@@ -1,0 +1,26 @@
+INSERT INTO `vckonline`.`monsters`
+(`name`,
+`area`,
+`type`,
+`order`,
+`strength_cost`,
+`magic_cost`,
+`vp_reward`,
+`gold_reward`,
+`strength_reward`,
+`magic_reward`,
+`has_special_reward`,
+`is_extra`)
+VALUES
+('',/*name*/
+'',/*area*/
+'',/*type*/
+,/*order*/
+,/*strength_cost*/
+,/*magic_cost*/
+,/*vp_reward*/
+,/*gold_reward*/
+,/*strength_reward*/
+,/*magic_reward*/
+,/*has_special_reward*/
+/*is_extra*/);

@@ -9,6 +9,7 @@ class Card:
 class Player:
     def __init__(self):
         self.name = "Player"
+        self.ownedStarters = []
         self.ownedCitizens = []
         self.ownedDomains = []
         self.dukes = []
@@ -23,28 +24,28 @@ class Player:
         self.workerCount = 0
     def display(self):
         print(self.name)
-        print("Gold: {} Strength: {} Magic: {}".format(self.goldScore, self.strengthScore, self.magicScore))
-        print("Citizens: {} Monsters: {} Domains: {}".format(len(self.ownedCitizens), len(self.ownedMonsters), len(self.ownedDomains)))
+        print(f"Gold: {self.goldScore} Strength: {self.strengthScore} Magic: {self.magicScore}")
+        print(f"Citizens: {len(self.ownedCitizens)} Monsters: {len(self.ownedMonsters)} Domains: {len(self.ownedDomains)}")
         if self.shadowCount != 0:
             tempChar = ''
             if self.shadowCount > 1:
                 tempChar = 's'
-            print("{} Shadow icon{}".format(self.shadowCount, tempChar))
+            print(f"{self.shadowCount} Shadow icon{tempChar}")
         if self.holyCount != 0:
             tempChar = ''
             if self.holyCount > 1:
                 tempChar = 's'
-            print("{} Holy icon{}".format(self.holyCount, tempChar))
+            print(f"{self.holyCount} Holy icon{tempChar}")
         if self.soldierCount != 0:
             tempChar = ''
             if self.soldierCount > 1:
                 tempChar = 's'
-            print("{} Soldier icon{}".format(self.soldierCount, tempChar))
+            print(f"{self.soldierCount} Soldier icon{tempChar}")
         if self.workerCount != 0:
             tempChar = ''
             if self.workerCount > 1:
                 tempChar = 's'
-            print("{} Worker icon{}".format(self.workerCount, tempChar))
+            print(f"{self.workerCount} Worker icon{tempChar}")
     def calc_roles(self):
         for citizen in self.ownedCitizens:
             self.shadowCount = self.shadowCount + citizen.shadowCount
@@ -310,10 +311,10 @@ class Board:
         self.dieOne = random.randint(1, 6)
         self.dieTwo = random.randint(1, 6)
         self.dieSum = self.dieOne + self.dieTwo
-        print("{} | {} | {}".format(self.dieOne, self.dieTwo, self.dieSum))
+        print(f"{self.dieOne} | {self.dieTwo} | {self.dieSum}")
         for citizen in self.playerList[0].ownedCitizens:
             if (citizen.rollMatch1 == self.dieOne) or (citizen.rollMatch1 == self.dieTwo) or (citizen.rollMatch1 == self.dieSum) or (citizen.rollMatch2 == self.dieSum):
-                print("{} Payout".format(citizen.name))
+                print(f"{citizen.name} Payout")
                 self.playerList[0].goldScore = self.playerList[0].goldScore + citizen.goldPayoutOnTurn
                 self.playerList[0].strengthScore = self.playerList[0].strengthScore + citizen.strengthPayoutOnTurn
                 self.playerList[0].magicScore = self.playerList[0].magicScore + citizen.magicPayoutOnTurn
@@ -322,15 +323,22 @@ class Board:
         for player in listIterator:
             for citizen in player.ownedCitizens:
                 if (citizen.rollMatch1 == self.dieOne) or (citizen.rollMatch1 == self.dieTwo) or (citizen.rollMatch1 == self.dieSum) or (citizen.rollMatch2 == self.dieSum):
-                    print("{} Payout".format(citizen.name))
+                    print(f"{citizen.name} Payout")
                     player.goldScore = player.goldScore + citizen.goldPayoutOffTurn
                     player.strengthScore = player.strengthScore + citizen.strengthPayoutOffTurn
                     player.magicScore = player.magicScore + citizen.magicPayoutOffTurn
+                    
     def play_turn(self):
+        self.display()
         print("new turn")
         print("roll phase")
         self.roll_phase()
         
+    def display(self):
+        for player in self.playerList:
+            player.display()
+            
     def end_check(self):
         if self.exhaustedCount <= (self.playerCount*2):
             return False
+
