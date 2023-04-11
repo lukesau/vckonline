@@ -1,12 +1,7 @@
 INSERT INTO `vckonline`.`starters`
 (`name`,
-`gold_cost`,
 `roll_match1`,
 `roll_match2`,
-`shadow_count`,
-`holy_count`,
-`soldier_count`,
-`worker_count`,
 `gold_payout_on_turn`,
 `gold_payout_off_turn`,
 `strength_payout_on_turn`,
@@ -16,17 +11,11 @@ INSERT INTO `vckonline`.`starters`
 `has_special_payout_on_turn`,
 `has_special_payout_off_turn`,
 `special_payout_on_turn`,
-`special_payout_off_turn`,
-`special_citizen`)
+`special_payout_off_turn`)
 VALUES
 ('Peasant',/*name*/
-0,/*gold_cost*/
 5,/*roll_match1*/
 0,/*roll_match2*/
-0,/*shadow_count*/
-0,/*holy_count*/
-0,/*soldier_count*/
-0,/*worker_count*/
 1,/*gold_payout_on_turn*/
 1,/*gold_payout_off_turn*/
 0,/*strength_payout_on_turn*/
@@ -36,5 +25,4 @@ VALUES
 0,/*has_special_payout_on_turn*/
 0,/*has_special_payout_off_turn*/
 0,/*special_payout_on_turn*/
-0,/*special_payout_off_turn*/
-1/*special_citizen*/);
+0/*special_payout_off_turn*/);

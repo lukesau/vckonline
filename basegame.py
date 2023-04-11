@@ -3,9 +3,13 @@ import json
 import random
 
 class Card:
-    isVisible = False
-    isAccessible = False
-
+    def __init__(self):
+        self.name = ""
+        self.isVisible = False
+        self.isAccessible = False
+class Game:
+    def __init__(self):
+        self.board 
 class Player:
     def __init__(self):
         self.name = "Player"
@@ -25,7 +29,7 @@ class Player:
     def display(self):
         print(self.name)
         print(f"Gold: {self.goldScore} Strength: {self.strengthScore} Magic: {self.magicScore}")
-        print(f"Citizens: {len(self.ownedCitizens)} Monsters: {len(self.ownedMonsters)} Domains: {len(self.ownedDomains)}")
+        print(f"Starters: {len(self.ownedStarters)} Citizens: {len(self.ownedCitizens)} Monsters: {len(self.ownedMonsters)} Domains: {len(self.ownedDomains)}")
         if self.shadowCount != 0:
             tempChar = ''
             if self.shadowCount > 1:
@@ -46,6 +50,13 @@ class Player:
             if self.workerCount > 1:
                 tempChar = 's'
             print(f"{self.workerCount} Worker icon{tempChar}")
+        print(f"Starters:")
+        for starter in self.ownedStarters:
+            print(f"{starter.name} {starter.rollMatch1} {starter.rollMatch2} {starter.goldPayoutOnTurn} {starter.goldPayoutOffTurn} {starter.strengthPayoutOnTurn} {starter.strengthPayoutOffTurn}")
+        for citizen in self.ownedCitizens:
+            print(f"{citizen.name} {citizen.goldCost} {citizen.rollMatch1} {citizen.rollMatch2} {citizen.goldPayoutOnTurn} {citizen.goldPayoutOffTurn} {citizen.strengthPayoutOnTurn} {citizen.strengthPayoutOffTurn}")
+        for monster in self.ownedMonsters:
+            print(f"{monster.name} {citizen.goldCost} {citizen.rollMatch1} {citizen.rollMatch2} {citizen.goldPayoutOnTurn} {citizen.goldPayoutOffTurn} {citizen.strengthPayoutOnTurn} {citizen.strengthPayoutOffTurn}")
     def calc_roles(self):
         for citizen in self.ownedCitizens:
             self.shadowCount = self.shadowCount + citizen.shadowCount
@@ -59,11 +70,24 @@ class Player:
             self.workerCount = self.workerCount + domain.workerCount
 
 class Starter(Card):
-    rollActivation = 0
+    def __init__(self, name, roll_match1, roll_match2, gold_payout_on_turn, gold_payout_off_turn, strength_payout_on_turn, strength_payout_off_turn, magic_payout_on_turn, magic_payout_off_turn, has_special_payout_on_turn, has_special_payout_off_turn, special_payout_on_turn, special_payout_off_turn):
+        self.name = name
+        self.rollMatch1 = roll_match1
+        self.rollMatch2 = roll_match2
+        self.goldPayoutOnTurn = gold_payout_on_turn
+        self.goldPayoutOffTurn = gold_payout_off_turn
+        self.strengthPayoutOnTurn = strength_payout_on_turn
+        self.strengthPayoutOffTurn = strength_payout_off_turn
+        self.magicPayoutOnTurn = magic_payout_on_turn
+        self.magicPayoutOffTurn = magic_payout_off_turn
+        self.hasSpecialPayoutOnTurn = has_special_payout_on_turn
+        self.hasSpecialPayoutOffTurn = has_special_payout_off_turn
+        self.specialPayoutOnTurn = special_payout_on_turn
+        self.specialPayoutOffTurn = special_payout_off_turn
 
 class Citizen(Card):
-    def __init__(self, input_name, gold_cost, roll_match1, roll_match2, shadow_count, holy_count, soldier_count, worker_count, gold_payout_on_turn, gold_payout_off_turn, strength_payout_on_turn, strength_payout_off_turn, magic_payout_on_turn, magic_payout_off_turn, has_special_payout_on_turn, has_special_payout_off_turn, special_payout_on_turn, special_payout_off_turn, special_citizen):
-        self.name = input_name
+    def __init__(self, name, gold_cost, roll_match1, roll_match2, shadow_count, holy_count, soldier_count, worker_count, gold_payout_on_turn, gold_payout_off_turn, strength_payout_on_turn, strength_payout_off_turn, magic_payout_on_turn, magic_payout_off_turn, has_special_payout_on_turn, has_special_payout_off_turn, special_payout_on_turn, special_payout_off_turn, special_citizen):
+        self.name = name
         self.goldCost = gold_cost
         self.rollMatch1 = roll_match1
         self.rollMatch2 = roll_match2
@@ -83,28 +107,28 @@ class Citizen(Card):
         self.specialPayoutOffTurn = special_payout_off_turn
         self.specialCitizen = special_citizen
     def display(self):
-        print("\n%s" % self.name)
-        print("Cost: {} Gold".format(self.goldCost))
+        print(f"\n{self.name}")
+        print(f"Cost: {self.goldCost} Gold")
         if self.shadowCount != 0:
             tempChar = ''
             if self.shadowCount > 1:
                 tempChar = 's'
-            print("{} Shadow icon{}".format(self.shadowCount, tempChar))
+            print(f"{self.shadowCount} Shadow icon{tempChar}")
         if self.holyCount != 0:
             tempChar = ''
             if self.holyCount > 1:
                 tempChar = 's'
-            print("{} Holy icon{}".format(self.holyCount, tempChar))
+            print(f"{self.holyCount} Holy icon{tempChar}")
         if self.soldierCount != 0:
             tempChar = ''
             if self.soldierCount > 1:
                 tempChar = 's'
-            print("{} Soldier icon{}".format(self.soldierCount, tempChar))
+            print(f"{self.soldierCount} Soldier icon{tempChar}")
         if self.workerCount != 0:
             tempChar = ''
             if self.workerCount > 1:
                 tempChar = 's'
-            print("{} Worker icon{}".format(self.workerCount, tempChar))
+            print(f"{self.workerCount} Worker icon{tempChar}")
 
 class Domain(Card):
     def __init__(self, input_name, gold_cost, shadow_count, holy_count, soldier_count, worker_count, vp_reward, has_activation_effect, has_passive_effect, passive_effect, activation_effect, input_text):
@@ -127,22 +151,22 @@ class Domain(Card):
             tempChar = ''
             if self.shadowCount > 1:
                 tempChar = 's'
-            print("{} Shadow icon{}".format(self.shadowCount, tempChar))
+            print(f"{self.shadowCount} Shadow icon{tempChar}")
         if self.holyCount != 0:
             tempChar = ''
             if self.holyCount > 1:
                 tempChar = 's'
-            print("{} Holy icon{}".format(self.holyCount, tempChar))
+            print(f"{self.holyCount} Holy icon{tempChar}")
         if self.soldierCount != 0:
             tempChar = ''
             if self.soldierCount > 1:
                 tempChar = 's'
-            print("{} Soldier icon{}".format(self.soldierCount, tempChar))
+            print(f"{self.soldierCount} Soldier icon{tempChar}")
         if self.workerCount != 0:
             tempChar = ''
             if self.workerCount > 1:
                 tempChar = 's'
-            print("{} Worker icon{}".format(self.workerCount, tempChar))
+            print(f"{self.workerCount} Worker icon{tempChar}")
         print(self.text)
 
 class Monster(Card):
@@ -163,7 +187,7 @@ class Monster(Card):
         self.specialCost = special_cost
         self.isExtra = is_extra
     def display(self):
-        print("{} is a {} from {}".format(self.name, self.type, self.area))
+        print(f"{self.name} is a {self.type} from {self.area}")
     def add_strength_cost(self, addedStrength):
         self.strengthCost = self.strengthCost + addedStrength
     def add_magic_cost(self, addedMagic):
@@ -199,47 +223,47 @@ class Duke(Card):
             tempChar = ''
             if self.shadowMultiplier > 1:
                 tempChar = 's'
-            print("{} Victory Point{} per Shadow".format(self.shadowMultiplier, tempChar))
+            print(f"{self.shadowMultiplier} Victory Point{tempChar} per Shadow")
         if self.holyMultiplier != 0:
             tempChar = ''
             if self.holyMultiplier > 1:
                 tempChar = 's'
-            print("{} Victory Point{} per Holy".format(self.holyMultiplier, tempChar))
+            print(f"{self.holyMultiplier} Victory Point{tempChar} per Holy")
         if self.soldierMultiplier != 0:
             tempChar = ''
             if self.soldierMultiplier > 1:
                 tempChar = 's'
-            print("{} Victory Point{} per Soldier".format(self.soldierMultiplier, tempChar))
+            print(f"{self.soldierMultiplier} Victory Point{tempChar} per Soldier")
         if self.workerMultiplier != 0:
             tempChar = ''
             if self.workerMultiplier > 1:
                 tempChar = 's'
-            print("{} Victory Point{} per Worker".format(self.workerMultiplier, tempChar))
+            print(f"{self.workerMultiplier} Victory Point{tempChar} per Worker")
         if self.monsterMultiplier != 0:
             tempChar = ''
             if self.monsterMultiplier > 1:
                 tempChar = 's'
-            print("{} Victory Point{} per Monster".format(self.monsterMultiplier, tempChar))
+            print(f"{self.monsterMultiplier} Victory Point{tempChar} per Monster")
         if self.citizenMultiplier != 0:
             tempChar = ''
             if self.citizenMultiplier > 1:
                 tempChar = 's'
-            print("{} Victory Point{} per Citizen".format(self.citizenMultiplier, tempChar))
+            print(f"{self.citizenMultiplier} Victory Point{tempChar} per Citizen")
         if self.domainMultiplier != 0:
             tempChar = ''
             if self.domainMultiplier > 1:
                 tempChar = 's'
-            print("{} Victory Point{} per Domain".format(self.domainMultiplier, tempChar))
+            print(f"{self.domainMultiplier} Victory Point{tempChar} per Domain")
         if self.bossMultiplier != 0:
             tempChar = ''
             if self.bossMultiplier > 1:
                 tempChar = 's'
-            print("{} Victory Point{} per Boss".format(self.bossMultiplier, tempChar))
+            print(f"{self.bossMultiplier} Victory Point{tempChar} per Boss")
         if self.titanMultiplier != 0:
             tempChar = ''
             if self.titanMultiplier > 1:
                 tempChar = 's'
-            print("{} Victory Point{} per Titan".format(self.titanMultiplier, tempChar))
+            print(f"{self.titanMultiplier} Victory Point{tempChar} per Titan")
    
 
 class Board:
@@ -254,6 +278,7 @@ class Board:
         self.domainStack = []
         self.citizenStack = []
         self.monsterStack = []
+        self.starterStack = []
         self.dieOne = 0
         self.dieTwo = 0
         self.dieSum = 0
@@ -288,6 +313,12 @@ class Board:
         #for citizen in self.citizenStack:
         #    citizen.display()
         
+        myCursor.execute("SELECT * FROM starters")
+        myResult = myCursor.fetchall()
+        for row in myResult:
+            myStarter = Starter(row['name'], row['roll_match1'], row['roll_match2'], row['gold_payout_on_turn'], row['gold_payout_off_turn'], row['strength_payout_on_turn'], row['strength_payout_off_turn'], row['magic_payout_on_turn'], row['magic_payout_off_turn'], row['has_special_payout_on_turn'], row['has_special_payout_off_turn'], row['special_payout_on_turn'], row['special_payout_off_turn'])
+            self.starterStack.append(myStarter)
+        
         myCursor.execute("SELECT * FROM monsters")
         myResult = myCursor.fetchall()
         for row in myResult:
@@ -304,8 +335,9 @@ class Board:
             self.playerList.append(myPlayer)
         random.shuffle(self.playerList)
         self.playerList[0].isFirst = True
-            
-#end create player list and establish order
+        for player in self.playerList:
+            player.ownedStarters.append(self.starterStack[0])
+            player.ownedStarters.append(self.starterStack[1])
 
     def roll_phase(self):
         self.dieOne = random.randint(1, 6)
