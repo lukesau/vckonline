@@ -14,24 +14,32 @@ class MyFrame(wx.Frame):
         panel.SetSizer(my_sizer)
         self.host = "lukesau.com"
         self.port = 5000  # socket server port number   
+        self.header_size = 1024
+        self.format = "utf-8"
+        self.disconnect_message = "!DISCONNECT"
         self.Show()
-        
+        self.client_socket = socket.socket()
+        self.client_socket.connect((self.host, self.port))  # connect to the server
 
     def on_press(self, event):
         message = self.text_ctrl.GetValue()
         if not message:
             print("You didn't enter anything!")
         else:
-            client_socket = socket.socket()  # instantiate
-            client_socket.connect((self.host, self.port))  # connect to the server
-            client_socket.send(message.encode())  # send message
-            data = client_socket.recv(1024).decode()  # receive response
-            print('Received from server: ' + data)  # show in terminal
+            self.send(message)
             self.text_ctrl.SetValue("")
-            client_socket.close()
     def sync_with_server(self):
         client_socket = socket.socket()  # instantiate
         client_socket.connect((self.host, self.port))  # connect to the server
+    def send(self, msg):
+        message = msg.encode(self.format)
+        msg_length = len(message)
+        print(msg_length)
+        send_length = str(msg_length).encode(self.format)
+        send_length += b' ' * (self.header_size - len(send_length))
+        self.client_socket.send(send_length)
+        self.client_socket.send(message)
+        print("done sending")
 
         
         
