@@ -39,6 +39,7 @@ __pycache__/
 *.so
 
 # Distribution / packaging
+python3-vckonline/
 .Python
 build/
 develop-eggs/
