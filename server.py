@@ -10,7 +10,7 @@ class ServerVCKO:
         self.format = "utf-8"
         self.disconnect_message = "!DISCONNECT"
 
-    def handle_client(conn, addr):
+    def handle_client(self, conn, addr):
         print(f"Connection from: {addr}")
         connected = True
         while connected:
@@ -38,4 +38,3 @@ if __name__ == '__main__':
     print("server starting")
     server = ServerVCKO()
     server.start()
-
