@@ -6,14 +6,12 @@ class ServerVCKO:
     def __init__(self):
         self.host = socket.gethostname()
         self.port = 5000 
-        self.server_socket = socket.socket()  
-        self.server_socket.bind((self.host, self.port))
         self.header_size = 1024
         self.format = "utf-8"
         self.disconnect_message = "!DISCONNECT"
 
     def handle_client(conn, addr):
-        print("Connection from: " + str(address))
+        print(f"Connection from: {addr}")
         connected = True
         while connected:
             msg_length = conn.recv(self.header_size).decode(self.format)
@@ -22,14 +20,17 @@ class ServerVCKO:
                 msg = conn.recv(msg_length).decode(self.format)
                 if msg == disconnect_message:
                     connected = False
-            print(f"[{addr}] {msg}")
+                print(f"[{addr}] {msg}")
+                conn.send("msg received".encode(self.format))
         conn.close()
     def start(self):
-        self.server_socket.listen()
+        server_socket = socket.socket()  
+        server_socket.bind((self.host, self.port))
+        server_socket.listen()
         print(f"server is listening on {socket.gethostbyname(self.host)}")
         while True:
-            conn, address = self.server_socket.accept()
-            thread = threading.Thread(target = self.handle_client, args = (conn, address))
+            conn, addr = server_socket.accept()
+            thread = threading.Thread(target=self.handle_client, args=(conn, addr))
             thread.start
             print(f"Active threads: {threading.active_count() - 1}")
  
