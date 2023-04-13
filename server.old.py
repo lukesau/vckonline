@@ -27,7 +27,7 @@ class ServerVCKO:
         conn.close()
     def start(self):
         self.server_socket.listen()
-        print(f"server is listening on {self.server_socket.gethostbyname(self.host)}")
+        print(f"server is listening on {socket.gethostbyname(self.host)}")
         while True:
             conn, addr = self.server_socket.accept()
             thread = threading.Thread(target=self.handle_client, args=(conn, addr))
