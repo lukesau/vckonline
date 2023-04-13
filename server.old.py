@@ -9,6 +9,8 @@ class ServerVCKO:
         self.header_size = 1024
         self.format = "utf-8"
         self.disconnect_message = "!DISCONNECT"
+        self.server_socket = socket.socket()  
+        self.server_socket.bind((self.host, self.port))
 
     def handle_client(self, conn, addr):
         print(f"Connection from: {addr}")
@@ -24,12 +26,10 @@ class ServerVCKO:
                 conn.send("msg received".encode(self.format))
         conn.close()
     def start(self):
-        server_socket = socket.socket()  
-        server_socket.bind((self.host, self.port))
-        server_socket.listen()
-        print(f"server is listening on {socket.gethostbyname(self.host)}")
+        self.server_socket.listen()
+        print(f"server is listening on {self.server_socket.gethostbyname(self.host)}")
         while True:
-            conn, addr = server_socket.accept()
+            conn, addr = self.server_socket.accept()
             thread = threading.Thread(target=self.handle_client, args=(conn, addr))
             thread.start
             print(f"Active threads: {threading.active_count() - 1}")
