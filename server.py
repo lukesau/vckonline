@@ -1,46 +1,40 @@
-import socket 
+import socket
+import time
 import threading
 
-HEADER = 1024
-PORT = 5000
-SERVER = socket.gethostbyname(socket.gethostname())
-ADDR = (SERVER, PORT)
-FORMAT = 'utf-8'
-DISCONNECT_MESSAGE = "!DISCONNECT"
+class ServerVCKO:
+    def __init__(self):
+        self.host = socket.gethostname()
+        self.port = 5000 
+        self.header_size = 1024
+        self.format = "utf-8"
+        self.disconnect_message = "!DISCONNECT"
+        self.server_socket = socket.socket()  
+        self.server_socket.bind((self.host, self.port))
 
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.bind(ADDR)
-
-def handle_client(conn, addr):
-    print(f"[NEW CONNECTION] {addr} connected.")
-
-    connected = True
-    while connected:
-        msg_length = conn.recv(HEADER).decode(FORMAT)
-        if msg_length:
-            msg_length = int(msg_length)
-            msg = conn.recv(msg_length).decode(FORMAT)
-            match msg:
-                case DISCONNECT_MESSAGE:
+    def handle_client(self, conn, addr):
+        print(f"Connection from: {addr}")
+        connected = True
+        while connected:
+            msg_length = conn.recv(self.header_size).decode(self.format)
+            if msg_length:
+                msg_length = int(msg_length)
+                msg = conn.recv(msg_length).decode(self.format)
+                if msg == self.disconnect_message:
                     connected = False
-                case "test":
-                    print(f"[{addr}] {msg}")
-                    conn.send("Msg received special response".encode(FORMAT))
-                case _:
-                    print(f"[{addr}] {msg}")
-                    conn.send("Msg received".encode(FORMAT))
-    conn.close()
-        
-
-def start():
-    server.listen()
-    print(f"[LISTENING] Server is listening on {SERVER}")
-    while True:
-        conn, addr = server.accept()
-        thread = threading.Thread(target=handle_client, args=(conn, addr))
-        thread.start()
-        print(f"[ACTIVE CONNECTIONS] {threading.active_count() - 1}")
-
-
-print("[STARTING] server is starting...")
-start()
+                print(f"[{addr}] {msg}")
+                conn.send("msg received".encode(self.format))
+        conn.close()
+    def start(self):
+        self.server_socket.listen()
+        print(f"server is listening on {socket.gethostbyname(self.host)}")
+        while True:
+            conn, addr = self.server_socket.accept()
+            thread = threading.Thread(target=self.handle_client, args=(conn, addr))
+            thread.start()
+            print(f"Active threads: {threading.active_count() - 1}")
+ 
+if __name__ == '__main__':
+    print("server starting")
+    server = ServerVCKO()
+    server.start()
