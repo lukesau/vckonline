@@ -1,17 +1,18 @@
 import socket 
 import threading
 
-Class myClass():
-    HEADER = 64
-    PORT = 5000
-    SERVER = socket.gethostbyname(socket.gethostname())
-    ADDR = (SERVER, PORT)
-    FORMAT = 'utf-8'
-    DISCONNECT_MESSAGE = "!DISCONNECT"
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind(ADDR)
+class MyClass():
+    def __init__(self):
+        self.HEADER = 1024
+        self.PORT = 5000
+        self.SERVER = socket.gethostbyname(socket.gethostname())
+        self.ADDR = (self.SERVER, self.PORT)
+        self.FORMAT = 'utf-8'
+        self.DISCONNECT_MESSAGE = "!DISCONNECT"
+        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server.bind(self.ADDR)
 
-    def handle_client(conn, addr):
+    def handle_client(self, conn, addr):
         print(f"[NEW CONNECTION] {addr} connected.")
 
         connected = True
@@ -28,15 +29,17 @@ Class myClass():
         conn.close()
         
 
-    def start():
-        server.listen()
-        print(f"[LISTENING] Server is listening on {SERVER}")
+    def start(self):
+        self.server.listen()
+        print(f"[LISTENING] Server is listening on {self.SERVER}")
         while True:
-            conn, addr = server.accept()
-            thread = threading.Thread(target=handle_client, args=(conn, addr))
+            conn, addr = self.server.accept()
+            thread = threading.Thread(target=self.handle_client, args=(conn, addr))
             thread.start()
             print(f"[ACTIVE CONNECTIONS] {threading.active_count() - 1}")
 
 
 print("[STARTING] server is starting...")
-start()
+newServer = MyClass()
+newServer.start()
+
