@@ -131,8 +131,8 @@ class Citizen(Card):
             print(f"{self.workerCount} Worker icon{tempChar}")
 
 class Domain(Card):
-    def __init__(self, input_name, gold_cost, shadow_count, holy_count, soldier_count, worker_count, vp_reward, has_activation_effect, has_passive_effect, passive_effect, activation_effect, input_text):
-        self.name = input_name
+    def __init__(self, name, gold_cost, shadow_count, holy_count, soldier_count, worker_count, vp_reward, has_activation_effect, has_passive_effect, passive_effect, activation_effect, text):
+        self.name = name
         self.goldCost = gold_cost
         self.shadowCount = shadow_count
         self.holyCount = holy_count
@@ -143,7 +143,7 @@ class Domain(Card):
         self.hasPassiveEffect = has_passive_effect
         self.passiveEffect = passive_effect
         self.activationEffect = activation_effect
-        self.text = input_text
+        self.text = text
     def display(self):
         print("\n%s" % self.name)
         print("Cost: {} Gold".format(self.goldCost))
@@ -170,11 +170,11 @@ class Domain(Card):
         print(self.text)
 
 class Monster(Card):
-    def __init__(self, input_name, input_area, input_type, input_order, strength_cost, magic_cost, vp_reward, gold_reward, strength_reward, magic_reward, has_special_reward, special_reward, has_special_cost, special_cost, is_extra):
-        self.name = input_name
-        self.area = input_area
-        self.type = input_type
-        self.order = input_order
+    def __init__(self, name, area, type, order, strength_cost, magic_cost, vp_reward, gold_reward, strength_reward, magic_reward, has_special_reward, special_reward, has_special_cost, special_cost, is_extra):
+        self.name = name
+        self.area = area
+        self.type = type
+        self.order = order
         self.strengthCost = strength_cost
         self.magicCost = magic_cost
         self.vpReward = vp_reward
@@ -194,8 +194,8 @@ class Monster(Card):
         self.magicCost = self.magicCost + addedMagic
 
 class Duke(Card):
-    def __init__(self, input_name, gold_mult, strength_mult, magic_mult, shadow_mult, holy_mult, soldier_mult, worker_mult, monster_mult, citizen_mult, domain_mult, boss_mult, minion_mult, beast_mult, titan_mult):
-        self.name = input_name
+    def __init__(self, name, gold_mult, strength_mult, magic_mult, shadow_mult, holy_mult, soldier_mult, worker_mult, monster_mult, citizen_mult, domain_mult, boss_mult, minion_mult, beast_mult, titan_mult):
+        self.name = name
         self.goldMultiplier = gold_mult
         self.strengthMultiplier = strength_mult
         self.magicMultiplier = magic_mult
@@ -267,13 +267,14 @@ class Duke(Card):
    
 
 class Board:
-    def __init__(self, player_count, input_preset):
+    def __init__(self, player_count, preset, numberOfDukes=2):
         self.playerCount = player_count
-        self.preset = input_preset
+        self.preset = preset
+        self.numberOfDukes = numberOfDukes
         self.playerList = []
-        self.citizenGrid = []
-        self.domainGrid = []
-        self.monsterGrid = []
+        self.citizenGrid = [[] for _ in range(10)]
+        self.domainGrid = [[] for _ in range(5)]
+        self.monsterGrid = [[] for _ in range(5)]
         self.dukeStack = []
         self.domainStack = []
         self.citizenStack = []
@@ -286,6 +287,7 @@ class Board:
         
         myConnect = mysql.connector.connect(user='vckonline', password='vckonline', host='localhost', database='vckonline')
         myCursor = myConnect.cursor(dictionary = True)
+        
 #load game data
         myCursor.execute("SELECT * FROM dukes")
         myResult = myCursor.fetchall()
@@ -293,16 +295,16 @@ class Board:
             myDuke = Duke(row['name'], row['gold_mult'], row['strength_mult'], row['magic_mult'], row['shadow_mult'], row['holy_mult'], row['soldier_mult'], row['worker_mult'], row['monster_mult'], row['citizen_mult'], row['domain_mult'], row['boss_mult'], row['minion_mult'], row['beast_mult'], row['titan_mult'])
             self.dukeStack.append(myDuke)
         random.shuffle(self.dukeStack)
-        #for duke in self.dukeStack:
-        #    duke.display()
+        for duke in self.dukeStack:
+            duke.display()
         myCursor.execute("SELECT * FROM domains")
         myResult = myCursor.fetchall()
         for row in myResult:
             myDomain = Domain(row['name'], row['gold_cost'], row['shadow_count'], row['holy_count'], row['soldier_count'], row['worker_count'], row['vp_reward'], row['has_activation_effect'], row['has_passive_effect'], row['passive_effect'], row['activation_effect'], row['text'])
             self.domainStack.append(myDomain)
         random.shuffle(self.domainStack)
-        #for domain in self.domainStack:
-        #    domain.display()
+        for domain in self.domainStack:
+            domain.display()
 
         myCursor.execute("SELECT * FROM citizens")
         myResult = myCursor.fetchall()
@@ -310,8 +312,8 @@ class Board:
             myCitizen = Citizen(row['name'], row['gold_cost'], row['roll_match1'], row['roll_match2'], row['shadow_count'], row['holy_count'], row['soldier_count'], row['worker_count'], row['gold_payout_on_turn'], row['gold_payout_off_turn'], row['strength_payout_on_turn'], row['strength_payout_off_turn'], row['magic_payout_on_turn'], row['magic_payout_off_turn'], row['has_special_payout_on_turn'], row['has_special_payout_off_turn'], row['special_payout_on_turn'], row['special_payout_off_turn'], row['special_citizen'])
             self.citizenStack.append(myCitizen)
         random.shuffle(self.citizenStack)
-        #for citizen in self.citizenStack:
-        #    citizen.display()
+        for citizen in self.citizenStack:
+            citizen.display()
         
         myCursor.execute("SELECT * FROM starters")
         myResult = myCursor.fetchall()
@@ -324,20 +326,58 @@ class Board:
         for row in myResult:
             myMonster = Monster(row['name'], row['area'], row['type'], row['order'], row['strength_cost'], row['magic_cost'], row['vp_reward'], row['gold_reward'], row['strength_reward'], row['magic_reward'], row['has_special_reward'], row['special_reward'], row['has_special_cost'], row['special_cost'], row['is_extra'])
             self.monsterStack.append(myMonster)
-        #for monster in self.monsterStack:
-        #    monster.display()
+        for monster in self.monsterStack:
+            monster.display()
         myConnect.close()
-#end load game data and set up board
-#create player list and establish order
+#end load game data
+
+#create players and deal cards
         for x in range(0, self.playerCount):
             myPlayer = Player()
-            myPlayer.name = "Player %s" % (x + 1)
+            myPlayer.name = f"Player {(x + 1)}" 
             self.playerList.append(myPlayer)
         random.shuffle(self.playerList)
         self.playerList[0].isFirst = True
         for player in self.playerList:
             player.ownedStarters.append(self.starterStack[0])
             player.ownedStarters.append(self.starterStack[1])
+            for i in range(numberOfDukes):
+                player.ownedDukes.append(self.dukeStack.pop())
+        groupedMonsters = {}
+        for monster in self.monsterStack:
+            area = monster.area
+            if area in groupedMonsters:
+                groupedMonsters[area].append(monster)
+            else:
+                groupedMonsters[area] = [monster]
+        if self.preset == "shuffled":
+            # Convert groupedMonsters to a list of (area, monsters) tuples
+            area_monsters = list(groupedMonsters.items())
+            # Shuffle the list of (area, monsters) tuples
+            random.shuffle(area_monsters)
+            # Convert the shuffled list back to a dictionary
+            groupedMonsters = {area: monsters for area, monsters in area_monsters}
+        
+        # Fill the stacks with monsters from each area
+        stack_index = 0
+        for area, monsters in groupedMonsters.items():
+            if stack_index >= 5:  # stop dealing after 5 stacks
+                break
+            stack = self.monsterGrid[stack_index]
+            for monster in monsters:
+                stack.append(monster)
+                stack_index = (stack_index + 1) % 5  # move to the next stack
+        if self.playerCount != 5:
+            # Remove monsters with isExtra = True from each stack
+            for stack in self.monsterGrid:
+                stack[:] = [monster for monster in stack if not monster.isExtra]
+        for i, stack in enumerate(self.monsterGrid):
+            sorted_stack = sorted(stack, key=lambda monster: monster.order, reverse=True)
+            self.monsterGrid[i] = sorted_stack
+        for stack in self.monsterGrid:
+            if stack:  # check if the stack is not empty
+                monster = stack.pop()
+                print(f"Popped {monster.name}")
 
     def roll_phase(self):
         self.dieOne = random.randint(1, 6)
@@ -361,14 +401,7 @@ class Board:
                     player.magicScore = player.magicScore + citizen.magicPayoutOffTurn
                     
     def play_turn(self):
-        self.display()
-        print("new turn")
-        print("roll phase")
         self.roll_phase()
-        
-    def display(self):
-        for player in self.playerList:
-            player.display()
             
     def end_check(self):
         if self.exhaustedCount <= (self.playerCount*2):
