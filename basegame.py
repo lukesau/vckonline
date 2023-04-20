@@ -16,7 +16,7 @@ class Player:
         self.ownedStarters = []
         self.ownedCitizens = []
         self.ownedDomains = []
-        self.dukes = []
+        self.ownedDukes = []
         self.ownedMonsters = []
         self.goldScore = 2
         self.strengthScore = 0

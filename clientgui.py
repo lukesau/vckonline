@@ -13,7 +13,7 @@ class MyFrame(wx.Frame):
         my_sizer.Add(my_btn, 0, wx.ALL | wx.CENTER, 5)        
         panel.SetSizer(my_sizer)
         self.host = "lukesau.com"
-        self.port = 5000  # socket server port number   
+        self.port = 8328  # socket server port number   
         self.header_size = 1024
         self.format = "utf-8"
         self.disconnect_message = "!DISCONNECT"

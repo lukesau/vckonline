@@ -1,16 +1,18 @@
 import socket
 import time
 import threading
+from basegame import *
 
 class ServerVCKO:
     def __init__(self):
         self.host = socket.gethostname()
-        self.port = 5000 
+        self.port = 8328 
         self.header_size = 1024
         self.format = "utf-8"
         self.disconnect_message = "!DISCONNECT"
         self.server_socket = socket.socket()  
         self.server_socket.bind((self.host, self.port))
+        self.game_list = []
 
     def handle_client(self, conn, addr):
         print(f"Connection from: {addr}")
