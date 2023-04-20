@@ -1,4 +1,4 @@
-from basegame import *
+from common import *
 from server import *
 
 print("Welcome to Valeria Card Kingdoms: Online")

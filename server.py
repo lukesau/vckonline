@@ -1,7 +1,7 @@
 import socket
 import time
 import threading
-from basegame import *
+from common import *
 
 class ServerVCKO:
     def __init__(self):
