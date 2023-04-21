@@ -368,9 +368,12 @@ class Board:
                 stack.append(monster)
                 stack_index = (stack_index + 1) % 5  # move to the next stack
         if self.playerCount != 5:
-            # Remove monsters with isExtra = True from each stack
             for stack in self.monsterGrid:
+                # Remove monsters with isExtra = True from each stack
                 stack[:] = [monster for monster in stack if not monster.isExtra]
+                # Turn monsters face up
+                for monster in stack:
+                    monster.is
         for i, stack in enumerate(self.monsterGrid):
             sorted_stack = sorted(stack, key=lambda monster: monster.order, reverse=True)
             self.monsterGrid[i] = sorted_stack
