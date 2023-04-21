@@ -1,76 +1,57 @@
 import mysql.connector
-import json
 import random
+from typing import List
+
 
 class Card:
     def __init__(self):
         self.name = ""
-        self.isVisible = False
-        self.isAccessible = False
-class Game:
-    def __init__(self):
-        self.board 
+        self.is_visible = False
+        self.is_accessible = False
+
+    def set_visibility(self, toggle: bool = True):
+        self.is_visible = toggle
+
+    def set_accessibility(self, toggle: bool = True):
+        self.is_accessible = toggle
+
+
 class Player:
     def __init__(self):
         self.name = "Player"
-        self.ownedStarters = []
-        self.ownedCitizens = []
-        self.ownedDomains = []
-        self.ownedDukes = []
-        self.ownedMonsters = []
-        self.goldScore = 2
-        self.strengthScore = 0
-        self.magicScore = 1
-        self.isFirst = False
-        self.shadowCount = 0
-        self.holyCount = 0
-        self.soldierCount = 0
-        self.workerCount = 0
-    def display(self):
-        print(self.name)
-        print(f"Gold: {self.goldScore} Strength: {self.strengthScore} Magic: {self.magicScore}")
-        print(f"Starters: {len(self.ownedStarters)} Citizens: {len(self.ownedCitizens)} Monsters: {len(self.ownedMonsters)} Domains: {len(self.ownedDomains)}")
-        if self.shadowCount != 0:
-            tempChar = ''
-            if self.shadowCount > 1:
-                tempChar = 's'
-            print(f"{self.shadowCount} Shadow icon{tempChar}")
-        if self.holyCount != 0:
-            tempChar = ''
-            if self.holyCount > 1:
-                tempChar = 's'
-            print(f"{self.holyCount} Holy icon{tempChar}")
-        if self.soldierCount != 0:
-            tempChar = ''
-            if self.soldierCount > 1:
-                tempChar = 's'
-            print(f"{self.soldierCount} Soldier icon{tempChar}")
-        if self.workerCount != 0:
-            tempChar = ''
-            if self.workerCount > 1:
-                tempChar = 's'
-            print(f"{self.workerCount} Worker icon{tempChar}")
-        print(f"Starters:")
-        for starter in self.ownedStarters:
-            print(f"{starter.name} {starter.rollMatch1} {starter.rollMatch2} {starter.goldPayoutOnTurn} {starter.goldPayoutOffTurn} {starter.strengthPayoutOnTurn} {starter.strengthPayoutOffTurn}")
-        for citizen in self.ownedCitizens:
-            print(f"{citizen.name} {citizen.goldCost} {citizen.rollMatch1} {citizen.rollMatch2} {citizen.goldPayoutOnTurn} {citizen.goldPayoutOffTurn} {citizen.strengthPayoutOnTurn} {citizen.strengthPayoutOffTurn}")
-        for monster in self.ownedMonsters:
-            print(f"{monster.name} {citizen.goldCost} {citizen.rollMatch1} {citizen.rollMatch2} {citizen.goldPayoutOnTurn} {citizen.goldPayoutOffTurn} {citizen.strengthPayoutOnTurn} {citizen.strengthPayoutOffTurn}")
+        self.owned_starters = []
+        self.owned_citizens = []
+        self.owned_domains = []
+        self.owned_dukes = []
+        self.owned_monsters = []
+        self.gold_score = 2
+        self.strength_score = 0
+        self.magic_score = 1
+        self.is_first = False
+        self.shadow_count = 0
+        self.holy_count = 0
+        self.soldier_count = 0
+        self.worker_count = 0
+
     def calc_roles(self):
-        for citizen in self.ownedCitizens:
-            self.shadowCount = self.shadowCount + citizen.shadowCount
-            self.holyCount = self.holyCount + citizen.holyCount
-            self.soldierCount = self.soldierCount + citizen.soldierCount
-            self.workerCount = self.workerCount + citizen.workerCount
-        for domain in self.ownedDomains:
-            self.shadowCount = self.shadowCount + domain.shadowCount
-            self.holyCount = self.holyCount + domain.holyCount
-            self.soldierCount = self.soldierCount + domain.soldierCount
-            self.workerCount = self.workerCount + domain.workerCount
+        for citizen in self.owned_citizens:
+            self.shadow_count = self.shadow_count + citizen.shadow_count
+            self.holy_count = self.holy_count + citizen.holy_count
+            self.soldier_count = self.soldier_count + citizen.soldier_count
+            self.worker_count = self.worker_count + citizen.worker_count
+        for domain in self.owned_domains:
+            self.shadow_count = self.shadow_count + domain.shadow_count
+            self.holy_count = self.holy_count + domain.holy_count
+            self.soldier_count = self.soldier_count + domain.soldier_count
+            self.worker_count = self.worker_count + domain.worker_count
+
 
 class Starter(Card):
-    def __init__(self, name, roll_match1, roll_match2, gold_payout_on_turn, gold_payout_off_turn, strength_payout_on_turn, strength_payout_off_turn, magic_payout_on_turn, magic_payout_off_turn, has_special_payout_on_turn, has_special_payout_off_turn, special_payout_on_turn, special_payout_off_turn):
+    def __init__(self, name, roll_match1, roll_match2, gold_payout_on_turn, gold_payout_off_turn,
+                 strength_payout_on_turn, strength_payout_off_turn, magic_payout_on_turn, magic_payout_off_turn,
+                 has_special_payout_on_turn, has_special_payout_off_turn, special_payout_on_turn,
+                 special_payout_off_turn):
+        super().__init__()
         self.name = name
         self.rollMatch1 = roll_match1
         self.rollMatch2 = roll_match2
@@ -85,8 +66,13 @@ class Starter(Card):
         self.specialPayoutOnTurn = special_payout_on_turn
         self.specialPayoutOffTurn = special_payout_off_turn
 
+
 class Citizen(Card):
-    def __init__(self, name, gold_cost, roll_match1, roll_match2, shadow_count, holy_count, soldier_count, worker_count, gold_payout_on_turn, gold_payout_off_turn, strength_payout_on_turn, strength_payout_off_turn, magic_payout_on_turn, magic_payout_off_turn, has_special_payout_on_turn, has_special_payout_off_turn, special_payout_on_turn, special_payout_off_turn, special_citizen):
+    def __init__(self, name, gold_cost, roll_match1, roll_match2, shadow_count, holy_count, soldier_count, worker_count,
+                 gold_payout_on_turn, gold_payout_off_turn, strength_payout_on_turn, strength_payout_off_turn,
+                 magic_payout_on_turn, magic_payout_off_turn, has_special_payout_on_turn, has_special_payout_off_turn,
+                 special_payout_on_turn, special_payout_off_turn, special_citizen):
+        super().__init__()
         self.name = name
         self.goldCost = gold_cost
         self.rollMatch1 = roll_match1
@@ -106,307 +92,230 @@ class Citizen(Card):
         self.specialPayoutOnTurn = special_payout_on_turn
         self.specialPayoutOffTurn = special_payout_off_turn
         self.specialCitizen = special_citizen
-    def display(self):
-        print(f"\n{self.name}")
-        print(f"Cost: {self.goldCost} Gold")
-        if self.shadowCount != 0:
-            tempChar = ''
-            if self.shadowCount > 1:
-                tempChar = 's'
-            print(f"{self.shadowCount} Shadow icon{tempChar}")
-        if self.holyCount != 0:
-            tempChar = ''
-            if self.holyCount > 1:
-                tempChar = 's'
-            print(f"{self.holyCount} Holy icon{tempChar}")
-        if self.soldierCount != 0:
-            tempChar = ''
-            if self.soldierCount > 1:
-                tempChar = 's'
-            print(f"{self.soldierCount} Soldier icon{tempChar}")
-        if self.workerCount != 0:
-            tempChar = ''
-            if self.workerCount > 1:
-                tempChar = 's'
-            print(f"{self.workerCount} Worker icon{tempChar}")
+
 
 class Domain(Card):
-    def __init__(self, name, gold_cost, shadow_count, holy_count, soldier_count, worker_count, vp_reward, has_activation_effect, has_passive_effect, passive_effect, activation_effect, text):
+    def __init__(self, name, gold_cost, shadow_count, holy_count, soldier_count, worker_count, vp_reward,
+                 has_activation_effect, has_passive_effect, passive_effect, activation_effect, text):
+        super().__init__()
         self.name = name
-        self.goldCost = gold_cost
-        self.shadowCount = shadow_count
-        self.holyCount = holy_count
-        self.soldierCount = soldier_count
-        self.workerCount = worker_count
-        self.vpReward = vp_reward
-        self.hasActivationEffect = has_activation_effect
-        self.hasPassiveEffect = has_passive_effect
-        self.passiveEffect = passive_effect
-        self.activationEffect = activation_effect
+        self.gold_cost = gold_cost
+        self.shadow_count = shadow_count
+        self.holy_count = holy_count
+        self.soldier_count = soldier_count
+        self.worker_count = worker_count
+        self.vp_reward = vp_reward
+        self.has_activation_effect = has_activation_effect
+        self.has_passive_effect = has_passive_effect
+        self.passive_effect = passive_effect
+        self.activation_effect = activation_effect
         self.text = text
-    def display(self):
-        print("\n%s" % self.name)
-        print("Cost: {} Gold".format(self.goldCost))
-        if self.shadowCount != 0:
-            tempChar = ''
-            if self.shadowCount > 1:
-                tempChar = 's'
-            print(f"{self.shadowCount} Shadow icon{tempChar}")
-        if self.holyCount != 0:
-            tempChar = ''
-            if self.holyCount > 1:
-                tempChar = 's'
-            print(f"{self.holyCount} Holy icon{tempChar}")
-        if self.soldierCount != 0:
-            tempChar = ''
-            if self.soldierCount > 1:
-                tempChar = 's'
-            print(f"{self.soldierCount} Soldier icon{tempChar}")
-        if self.workerCount != 0:
-            tempChar = ''
-            if self.workerCount > 1:
-                tempChar = 's'
-            print(f"{self.workerCount} Worker icon{tempChar}")
-        print(self.text)
+
 
 class Monster(Card):
-    def __init__(self, name, area, type, order, strength_cost, magic_cost, vp_reward, gold_reward, strength_reward, magic_reward, has_special_reward, special_reward, has_special_cost, special_cost, is_extra):
+    def __init__(self, name, area, type, order, strength_cost, magic_cost, vp_reward, gold_reward, strength_reward,
+                 magic_reward, has_special_reward, special_reward, has_special_cost, special_cost, is_extra):
+        super().__init__()
         self.name = name
         self.area = area
         self.type = type
         self.order = order
-        self.strengthCost = strength_cost
-        self.magicCost = magic_cost
-        self.vpReward = vp_reward
-        self.goldReward = gold_reward
-        self.strengthReward = strength_reward
-        self.magicReward = magic_reward
-        self.hasSpecialReward = has_special_reward
-        self.specialReward = special_reward
-        self.hasSpecialCost = has_special_cost
-        self.specialCost = special_cost
-        self.isExtra = is_extra
-    def display(self):
-        print(f"{self.name} is a {self.type} from {self.area}")
-    def add_strength_cost(self, addedStrength):
-        self.strengthCost = self.strengthCost + addedStrength
-    def add_magic_cost(self, addedMagic):
-        self.magicCost = self.magicCost + addedMagic
+        self.strength_cost = strength_cost
+        self.magic_cost = magic_cost
+        self.vp_reward = vp_reward
+        self.gold_reward = gold_reward
+        self.strength_reward = strength_reward
+        self.magic_reward = magic_reward
+        self.has_special_reward = has_special_reward
+        self.special_reward = special_reward
+        self.has_special_cost = has_special_cost
+        self.special_cost = special_cost
+        self.is_extra = is_extra
+
+    def add_strength_cost(self, added_strength):
+        self.strength_cost = self.strength_cost + added_strength
+
+    def add_magic_cost(self, added_magic):
+        self.magic_cost = self.magic_cost + added_magic
+
 
 class Duke(Card):
-    def __init__(self, name, gold_mult, strength_mult, magic_mult, shadow_mult, holy_mult, soldier_mult, worker_mult, monster_mult, citizen_mult, domain_mult, boss_mult, minion_mult, beast_mult, titan_mult):
+    def __init__(self, name, gold_mult, strength_mult, magic_mult, shadow_mult, holy_mult, soldier_mult, worker_mult,
+                 monster_mult, citizen_mult, domain_mult, boss_mult, minion_mult, beast_mult, titan_mult):
+        super().__init__()
         self.name = name
-        self.goldMultiplier = gold_mult
-        self.strengthMultiplier = strength_mult
-        self.magicMultiplier = magic_mult
-        self.shadowMultiplier = shadow_mult
-        self.holyMultiplier = holy_mult
-        self.soldierMultiplier = soldier_mult
-        self.workerMultiplier = worker_mult
-        self.monsterMultiplier = monster_mult
-        self.citizenMultiplier = citizen_mult
-        self.domainMultiplier = domain_mult
-        self.bossMultiplier = boss_mult
-        self.minionMultiplier = minion_mult
-        self.beastMultiplier = beast_mult
-        self.titanMultiplier = titan_mult
-        
-    def display(self):
-        print("\n%s" % self.name)
-        if (self.goldMultiplier != self.strengthMultiplier):
-            resourceScore = 1/float(self.strengthMultiplier)
-            print(f"1 Victory Point per gold and {resourceScore:.2f} per Strength/Magic")
-        else:
-            resourceScore = 1/float(self.goldMultiplier)
-            print(f"{resourceScore:.2f} Victory Points per resource")
-        if self.shadowMultiplier != 0:
-            tempChar = ''
-            if self.shadowMultiplier > 1:
-                tempChar = 's'
-            print(f"{self.shadowMultiplier} Victory Point{tempChar} per Shadow")
-        if self.holyMultiplier != 0:
-            tempChar = ''
-            if self.holyMultiplier > 1:
-                tempChar = 's'
-            print(f"{self.holyMultiplier} Victory Point{tempChar} per Holy")
-        if self.soldierMultiplier != 0:
-            tempChar = ''
-            if self.soldierMultiplier > 1:
-                tempChar = 's'
-            print(f"{self.soldierMultiplier} Victory Point{tempChar} per Soldier")
-        if self.workerMultiplier != 0:
-            tempChar = ''
-            if self.workerMultiplier > 1:
-                tempChar = 's'
-            print(f"{self.workerMultiplier} Victory Point{tempChar} per Worker")
-        if self.monsterMultiplier != 0:
-            tempChar = ''
-            if self.monsterMultiplier > 1:
-                tempChar = 's'
-            print(f"{self.monsterMultiplier} Victory Point{tempChar} per Monster")
-        if self.citizenMultiplier != 0:
-            tempChar = ''
-            if self.citizenMultiplier > 1:
-                tempChar = 's'
-            print(f"{self.citizenMultiplier} Victory Point{tempChar} per Citizen")
-        if self.domainMultiplier != 0:
-            tempChar = ''
-            if self.domainMultiplier > 1:
-                tempChar = 's'
-            print(f"{self.domainMultiplier} Victory Point{tempChar} per Domain")
-        if self.bossMultiplier != 0:
-            tempChar = ''
-            if self.bossMultiplier > 1:
-                tempChar = 's'
-            print(f"{self.bossMultiplier} Victory Point{tempChar} per Boss")
-        if self.titanMultiplier != 0:
-            tempChar = ''
-            if self.titanMultiplier > 1:
-                tempChar = 's'
-            print(f"{self.titanMultiplier} Victory Point{tempChar} per Titan")
-   
+        self.gold_multiplier = gold_mult
+        self.strength_multiplier = strength_mult
+        self.magic_multiplier = magic_mult
+        self.shadow_multiplier = shadow_mult
+        self.holy_multiplier = holy_mult
+        self.soldier_multiplier = soldier_mult
+        self.worker_multiplier = worker_mult
+        self.monster_multiplier = monster_mult
+        self.citizen_multiplier = citizen_mult
+        self.domain_multiplier = domain_mult
+        self.boss_multiplier = boss_mult
+        self.minion_multiplier = minion_mult
+        self.beast_multiplier = beast_mult
+        self.titan_multiplier = titan_mult
+
 
 class Board:
-    def __init__(self, player_count, preset, numberOfDukes=2):
-        self.playerCount = player_count
+    def __init__(self, player_count, preset, number_of_dukes=2):
+        self.player_count = player_count
         self.preset = preset
-        self.numberOfDukes = numberOfDukes
-        self.playerList = []
-        self.citizenGrid = [[] for _ in range(10)]
-        self.domainGrid = [[] for _ in range(5)]
-        self.monsterGrid = [[] for _ in range(5)]
-        self.dukeStack = []
-        self.domainStack = []
-        self.citizenStack = []
-        self.monsterStack = []
-        self.starterStack = []
-        self.dieOne = 0
-        self.dieTwo = 0
-        self.dieSum = 0
-        self.exhaustedCount = 0
-        
-        myConnect = mysql.connector.connect(user='vckonline', password='vckonline', host='localhost', database='vckonline')
-        myCursor = myConnect.cursor(dictionary = True)
-        
-#load game data
-        myCursor.execute("SELECT * FROM dukes")
-        myResult = myCursor.fetchall()
-        for row in myResult:
-            myDuke = Duke(row['name'], row['gold_mult'], row['strength_mult'], row['magic_mult'], row['shadow_mult'], row['holy_mult'], row['soldier_mult'], row['worker_mult'], row['monster_mult'], row['citizen_mult'], row['domain_mult'], row['boss_mult'], row['minion_mult'], row['beast_mult'], row['titan_mult'])
-            self.dukeStack.append(myDuke)
-        random.shuffle(self.dukeStack)
-        for duke in self.dukeStack:
-            duke.display()
-        myCursor.execute("SELECT * FROM domains")
-        myResult = myCursor.fetchall()
-        for row in myResult:
-            myDomain = Domain(row['name'], row['gold_cost'], row['shadow_count'], row['holy_count'], row['soldier_count'], row['worker_count'], row['vp_reward'], row['has_activation_effect'], row['has_passive_effect'], row['passive_effect'], row['activation_effect'], row['text'])
-            self.domainStack.append(myDomain)
-        random.shuffle(self.domainStack)
-        for domain in self.domainStack:
-            domain.display()
+        self.number_of_dukes = number_of_dukes
+        self.player_list = []
+        self.citizen_grid = [[] for _ in range(10)]
+        self.domain_grid = [[] for _ in range(5)]
+        self.monster_grid: List[List[Monster]] = [[] for _ in range(5)]
+        self.duke_stack = []
+        self.domain_stack = []
+        self.citizen_stack = []
+        self.monster_stack = []
+        self.starter_stack = []
+        self.die_one = 0
+        self.die_two = 0
+        self.die_sum = 0
+        self.exhausted_count = 0
 
-        myCursor.execute("SELECT * FROM citizens")
-        myResult = myCursor.fetchall()
-        for row in myResult:
-            myCitizen = Citizen(row['name'], row['gold_cost'], row['roll_match1'], row['roll_match2'], row['shadow_count'], row['holy_count'], row['soldier_count'], row['worker_count'], row['gold_payout_on_turn'], row['gold_payout_off_turn'], row['strength_payout_on_turn'], row['strength_payout_off_turn'], row['magic_payout_on_turn'], row['magic_payout_off_turn'], row['has_special_payout_on_turn'], row['has_special_payout_off_turn'], row['special_payout_on_turn'], row['special_payout_off_turn'], row['special_citizen'])
-            self.citizenStack.append(myCitizen)
-        random.shuffle(self.citizenStack)
-        for citizen in self.citizenStack:
-            citizen.display()
-        
-        myCursor.execute("SELECT * FROM starters")
-        myResult = myCursor.fetchall()
-        for row in myResult:
-            myStarter = Starter(row['name'], row['roll_match1'], row['roll_match2'], row['gold_payout_on_turn'], row['gold_payout_off_turn'], row['strength_payout_on_turn'], row['strength_payout_off_turn'], row['magic_payout_on_turn'], row['magic_payout_off_turn'], row['has_special_payout_on_turn'], row['has_special_payout_off_turn'], row['special_payout_on_turn'], row['special_payout_off_turn'])
-            self.starterStack.append(myStarter)
-        
-        myCursor.execute("SELECT * FROM monsters")
-        myResult = myCursor.fetchall()
-        for row in myResult:
-            myMonster = Monster(row['name'], row['area'], row['type'], row['order'], row['strength_cost'], row['magic_cost'], row['vp_reward'], row['gold_reward'], row['strength_reward'], row['magic_reward'], row['has_special_reward'], row['special_reward'], row['has_special_cost'], row['special_cost'], row['is_extra'])
-            self.monsterStack.append(myMonster)
-        for monster in self.monsterStack:
-            monster.display()
-        myConnect.close()
-#end load game data
+        my_connect = mysql.connector.connect(user='vckonline', password='vckonline', host='localhost',
+                                             database='vckonline')
+        my_cursor = my_connect.cursor(dictionary=True)
 
-#create players and deal cards
-        for x in range(0, self.playerCount):
-            myPlayer = Player()
-            myPlayer.name = f"Player {(x + 1)}" 
-            self.playerList.append(myPlayer)
-        random.shuffle(self.playerList)
-        self.playerList[0].isFirst = True
-        for player in self.playerList:
-            player.ownedStarters.append(self.starterStack[0])
-            player.ownedStarters.append(self.starterStack[1])
-            for i in range(numberOfDukes):
-                player.ownedDukes.append(self.dukeStack.pop())
-        groupedMonsters = {}
-        for monster in self.monsterStack:
+        # load game data
+        my_cursor.execute("SELECT * FROM dukes")
+        my_result = my_cursor.fetchall()
+        for row in my_result:
+            my_duke = Duke(row['name'], row['gold_mult'], row['strength_mult'], row['magic_mult'], row['shadow_mult'],
+                           row['holy_mult'], row['soldier_mult'], row['worker_mult'], row['monster_mult'],
+                           row['citizen_mult'], row['domain_mult'], row['boss_mult'], row['minion_mult'],
+                           row['beast_mult'], row['titan_mult'])
+            self.duke_stack.append(my_duke)
+        random.shuffle(self.duke_stack)
+        my_cursor.execute("SELECT * FROM domains")
+        my_result = my_cursor.fetchall()
+        for row in my_result:
+            my_domain = Domain(row['name'], row['gold_cost'], row['shadow_count'], row['holy_count'],
+                               row['soldier_count'], row['worker_count'], row['vp_reward'],
+                               row['has_activation_effect'],
+                               row['has_passive_effect'], row['passive_effect'], row['activation_effect'], row['text'])
+            self.domain_stack.append(my_domain)
+        random.shuffle(self.domain_stack)
+
+        my_cursor.execute("SELECT * FROM citizens")
+        my_result = my_cursor.fetchall()
+        for row in my_result:
+            my_citizen = Citizen(row['name'], row['gold_cost'], row['roll_match1'], row['roll_match2'],
+                                 row['shadow_count'], row['holy_count'], row['soldier_count'], row['worker_count'],
+                                 row['gold_payout_on_turn'], row['gold_payout_off_turn'],
+                                 row['strength_payout_on_turn'],
+                                 row['strength_payout_off_turn'], row['magic_payout_on_turn'],
+                                 row['magic_payout_off_turn'], row['has_special_payout_on_turn'],
+                                 row['has_special_payout_off_turn'], row['special_payout_on_turn'],
+                                 row['special_payout_off_turn'], row['special_citizen'])
+            self.citizen_stack.append(my_citizen)
+        random.shuffle(self.citizen_stack)
+
+        my_cursor.execute("SELECT * FROM starters")
+        my_result = my_cursor.fetchall()
+        for row in my_result:
+            my_starter = Starter(row['name'], row['roll_match1'], row['roll_match2'], row['gold_payout_on_turn'],
+                                 row['gold_payout_off_turn'], row['strength_payout_on_turn'],
+                                 row['strength_payout_off_turn'], row['magic_payout_on_turn'],
+                                 row['magic_payout_off_turn'], row['has_special_payout_on_turn'],
+                                 row['has_special_payout_off_turn'], row['special_payout_on_turn'],
+                                 row['special_payout_off_turn'])
+            self.starter_stack.append(my_starter)
+
+        my_cursor.execute("SELECT * FROM monsters")
+        my_result = my_cursor.fetchall()
+        for row in my_result:
+            my_monster = Monster(row['name'], row['area'], row['type'], row['order'], row['strength_cost'],
+                                 row['magic_cost'], row['vp_reward'], row['gold_reward'], row['strength_reward'],
+                                 row['magic_reward'], row['has_special_reward'], row['special_reward'],
+                                 row['has_special_cost'], row['special_cost'], row['is_extra'])
+            self.monster_stack.append(my_monster)
+        my_connect.close()
+        # end load game data
+
+        # create players and deal cards
+        for x in range(0, self.player_count):
+            my_player = Player()
+            my_player.name = f"Player {(x + 1)}"
+            self.player_list.append(my_player)
+        random.shuffle(self.player_list)
+        self.player_list[0].is_first = True
+        for player in self.player_list:
+            player.owned_starters.append(self.starter_stack[0])
+            player.owned_starters.append(self.starter_stack[1])
+            for i in range(number_of_dukes):
+                player.owned_dukes.append(self.duke_stack.pop())
+        grouped_monsters = {}
+        for monster in self.monster_stack:
             area = monster.area
-            if area in groupedMonsters:
-                groupedMonsters[area].append(monster)
+            if area in grouped_monsters:
+                grouped_monsters[area].append(monster)
             else:
-                groupedMonsters[area] = [monster]
+                grouped_monsters[area] = [monster]
         if self.preset == "shuffled":
-            # Convert groupedMonsters to a list of (area, monsters) tuples
-            area_monsters = list(groupedMonsters.items())
+            # Convert grouped_monsters to a list of (area, monsters) tuples
+            area_monsters = list(grouped_monsters.items())
             # Shuffle the list of (area, monsters) tuples
             random.shuffle(area_monsters)
             # Convert the shuffled list back to a dictionary
-            groupedMonsters = {area: monsters for area, monsters in area_monsters}
-        
+            grouped_monsters = {area: monsters for area, monsters in area_monsters}
+
         # Fill the stacks with monsters from each area
         stack_index = 0
-        for area, monsters in groupedMonsters.items():
+        for area, monsters in grouped_monsters.items():
             if stack_index >= 5:  # stop dealing after 5 stacks
                 break
-            stack = self.monsterGrid[stack_index]
+            stack = self.monster_grid[stack_index]
             for monster in monsters:
                 stack.append(monster)
                 stack_index = (stack_index + 1) % 5  # move to the next stack
-        if self.playerCount != 5:
-            for stack in self.monsterGrid:
+        if self.player_count != 5:
+            for stack in self.monster_grid:
                 # Remove monsters with isExtra = True from each stack
-                stack[:] = [monster for monster in stack if not monster.isExtra]
+                stack[:] = [monster for monster in stack if not monster.is_extra]
                 # Turn monsters face up
                 for monster in stack:
-                    monster.is
-        for i, stack in enumerate(self.monsterGrid):
+                    monster.set_visibility(True)
+        for i, stack in enumerate(self.monster_grid):
             sorted_stack = sorted(stack, key=lambda monster: monster.order, reverse=True)
-            self.monsterGrid[i] = sorted_stack
-        for stack in self.monsterGrid:
+            self.monster_grid[i] = sorted_stack
+        for stack in self.monster_grid:
             if stack:  # check if the stack is not empty
                 monster = stack.pop()
                 print(f"Popped {monster.name}")
 
     def roll_phase(self):
-        self.dieOne = random.randint(1, 6)
-        self.dieTwo = random.randint(1, 6)
-        self.dieSum = self.dieOne + self.dieTwo
-        print(f"{self.dieOne} | {self.dieTwo} | {self.dieSum}")
-        for citizen in self.playerList[0].ownedCitizens:
-            if (citizen.rollMatch1 == self.dieOne) or (citizen.rollMatch1 == self.dieTwo) or (citizen.rollMatch1 == self.dieSum) or (citizen.rollMatch2 == self.dieSum):
+        self.die_one = random.randint(1, 6)
+        self.die_two = random.randint(1, 6)
+        self.die_sum = self.die_one + self.die_two
+        print(f"{self.die_one} | {self.die_two} | {self.die_sum}")
+        for citizen in self.player_list[0].owned_citizens:
+            if (citizen.rollMatch1 == self.die_one) or (citizen.rollMatch1 == self.die_two) or (
+                    citizen.rollMatch1 == self.die_sum) or (citizen.rollMatch2 == self.die_sum):
                 print(f"{citizen.name} Payout")
-                self.playerList[0].goldScore = self.playerList[0].goldScore + citizen.goldPayoutOnTurn
-                self.playerList[0].strengthScore = self.playerList[0].strengthScore + citizen.strengthPayoutOnTurn
-                self.playerList[0].magicScore = self.playerList[0].magicScore + citizen.magicPayoutOnTurn
-        listIterator = iter(self.playerList)
-        next(listIterator)
-        for player in listIterator:
-            for citizen in player.ownedCitizens:
-                if (citizen.rollMatch1 == self.dieOne) or (citizen.rollMatch1 == self.dieTwo) or (citizen.rollMatch1 == self.dieSum) or (citizen.rollMatch2 == self.dieSum):
+                self.player_list[0].gold_score = self.player_list[0].gold_score + citizen.goldPayoutOnTurn
+                self.player_list[0].strength_score = self.player_list[0].strength_score + citizen.strengthPayoutOnTurn
+                self.player_list[0].magic_score = self.player_list[0].magic_score + citizen.magicPayoutOnTurn
+        list_iterator = iter(self.player_list)
+        next(list_iterator)
+        for player in list_iterator:
+            for citizen in player.owned_citizens:
+                if (citizen.rollMatch1 == self.die_one) or (citizen.rollMatch1 == self.die_two) or (
+                        citizen.rollMatch1 == self.die_sum) or (citizen.rollMatch2 == self.die_sum):
                     print(f"{citizen.name} Payout")
-                    player.goldScore = player.goldScore + citizen.goldPayoutOffTurn
-                    player.strengthScore = player.strengthScore + citizen.strengthPayoutOffTurn
-                    player.magicScore = player.magicScore + citizen.magicPayoutOffTurn
-                    
+                    player.gold_score = player.gold_score + citizen.goldPayoutOffTurn
+                    player.strength_score = player.strength_score + citizen.strengthPayoutOffTurn
+                    player.magic_score = player.magic_score + citizen.magicPayoutOffTurn
+
     def play_turn(self):
         self.roll_phase()
-            
-    def end_check(self):
-        if self.exhaustedCount <= (self.playerCount*2):
-            return False
 
+    def end_check(self):
+        if self.exhausted_count <= (self.player_count * 2):
+            return False

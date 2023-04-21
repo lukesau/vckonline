@@ -1,16 +1,17 @@
 import wx
 import socket
 
-class MyFrame(wx.Frame):    
+
+class MyFrame(wx.Frame):
     def __init__(self):
         super().__init__(parent=None, title='VCK Online')
-        panel = wx.Panel(self)        
-        my_sizer = wx.BoxSizer(wx.VERTICAL)        
+        panel = wx.Panel(self)
+        my_sizer = wx.BoxSizer(wx.VERTICAL)
         self.text_ctrl = wx.TextCtrl(panel)
-        my_sizer.Add(self.text_ctrl, 0, wx.ALL | wx.EXPAND, 5)        
+        my_sizer.Add(self.text_ctrl, 0, wx.ALL | wx.EXPAND, 5)
         my_btn = wx.Button(panel, label='Press Me')
         my_btn.Bind(wx.EVT_BUTTON, self.on_press)
-        my_sizer.Add(my_btn, 0, wx.ALL | wx.CENTER, 5)        
+        my_sizer.Add(my_btn, 0, wx.ALL | wx.CENTER, 5)
         panel.SetSizer(my_sizer)
         self.host = "lukesau.com"
         self.port = 8328  # socket server port number   
@@ -29,6 +30,7 @@ class MyFrame(wx.Frame):
             self.send(message, client_socket)
             self.text_ctrl.SetValue("")
             self.send(self.disconnect_message, client_socket)
+
     def send(self, msg, input_socket):
         message = msg.encode(self.format)
         msg_length = len(message)
@@ -39,15 +41,9 @@ class MyFrame(wx.Frame):
         input_socket.send(message)
         print("done sending")
         print(input_socket.recv(2048).decode(self.format))
-        
 
-        
-        
+
 if __name__ == '__main__':
     app = wx.App()
     frame = MyFrame()
     app.MainLoop()
-    
-
-
-

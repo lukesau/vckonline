@@ -5,13 +5,15 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="67d0f8e4-ef35-4641-9e95-eb79cf01a045" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/.gitignore" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vckonline.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/clientgui.py" beforeDir="false" afterPath="$PROJECT_DIR$/clientgui.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/common.py" beforeDir="false" afterPath="$PROJECT_DIR$/common.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/images/DrgHdhv.jpg" beforeDir="false" afterPath="$PROJECT_DIR$/images/shadowvale_dukes_domains_monsters.jpg" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/images/cRtDKFF.jpg" beforeDir="false" afterPath="$PROJECT_DIR$/images/unused/cRtDKFF.jpg" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/images/dukes_shadowvale.jpg" beforeDir="false" afterPath="$PROJECT_DIR$/images/dukes_expansion.jpg" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/images/playmat" beforeDir="false" afterPath="$PROJECT_DIR$/images/playmat.jpg" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server.py" beforeDir="false" afterPath="$PROJECT_DIR$/server.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vckonline.py" beforeDir="false" afterPath="$PROJECT_DIR$/vckonline.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
