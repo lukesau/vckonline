@@ -1,9 +1,7 @@
 from common import *
-from server import *
 
 print("Welcome to Valeria Card Kingdoms: Online")
-playerCount = 2 # int(input("How many players? (2-5):\n"))
-citizenSet = "na" # input("What set do you want to play? (base1, base2, shadowvale, flamesandfrost, crimsonseas, shuffled):\n")
-# gameBoard = Board(playerCount, citizenSet)
-gameBoard = Board(playerCount, citizenSet)
-gameBoard.play_turn()
+player_count = 4
+citizen_set = "shadowvale"  # base1, base2, shadowvale, flamesandfrost, crimsonseas, shuffled
+game_board = Board(player_count, citizen_set)
+game_board.play_turn()
