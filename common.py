@@ -317,20 +317,7 @@ class Board:
                 else:  # other domains are not visible or accessible
                     domain = self.domain_stack.pop()
                     stack.append(domain)
-        # print out the result
-        for i, monster_list in enumerate(self.monster_grid):
-            print(
-                f"Monster Stack {i + 1}: {[f'{monster.name} ({monster.monster_id})' + ('E' if monster.is_extra else '') + ('V' if monster.is_visible else '') + ('A' if monster.is_accessible else '') for monster in monster_list]}")
-        for i, citizen_list in enumerate(self.citizen_grid):
-            print(
-                f"Citizen Stack {i + 1}: {[f'{citizen.name} ({citizen.citizen_id})' + ('V' if citizen.is_visible else '') + ('A' if citizen.is_accessible else '') for citizen in citizen_list]}")
-        for i, domain_list in enumerate(self.domain_grid):
-            print(
-                f"Domain Stack {i + 1}: {[f'{domain.name} ({domain.domain_id})' + ('V' if domain.is_visible else '') + ('A' if domain.is_accessible else '') for domain in domain_list]}")
-        print(f"monster stack size {len(self.monster_stack)}")
-        print(f"citizen stack size {len(self.citizen_stack)}")
-        print(f"domain stack size {len(self.domain_stack)}")
-        print(f"graveyard stack size {len(self.graveyard)}")
+        self.get_board_state()
 
     def remove_extra_cards(self):
         if self.player_count != 5:
@@ -462,6 +449,21 @@ class Board:
                     for stack in self.monster_grid:
                         # Remove monsters with isExtra = True from each stack
                         stack[:] = [monster for monster in stack if not monster.is_extra]
+
+    def get_board_state(self):
+        for i, monster_list in enumerate(self.monster_grid):
+            print(
+                f"Monster Stack {i + 1}: {[f'{monster.name} ({monster.monster_id})' + ('E' if monster.is_extra else '') + ('V' if monster.is_visible else '') + ('A' if monster.is_accessible else '') for monster in monster_list]}")
+        for i, citizen_list in enumerate(self.citizen_grid):
+            print(
+                f"Citizen Stack {i + 1}: {[f'{citizen.name} ({citizen.citizen_id})' + ('V' if citizen.is_visible else '') + ('A' if citizen.is_accessible else '') for citizen in citizen_list]}")
+        for i, domain_list in enumerate(self.domain_grid):
+            print(
+                f"Domain Stack {i + 1}: {[f'{domain.name} ({domain.domain_id})' + ('V' if domain.is_visible else '') + ('A' if domain.is_accessible else '') for domain in domain_list]}")
+        print(f"monster stack size {len(self.monster_stack)}")
+        print(f"citizen stack size {len(self.citizen_stack)}")
+        print(f"domain stack size {len(self.domain_stack)}")
+        print(f"graveyard stack size {len(self.graveyard)}")
 
     def roll_phase(self):
         self.die_one = random.randint(1, 6)
