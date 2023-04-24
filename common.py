@@ -1,6 +1,8 @@
 import mysql.connector
 import random
 from typing import List
+import shortuuid
+import uuid
 
 
 class Card:
@@ -17,8 +19,9 @@ class Card:
 
 
 class Player:
-    def __init__(self):
-        self.name = "Player"
+    def __init__(self, name, player_id):
+        self.player_id = player_id
+        self.name = name
         self.owned_starters = []
         self.owned_citizens = []
         self.owned_domains = []
@@ -173,8 +176,9 @@ class Duke(Card):
         self.expansion = expansion
 
 
-class Board:
+class Game:
     def __init__(self, player_count, preset="shuffled", number_of_dukes=2):
+        self.game_id = uuid.uuid4()
         self.player_count = player_count
         self.preset = preset
         self.number_of_dukes = number_of_dukes
@@ -254,10 +258,144 @@ class Board:
             self.monster_stack.append(my_monster)
         my_connect.close()
         # end load game data
-        self.remove_extra_cards()
+        # remove extra cards
+        if self.player_count != 5:
+            extra_monsters = []
+            remaining_monsters = []
+            for monster in self.monster_stack:
+                if monster.is_extra == 1:
+                    extra_monsters.append(monster)
+                else:
+                    remaining_monsters.append(monster)
+            self.monster_stack = remaining_monsters
+            self.graveyard.extend(extra_monsters)
+        match self.preset:
+            case "base1":
+                base1_monsters = []
+                other_expansion_monsters = []
+                for monster in self.monster_stack:
+                    if monster.expansion == "base1":
+                        base1_monsters.append(monster)
+                    else:
+                        other_expansion_monsters.append(monster)
+                self.monster_stack = base1_monsters
+                self.graveyard.extend(other_expansion_monsters)
+                base1_citizens = []
+                other_expansion_citizens = []
+                for citizen in self.citizen_stack:
+                    if citizen.expansion == "base1":
+                        base1_citizens.append(citizen)
+                    else:
+                        other_expansion_citizens.append(citizen)
+                self.citizen_stack = base1_citizens
+                self.graveyard.extend(other_expansion_citizens)
+            case "base2":
+                base1_monsters = []
+                base2_monsters = []
+                other_expansion_monsters = []
+                for monster in self.monster_stack:
+                    if monster.expansion == "base1":
+                        base1_monsters.append(monster)
+                    elif monster.expansion == "base2":
+                        base2_monsters.append(monster)
+                    else:
+                        other_expansion_monsters.append(monster)
+                # add 2 random monster areas from base1 to fill out base2 monsters
+                grouped_monsters = {}
+                for base1_monster in base1_monsters:
+                    area = base1_monster.area
+                    if area in grouped_monsters:
+                        grouped_monsters[area].append(base1_monster)
+                    else:
+                        grouped_monsters[area] = [base1_monster]
+                areas = list(grouped_monsters.keys())
+                chosen_areas = random.sample(areas, 2)
+                not_chosen_monsters = [monster for area, monsters in grouped_monsters.items() if
+                                       area not in chosen_areas for monster in monsters]
+                self.graveyard.extend(not_chosen_monsters)
+                for i, area in enumerate(chosen_areas):
+                    monsters = grouped_monsters[area]
+                    base2_monsters.extend(monsters)
+                self.monster_stack = base2_monsters
+                self.graveyard.extend(other_expansion_monsters)
+                base2_citizens = []
+                other_expansion_citizens = []
+                for citizen in self.citizen_stack:
+                    if citizen.expansion == "base2":
+                        base2_citizens.append(citizen)
+                    else:
+                        other_expansion_citizens.append(citizen)
+                # add peasant and knight from base1
+                for citizen in other_expansion_citizens:
+                    if citizen.name == "Peasant" and citizen.expansion == "base1":
+                        base2_citizens.append(citizen)
+                    elif citizen.name == "Knight" and citizen.expansion == "base1":
+                        base2_citizens.append(citizen)
+                self.citizen_stack = base2_citizens
+                # put the rest of the cards in the graveyard
+                grouped_citizens = {}
+                for citizen in other_expansion_citizens:
+                    expansion = citizen.expansion
+                    if expansion in grouped_citizens:
+                        grouped_citizens[expansion].append(citizen)
+                    else:
+                        grouped_citizens[expansion] = [citizen]
+                if "base1" in grouped_citizens:
+                    base1_citizens = grouped_citizens["base1"]
+                    base1_citizens = [citizen for citizen in base1_citizens if
+                                      citizen.name not in ("Peasant", "Knight")]
+                    grouped_citizens["base1"] = base1_citizens
+                    other_expansion_citizens = []
+                    for expansion in grouped_citizens.values():
+                        other_expansion_citizens.extend(expansion)
+                self.graveyard.extend(other_expansion_citizens)
+            case "shadowvale":
+                shadowvale_monsters = []
+                other_expansion_monsters = []
+                for monster in self.monster_stack:
+                    if monster.expansion == "shadowvale":
+                        shadowvale_monsters.append(monster)
+                    else:
+                        other_expansion_monsters.append(monster)
+                self.monster_stack = shadowvale_monsters
+                self.graveyard.extend(other_expansion_monsters)
+                shadowvale_citizens = []
+                other_expansion_citizens = []
+                for citizen in self.citizen_stack:
+                    if citizen.expansion == "shadowvale":
+                        shadowvale_citizens.append(citizen)
+                    else:
+                        other_expansion_citizens.append(citizen)
+                self.citizen_stack = shadowvale_citizens
+                self.graveyard.extend(other_expansion_citizens)
+            case "flamesandfrost":
+                flamesandfrost_monsters = []
+                other_expansion_monsters = []
+                for monster in self.monster_stack:
+                    if monster.expansion == "flamesandfrost":
+                        flamesandfrost_monsters.append(monster)
+                    else:
+                        other_expansion_monsters.append(monster)
+                self.monster_stack = flamesandfrost_monsters
+                self.graveyard.extend(other_expansion_monsters)
+                flamesandfrost_citizens = []
+                other_expansion_citizens = []
+                for citizen in self.citizen_stack:
+                    if citizen.expansion == "flamesandfrost":
+                        flamesandfrost_citizens.append(citizen)
+                    else:
+                        other_expansion_citizens.append(citizen)
+                self.citizen_stack = flamesandfrost_citizens
+                self.graveyard.extend(other_expansion_citizens)
+            case _:
+                if self.player_count != 5:
+                    for stack in self.monster_grid:
+                        # Remove monsters with isExtra = True from each stack
+                        stack[:] = [monster for monster in stack if not monster.is_extra]
+        # end remove extra cards
         # create players and determine order
         for x in range(0, self.player_count):
-            my_player = Player()
+            my_player = Player(shortuuid.uuid())
             my_player.name = f"Player {(x + 1)}"
             self.player_list.append(my_player)
         random.shuffle(self.player_list)
@@ -317,140 +455,9 @@ class Board:
                 else:  # other domains are not visible or accessible
                     domain = self.domain_stack.pop()
                     stack.append(domain)
-        self.get_board_state()
+        self.get_game_state()
 
-    def remove_extra_cards(self):
-        if self.player_count != 5:
-            extra_monsters = []
-            remaining_monsters = []
-            for monster in self.monster_stack:
-                if monster.is_extra == 1:
-                    extra_monsters.append(monster)
-                else:
-                    remaining_monsters.append(monster)
-            self.monster_stack = remaining_monsters
-            self.graveyard.extend(extra_monsters)
-        match self.preset:
-            case "base1":
-                base1_monsters = []
-                other_expansion_monsters = []
-                for monster in self.monster_stack:
-                    if monster.expansion == "base1":
-                        base1_monsters.append(monster)
-                    else:
-                        other_expansion_monsters.append(monster)
-                self.monster_stack = base1_monsters
-                self.graveyard.extend(other_expansion_monsters)
-                base1_citizens = []
-                other_expansion_citizens = []
-                for citizen in self.citizen_stack:
-                    if citizen.expansion == "base1":
-                        base1_citizens.append(citizen)
-                    else:
-                        other_expansion_citizens.append(citizen)
-                self.citizen_stack = base1_citizens
-                self.graveyard.extend(other_expansion_citizens)
-            case "base2":
-                base1_monsters = []
-                base2_monsters = []
-                other_expansion_monsters = []
-                for monster in self.monster_stack:
-                    if monster.expansion == "base1":
-                        base1_monsters.append(monster)
-                    elif monster.expansion == "base2":
-                        base2_monsters.append(monster)
-                    else:
-                        other_expansion_monsters.append(monster)
-                # add 2 random monster areas from base1 to fill out base2 monsters
-                grouped_monsters = {}
-                for base1_monster in base1_monsters:
-                    area = base1_monster.area
-                    if area in grouped_monsters:
-                        grouped_monsters[area].append(base1_monster)
-                    else:
-                        grouped_monsters[area] = [base1_monster]
-                areas = list(grouped_monsters.keys())
-                chosen_areas = random.sample(areas, 2)
-                not_chosen_monsters = [monster for area, monsters in grouped_monsters.items() if area not in chosen_areas for monster in monsters]
-                self.graveyard.extend(not_chosen_monsters)
-                for i, area in enumerate(chosen_areas):
-                    monsters = grouped_monsters[area]
-                    base2_monsters.extend(monsters)
-                self.monster_stack = base2_monsters
-                self.graveyard.extend(other_expansion_monsters)
-                base2_citizens = []
-                other_expansion_citizens = []
-                for citizen in self.citizen_stack:
-                    if citizen.expansion == "base2":
-                        base2_citizens.append(citizen)
-                    else:
-                        other_expansion_citizens.append(citizen)
-                for citizen in other_expansion_citizens:
-                    if citizen.name == "Peasant" and citizen.expansion == "base1":
-                        base2_citizens.append(citizen)
-                    elif citizen.name == "Knight" and citizen.expansion == "base1":
-                        base2_citizens.append(citizen)
-                self.citizen_stack = base2_citizens
-                grouped_citizens = {}
-                for citizen in other_expansion_citizens:
-                    expansion = citizen.expansion
-                    if expansion in grouped_citizens:
-                        grouped_citizens[expansion].append(citizen)
-                    else:
-                        grouped_citizens[expansion] = [citizen]
-                if "base1" in grouped_citizens:
-                    base1_citizens = grouped_citizens["base1"]
-                    base1_citizens = [citizen for citizen in base1_citizens if citizen.name not in ("Peasant", "Knight")]
-                    grouped_citizens["base1"] = base1_citizens
-                    other_expansion_citizens = []
-                    for expansion in grouped_citizens.values():
-                        other_expansion_citizens.extend(expansion)
-                self.graveyard.extend(other_expansion_citizens)
-            case "shadowvale":
-                shadowvale_monsters = []
-                other_expansion_monsters = []
-                for monster in self.monster_stack:
-                    if monster.expansion == "shadowvale":
-                        shadowvale_monsters.append(monster)
-                    else:
-                        other_expansion_monsters.append(monster)
-                self.monster_stack = shadowvale_monsters
-                self.graveyard.extend(other_expansion_monsters)
-                shadowvale_citizens = []
-                other_expansion_citizens = []
-                for citizen in self.citizen_stack:
-                    if citizen.expansion == "shadowvale":
-                        shadowvale_citizens.append(citizen)
-                    else:
-                        other_expansion_citizens.append(citizen)
-                self.citizen_stack = shadowvale_citizens
-                self.graveyard.extend(other_expansion_citizens)
-            case "flamesandfrost":
-                flamesandfrost_monsters = []
-                other_expansion_monsters = []
-                for monster in self.monster_stack:
-                    if monster.expansion == "flamesandfrost":
-                        flamesandfrost_monsters.append(monster)
-                    else:
-                        other_expansion_monsters.append(monster)
-                self.monster_stack = flamesandfrost_monsters
-                self.graveyard.extend(other_expansion_monsters)
-                flamesandfrost_citizens = []
-                other_expansion_citizens = []
-                for citizen in self.citizen_stack:
-                    if citizen.expansion == "flamesandfrost":
-                        flamesandfrost_citizens.append(citizen)
-                    else:
-                        other_expansion_citizens.append(citizen)
-                self.citizen_stack = flamesandfrost_citizens
-                self.graveyard.extend(other_expansion_citizens)
-            case _:
-                if self.player_count != 5:
-                    for stack in self.monster_grid:
-                        # Remove monsters with isExtra = True from each stack
-                        stack[:] = [monster for monster in stack if not monster.is_extra]
-
-    def get_board_state(self):
+    def get_game_state(self):
         for i, monster_list in enumerate(self.monster_grid):
             print(
                 f"Monster Stack {i + 1}: {[f'{monster.name} ({monster.monster_id})' + ('E' if monster.is_extra else '') + ('V' if monster.is_visible else '') + ('A' if monster.is_accessible else '') for monster in monster_list]}")
@@ -460,6 +467,9 @@ class Board:
         for i, domain_list in enumerate(self.domain_grid):
             print(
                 f"Domain Stack {i + 1}: {[f'{domain.name} ({domain.domain_id})' + ('V' if domain.is_visible else '') + ('A' if domain.is_accessible else '') for domain in domain_list]}")
+        for i, player in enumerate(self.player_list):
+            print(
+                f"Player {i + 1}: {[f'{player.name} ({player.player_id})' + (' *' if player.is_first else '') + f' G{player.gold_score} S{player.strength_score} M{player.magic_score}']}")
         print(f"monster stack size {len(self.monster_stack)}")
         print(f"citizen stack size {len(self.citizen_stack)}")
         print(f"domain stack size {len(self.domain_stack)}")
