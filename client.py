@@ -6,13 +6,6 @@ import json
 
 
 class ClientVCKO(wx.App):
-    def __init__(self):
-        super().__init__()
-        self.frame = None
-        self.connection_status = None
-        self.in_lobby = None
-        self.player_id = None
-
     def OnInit(self):
         self.frame = MyFrame(self)
         self.frame.Show()
@@ -23,6 +16,7 @@ class ClientVCKO(wx.App):
         return True
 
     def parse_response(self, response):
+        print(f"{response}")
         first_word = response.split()[0]
         match first_word:
             case "lobby":
@@ -31,6 +25,9 @@ class ClientVCKO(wx.App):
                     self.player_id = full_command[2]
                     self.in_lobby = True
                     print(self.player_id)
+                    print(self.frame)
+                    self.frame.show_list_view(None)
+                    print("did it work")
                 else:
                     print("Couldn't understand that response")
             case _:
@@ -66,6 +63,27 @@ class MyFrame(wx.Frame):
         self.timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.set_connection_status, self.timer)
         self.timer.Start(5000)
+
+    def show_list_view(self, event):
+        print("show list view")
+        # create a list view with a ready up button
+        list_ctrl = wx.ListCtrl(self.panel, style=wx.LC_REPORT)
+        list_ctrl.InsertColumn(0, "Player ID")
+        list_ctrl.InsertColumn(1, "Ready Status")
+        list_ctrl.InsertItem(0, self.app.player_id)
+        list_ctrl.SetItem(0, 1, "Not Ready")
+
+        ready_button = wx.Button(self.panel, label="Ready Up")
+        ready_button.Bind(wx.EVT_BUTTON, self.on_ready_up)
+
+        # Add the list view and button to the vertical sizer
+        self.vertical_sizer.Insert(0, list_ctrl, 0, wx.ALL | wx.EXPAND, 5)
+        self.vertical_sizer.Add(ready_button, 0, wx.ALL | wx.CENTER, 5)
+        self.panel.Layout()
+
+    def on_ready_up(self, event):
+        # implement ready up functionality here
+        print("Ready Up button pressed!")
 
     def set_connection_status(self, event=None):
         if connection_check():

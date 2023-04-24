@@ -36,7 +36,7 @@ class ServerVCKO:
                             joining_player = LobbyMember(joining_player_name, joining_player_id)
                             self.lobby.append(joining_player)
                             message = f"lobby joined {joining_player_id}"
-                            conn.send(joining_player_id.encode(Constants.text_format))
+                            conn.send(message.encode(Constants.text_format))
                         elif full_command[1] == "get_status":
                             lobby_data = []
                             for lobby_member in self.lobby:
