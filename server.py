@@ -37,18 +37,26 @@ class ServerVCKO:
                             self.lobby.append(joining_player)
                             message = f"lobby joined {joining_player_id}"
                             conn.send(message.encode(Constants.text_format))
-                        elif full_command[1] == "get_status":
-                            lobby_data = []
-                            for lobby_member in self.lobby:
-                                player_dict = {
-                                    "name": lobby_member.name,
-                                    "player_id": lobby_member.player_id,
-                                    "is_ready": lobby_member.is_ready
-                                }
-                                lobby_data.append(player_dict)
-                            json_data = json.dumps(lobby_data)
-                            print(json_data)
-                            conn.send(json_data.encode(Constants.text_format))
+                        elif full_command[1] == "leave" and len(full_command) > 2:
+                            temp_lobby = []
+                            for player in self.lobby:
+                                if player.player_id != full_command[2]:
+                                    temp_lobby.append(player)
+                            self.lobby = temp_lobby
+                            self.send_lobby_state(conn)
+                        elif full_command[1] == "get_status" and len(full_command) == 2:
+                            self.send_lobby_state(conn)
+                        elif full_command[1] == "ready" and len(full_command) > 2:
+                            for player in self.lobby:
+                                if player.player_id == full_command[2]:
+                                    player.is_ready = True
+                            self.send_lobby_state(conn)
+                        elif full_command[1] == "unready" and len(full_command) > 2:
+                            for player in self.lobby:
+                                if player.player_id == full_command[2]:
+                                    player.is_ready = False
+
+                            self.send_lobby_state(conn)
                         else:
                             conn.send("invalid message".encode(Constants.text_format))
                     case _:
@@ -65,6 +73,18 @@ class ServerVCKO:
             thread = threading.Thread(target=self.handle_client, args=(conn, addr))
             thread.start()
             print(f"Active threads: {threading.active_count() - 1}")
+
+    def send_lobby_state(self, conn):
+        lobby_data = []
+        for lobby_member in self.lobby:
+            player_dict = {
+                "name": lobby_member.name,
+                "player_id": lobby_member.player_id,
+                "is_ready": lobby_member.is_ready
+            }
+            lobby_data.append(player_dict)
+        response = f"lobby state {json.dumps(lobby_data)}"
+        conn.send(response.encode(Constants.text_format))
 
 
 class LobbyMember:

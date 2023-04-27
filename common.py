@@ -19,9 +19,9 @@ class Card:
 
 
 class Player:
-    def __init__(self, name, player_id):
+    def __init__(self, player_id):
         self.player_id = player_id
-        self.name = name
+        # self.name = name
         self.owned_starters = []
         self.owned_citizens = []
         self.owned_domains = []
@@ -416,7 +416,7 @@ class Game:
                 grouped_monsters[area] = [monster]
         # Reverse the order of each group by monster_order
         for area, monsters in grouped_monsters.items():
-            monsters.sort(key=lambda monster: monster.order, reverse=True)
+            monsters.sort(key=lambda item: item.order, reverse=True)
         areas = list(grouped_monsters.keys())
         chosen_areas = random.sample(areas, 5)
         for i, area in enumerate(chosen_areas):
@@ -469,7 +469,7 @@ class Game:
                 f"Domain Stack {i + 1}: {[f'{domain.name} ({domain.domain_id})' + ('V' if domain.is_visible else '') + ('A' if domain.is_accessible else '') for domain in domain_list]}")
         for i, player in enumerate(self.player_list):
             print(
-                f"Player {i + 1}: {[f'{player.name} ({player.player_id})' + (' *' if player.is_first else '') + f' G{player.gold_score} S{player.strength_score} M{player.magic_score}']}")
+                f"Player {i + 1}: {[f'{player.player_id}' + (' *' if player.is_first else '') + f' G{player.gold_score} S{player.strength_score} M{player.magic_score}']}")
         print(f"monster stack size {len(self.monster_stack)}")
         print(f"citizen stack size {len(self.citizen_stack)}")
         print(f"domain stack size {len(self.domain_stack)}")
