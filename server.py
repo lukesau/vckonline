@@ -11,7 +11,7 @@ class ServerVCKO:
         self.host = socket.gethostname()
         self.server_socket = socket.socket()
         self.server_socket.bind((self.host, Constants.port))
-        self.game_list = []
+        self.game_dict = {}
         self.lobby = []
         self.gamers = []
 
@@ -24,13 +24,13 @@ class ServerVCKO:
                 msg_length = int(msg_length)
                 msg = conn.recv(msg_length).decode(Constants.text_format)
                 first_word = msg.split()[0]
+                full_command = msg.split()
                 match first_word:
                     case "connection_check":
                         connected = False
                         conn.send("received".encode(Constants.text_format))
                     case "lobby":
                         connected = False
-                        full_command = msg.split()
                         if full_command[1] == "join" and len(full_command) > 2:
                             joining_player_name = ' '.join(full_command[2:])
                             joining_player_id = shortuuid.uuid()
@@ -80,6 +80,9 @@ class ServerVCKO:
                                         players_to_remove.append(player)
                                 for player in players_to_remove:
                                     self.lobby.remove(player)
+                                new_game = Game(new_game_id, self.gamers)
+                                self.game_dict[new_game.game_id] = new_game
+                                print(f"size of game dict: {len(self.game_dict)}")
                                 message = f"game joined {new_game_id}"
                                 conn.send(message.encode(Constants.text_format))
                             else:
@@ -91,6 +94,20 @@ class ServerVCKO:
                             self.send_lobby_state(conn)
                         else:
                             conn.send("invalid message".encode(Constants.text_format))
+                    case "game":
+                        connected = False
+                        if full_command[1] == "get_status" and len(full_command) == 3:
+                            print(full_command[2])
+                            print(len(self.game_dict))
+                            for game in self.game_dict:
+                                print(f"game id: {game}")
+                            game_id = full_command[2]
+                            game = self.game_dict.get(game_id)
+                            if not game:
+                                message = "game state error: game not found"
+                                conn.send(message.encode(Constants.text_format))
+                            else:
+                                self.send_game_state(conn, full_command[2])
                     case _:
                         connected = False
                         conn.send("invalid message".encode(Constants.text_format))
@@ -116,6 +133,15 @@ class ServerVCKO:
             }
             lobby_data.append(player_dict)
         response = f"lobby state {json.dumps(lobby_data)}"
+        conn.send(response.encode(Constants.text_format))
+
+    def send_game_state(self, conn, game_id):
+        game = self.game_dict.get(game_id)
+        if not game:
+            response = "game state error: game not found"
+        else:
+            game_json = json.dumps(game, cls=GameObjectEncoder)
+            response = f"game state {game_json}"
         conn.send(response.encode(Constants.text_format))
 
 

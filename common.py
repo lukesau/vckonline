@@ -1,6 +1,9 @@
+import json
+from json import JSONEncoder
+
 import mysql.connector
 import random
-from typing import List
+from typing import List, Dict
 import shortuuid
 import uuid
 
@@ -19,9 +22,9 @@ class Card:
 
 
 class Player:
-    def __init__(self, player_id):
+    def __init__(self, player_id, name):
         self.player_id = player_id
-        # self.name = name
+        self.name = name
         self.owned_starters = []
         self.owned_citizens = []
         self.owned_domains = []
@@ -177,9 +180,9 @@ class Duke(Card):
 
 
 class Game:
-    def __init__(self, player_count, preset="shuffled", number_of_dukes=2):
-        self.game_id = uuid.uuid4()
-        self.player_count = player_count
+    def __init__(self, game_id, player_list_from_lobby, preset="shuffled", number_of_dukes=2):
+        self.game_id = game_id
+        self.player_count = len(player_list_from_lobby)
         self.preset = preset
         self.number_of_dukes = number_of_dukes
         self.player_list = []
@@ -394,9 +397,8 @@ class Game:
                         stack[:] = [monster for monster in stack if not monster.is_extra]
         # end remove extra cards
         # create players and determine order
-        for x in range(0, self.player_count):
-            my_player = Player(shortuuid.uuid())
-            my_player.name = f"Player {(x + 1)}"
+        for player in player_list_from_lobby:
+            my_player = Player(player.player_id, player.name)
             self.player_list.append(my_player)
         random.shuffle(self.player_list)
         self.player_list[0].is_first = True
@@ -505,3 +507,157 @@ class Game:
     def end_check(self):
         if self.exhausted_count <= (self.player_count * 2):
             return False
+
+
+class GameObjectEncoder(JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Card):
+            return {
+                "name": obj.name,
+                "is_visible": obj.is_visible,
+                "is_accessible": obj.is_accessible,
+            }
+        elif isinstance(obj, Player):
+            return {
+                'player_id': obj.player_id,
+                'name': obj.name,
+                'owned_starters': [starter.starter_id for starter in obj.owned_starters],
+                'owned_citizens': [citizen.citizen_id for citizen in obj.owned_citizens],
+                'owned_domains': [domain.domain_id for domain in obj.owned_domains],
+                'owned_dukes': [duke.duke_id for duke in obj.owned_dukes],
+                'owned_monsters': [monster.monster_id for monster in obj.owned_monsters],
+                'gold_score': obj.gold_score,
+                'strength_score': obj.strength_score,
+                'magic_score': obj.magic_score,
+                'is_first': obj.is_first,
+                'shadow_count': obj.shadow_count,
+                'holy_count': obj.holy_count,
+                'soldier_count': obj.soldier_count,
+                'worker_count': obj.worker_count
+            }
+        elif isinstance(obj, Duke):
+            return {
+                **super().default(obj),
+                "duke_id": obj.duke_id,
+                "gold_multiplier": obj.gold_multiplier,
+                "strength_multiplier": obj.strength_multiplier,
+                "magic_multiplier": obj.magic_multiplier,
+                "shadow_multiplier": obj.shadow_multiplier,
+                "holy_multiplier": obj.holy_multiplier,
+                "soldier_multiplier": obj.soldier_multiplier,
+                "worker_multiplier": obj.worker_multiplier,
+                "monster_multiplier": obj.monster_multiplier,
+                "citizen_multiplier": obj.citizen_multiplier,
+                "domain_multiplier": obj.domain_multiplier,
+                "boss_multiplier": obj.boss_multiplier,
+                "minion_multiplier": obj.minion_multiplier,
+                "beast_multiplier": obj.beast_multiplier,
+                "titan_multiplier": obj.titan_multiplier,
+                "expansion": obj.expansion,
+            }
+        elif isinstance(obj, Monster):
+            return {
+                **super().default(obj),
+                "monster_id": obj.monster_id,
+                "name": obj.name,
+                "area": obj.area,
+                "monster_type": obj.monster_type,
+                "order": obj.order,
+                "strength_cost": obj.strength_cost,
+                "magic_cost": obj.magic_cost,
+                "vp_reward": obj.vp_reward,
+                "gold_reward": obj.gold_reward,
+                "strength_reward": obj.strength_reward,
+                "magic_reward": obj.magic_reward,
+                "has_special_reward": obj.has_special_reward,
+                "special_reward": obj.special_reward,
+                "has_special_cost": obj.has_special_cost,
+                "special_cost": obj.special_cost,
+                "is_extra": obj.is_extra,
+                "expansion": obj.expansion,
+            }
+        elif isinstance(obj, Starter):
+            return {
+                **super().default(obj),
+                "starter_id": obj.starter_id,
+                "name": obj.name,
+                "roll_match1": obj.rollMatch1,
+                "roll_match2": obj.rollMatch2,
+                "gold_payout_on_turn": obj.goldPayoutOnTurn,
+                "gold_payout_off_turn": obj.goldPayoutOffTurn,
+                "strength_payout_on_turn": obj.strengthPayoutOnTurn,
+                "strength_payout_off_turn": obj.strengthPayoutOffTurn,
+                "magic_payout_on_turn": obj.magicPayoutOnTurn,
+                "magic_payout_off_turn": obj.magicPayoutOffTurn,
+                "has_special_payout_on_turn": obj.hasSpecialPayoutOnTurn,
+                "has_special_payout_off_turn": obj.hasSpecialPayoutOffTurn,
+                "special_payout_on_turn": obj.specialPayoutOnTurn,
+                "special_payout_off_turn": obj.specialPayoutOffTurn,
+                "expansion": obj.expansion,
+            }
+        elif isinstance(obj, Citizen):
+            return {
+                **super().default(obj),
+                "citizen_id": obj.citizen_id,
+                "name": obj.name,
+                "gold_cost": obj.gold_cost,
+                "roll_match1": obj.roll_match1,
+                "roll_match2": obj.roll_match2,
+                "shadow_count": obj.shadow_count,
+                "holy_count": obj.holy_count,
+                "soldier_count": obj.soldier_count,
+                "worker_count": obj.worker_count,
+                "gold_payout_on_turn": obj.gold_payout_on_turn,
+                "gold_payout_off_turn": obj.gold_payout_off_turn,
+                "strength_payout_on_turn": obj.strength_payout_on_turn,
+                "strength_payout_off_turn": obj.strength_payout_off_turn,
+                "magic_payout_on_turn": obj.magic_payout_on_turn,
+                "magic_payout_off_turn": obj.magic_payout_off_turn,
+                "has_special_payout_on_turn": obj.has_special_payout_on_turn,
+                "has_special_payout_off_turn": obj.has_special_payout_off_turn,
+                "special_payout_on_turn": obj.special_payout_on_turn,
+                "special_payout_off_turn": obj.special_payout_off_turn,
+                "special_citizen": obj.special_citizen,
+                "expansion": obj.expansion,
+                }
+        elif isinstance(obj, Domain):
+            return {
+                'domain_id': obj.domain_id,
+                'name': obj.name,
+                'gold_cost': obj.gold_cost,
+                'shadow_count': obj.shadow_count,
+                'holy_count': obj.holy_count,
+                'soldier_count': obj.soldier_count,
+                'worker_count': obj.worker_count,
+                'vp_reward': obj.vp_reward,
+                'has_activation_effect': obj.has_activation_effect,
+                'has_passive_effect': obj.has_passive_effect,
+                'passive_effect': obj.passive_effect,
+                'activation_effect': obj.activation_effect,
+                'text': obj.text,
+                'expansion': obj.expansion
+            }
+        elif isinstance(obj, Game):
+            return {
+                "game_id": obj.game_id,
+                "player_count": obj.player_count,
+                "preset": obj.preset,
+                "number_of_dukes": obj.number_of_dukes,
+                "player_list": obj.player_list,
+                "citizen_grid": obj.citizen_grid,
+                "domain_grid": obj.domain_grid,
+                "monster_grid": obj.monster_grid,
+                "duke_stack": obj.duke_stack,
+                "domain_stack": obj.domain_stack,
+                "citizen_stack": obj.citizen_stack,
+                "monster_stack": obj.monster_stack,
+                "starter_stack": obj.starter_stack,
+                "graveyard": obj.graveyard,
+                "die_one": obj.die_one,
+                "die_two": obj.die_two,
+                "die_sum": obj.die_sum,
+                "exhausted_count": obj.exhausted_count
+            }
+        else:
+            return super().default(obj)
+

@@ -57,6 +57,20 @@ class GameFrame(wx.Frame):
         self.app = app
         self.panel = wx.Panel(self)
         self.SetMinSize(Constants.minimum_window_size)
+        self.last_lobby_state = []
+        self.timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.get_game_status, self.timer)
+        self.timer.Start(500)
+
+    def get_game_status(self, event=None):
+        if connection_check() and self.app.in_game:
+            self.app.parse_response(send(f"game get_status {self.app.game_id}"))
+            if self.app.lobby == self.last_lobby_state:
+                # If the current lobby state is the same as the last one, don't update the list control
+                return
+
+            # Save the new lobby state
+            self.last_lobby_state = self.app.lobby
 
 
 class LobbyFrame(wx.Frame):
@@ -116,7 +130,7 @@ class LobbyFrame(wx.Frame):
             # Save the new lobby state
             self.last_lobby_state = self.app.lobby
 
-    def highlight_current_player(self):
+    def highlight_current_player(self, event=None):
         if self.current_player_index is not None:
             self.list_ctrl.Select(self.current_player_index)
         else:
