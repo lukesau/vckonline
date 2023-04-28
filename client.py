@@ -1,6 +1,5 @@
 import wx
 import socket
-import threading
 from constants import *
 import json
 
@@ -267,11 +266,21 @@ def connection_check():
 def _send(msg, input_socket):
     message = msg.encode(Constants.text_format)
     msg_length = len(message)
+    print(msg_length)
     send_length = str(msg_length).encode(Constants.text_format)
     send_length += b' ' * (Constants.header_size - len(send_length))
     input_socket.send(send_length)
     input_socket.send(message)
-    return input_socket.recv(2048).decode(Constants.text_format)
+
+    # Receive the response
+    response = b""
+    while True:
+        chunk = input_socket.recv(2048)
+        response += chunk
+        if len(chunk) < 2048:
+            break
+
+    return response.decode(Constants.text_format)
 
 
 def send(message):
