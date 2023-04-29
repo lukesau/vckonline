@@ -14,6 +14,13 @@ class Card:
         self.is_visible = False
         self.is_accessible = False
 
+    def to_dict(self):
+        return {
+            "name": self.name,
+            "is_visible": self.is_visible,
+            "is_accessible": self.is_accessible,
+        }
+
     def toggle_visibility(self, toggle: bool = True):
         self.is_visible = toggle
 
@@ -74,6 +81,25 @@ class Starter(Card):
         self.specialPayoutOffTurn = special_payout_off_turn
         self.expansion = expansion
 
+    def to_dict(self):
+        return {
+            "starter_id": self.starter_id,
+            "name": self.name,
+            "roll_match1": self.rollMatch1,
+            "roll_match2": self.rollMatch2,
+            "gold_payout_on_turn": self.goldPayoutOnTurn,
+            "gold_payout_off_turn": self.goldPayoutOffTurn,
+            "strength_payout_on_turn": self.strengthPayoutOnTurn,
+            "strength_payout_off_turn": self.strengthPayoutOffTurn,
+            "magic_payout_on_turn": self.magicPayoutOnTurn,
+            "magic_payout_off_turn": self.magicPayoutOffTurn,
+            "has_special_payout_on_turn": self.hasSpecialPayoutOnTurn,
+            "has_special_payout_off_turn": self.hasSpecialPayoutOffTurn,
+            "special_payout_on_turn": self.specialPayoutOnTurn,
+            "special_payout_off_turn": self.specialPayoutOffTurn,
+            "expansion": self.expansion
+        }
+
 
 class Citizen(Card):
     def __init__(self, citizen_id, name, gold_cost, roll_match1, roll_match2, shadow_count, holy_count, soldier_count,
@@ -104,6 +130,30 @@ class Citizen(Card):
         self.special_citizen = special_citizen
         self.expansion = expansion
 
+    def to_dict(self):
+        base_dict = super().to_dict()
+        return {**base_dict,
+                "citizen_id": self.citizen_id,
+                "gold_cost": self.gold_cost,
+                "roll_match1": self.roll_match1,
+                "roll_match2": self.roll_match2,
+                "shadow_count": self.shadow_count,
+                "holy_count": self.holy_count,
+                "soldier_count": self.soldier_count,
+                "worker_count": self.worker_count,
+                "gold_payout_on_turn": self.gold_payout_on_turn,
+                "gold_payout_off_turn": self.gold_payout_off_turn,
+                "strength_payout_on_turn": self.strength_payout_on_turn,
+                "strength_payout_off_turn": self.strength_payout_off_turn,
+                "magic_payout_on_turn": self.magic_payout_on_turn,
+                "magic_payout_off_turn": self.magic_payout_off_turn,
+                "has_special_payout_on_turn": self.has_special_payout_on_turn,
+                "has_special_payout_off_turn": self.has_special_payout_off_turn,
+                "special_payout_on_turn": self.special_payout_on_turn,
+                "special_payout_off_turn": self.special_payout_off_turn,
+                "special_citizen": self.special_citizen,
+                "expansion": self.expansion}
+
 
 class Domain(Card):
     def __init__(self, domain_id, name, gold_cost, shadow_count, holy_count, soldier_count, worker_count, vp_reward,
@@ -123,6 +173,25 @@ class Domain(Card):
         self.activation_effect = activation_effect
         self.text = text
         self.expansion = expansion
+
+    def to_dict(self):
+        return {
+            **super().to_dict(),
+            "domain_id": self.domain_id,
+            "name": self.name,
+            "gold_cost": self.gold_cost,
+            "shadow_count": self.shadow_count,
+            "holy_count": self.holy_count,
+            "soldier_count": self.soldier_count,
+            "worker_count": self.worker_count,
+            "vp_reward": self.vp_reward,
+            "has_activation_effect": self.has_activation_effect,
+            "has_passive_effect": self.has_passive_effect,
+            "passive_effect": self.passive_effect,
+            "activation_effect": self.activation_effect,
+            "text": self.text,
+            "expansion": self.expansion
+        }
 
 
 class Monster(Card):
@@ -147,6 +216,28 @@ class Monster(Card):
         self.special_cost = special_cost
         self.is_extra = is_extra
         self.expansion = expansion
+
+    def to_dict(self):
+        card_dict = super().to_dict()
+        monster_dict = {
+            "monster_id": self.monster_id,
+            "area": self.area,
+            "monster_type": self.monster_type,
+            "order": self.order,
+            "strength_cost": self.strength_cost,
+            "magic_cost": self.magic_cost,
+            "vp_reward": self.vp_reward,
+            "gold_reward": self.gold_reward,
+            "strength_reward": self.strength_reward,
+            "magic_reward": self.magic_reward,
+            "has_special_reward": self.has_special_reward,
+            "special_reward": self.special_reward,
+            "has_special_cost": self.has_special_cost,
+            "special_cost": self.special_cost,
+            "is_extra": self.is_extra,
+            "expansion": self.expansion,
+        }
+        return {**card_dict, **monster_dict}
 
     def add_strength_cost(self, added_strength):
         self.strength_cost = self.strength_cost + added_strength
@@ -177,6 +268,27 @@ class Duke(Card):
         self.beast_multiplier = beast_mult
         self.titan_multiplier = titan_mult
         self.expansion = expansion
+
+    def to_dict(self):
+        return {
+            **super().to_dict(),
+            "duke_id": self.duke_id,
+            "gold_multiplier": self.gold_multiplier,
+            "strength_multiplier": self.strength_multiplier,
+            "magic_multiplier": self.magic_multiplier,
+            "shadow_multiplier": self.shadow_multiplier,
+            "holy_multiplier": self.holy_multiplier,
+            "soldier_multiplier": self.soldier_multiplier,
+            "worker_multiplier": self.worker_multiplier,
+            "monster_multiplier": self.monster_multiplier,
+            "citizen_multiplier": self.citizen_multiplier,
+            "domain_multiplier": self.domain_multiplier,
+            "boss_multiplier": self.boss_multiplier,
+            "minion_multiplier": self.minion_multiplier,
+            "beast_multiplier": self.beast_multiplier,
+            "titan_multiplier": self.titan_multiplier,
+            "expansion": self.expansion
+        }
 
 
 class Game:
@@ -511,13 +623,7 @@ class Game:
 
 class GameObjectEncoder(JSONEncoder):
     def default(self, obj):
-        if isinstance(obj, Card):
-            return {
-                "name": obj.name,
-                "is_visible": obj.is_visible,
-                "is_accessible": obj.is_accessible,
-            }
-        elif isinstance(obj, Player):
+        if isinstance(obj, Player):
             return {
                 'player_id': obj.player_id,
                 'name': obj.name,
@@ -536,107 +642,15 @@ class GameObjectEncoder(JSONEncoder):
                 'worker_count': obj.worker_count
             }
         elif isinstance(obj, Duke):
-            return {
-                **super().default(obj),
-                "duke_id": obj.duke_id,
-                "gold_multiplier": obj.gold_multiplier,
-                "strength_multiplier": obj.strength_multiplier,
-                "magic_multiplier": obj.magic_multiplier,
-                "shadow_multiplier": obj.shadow_multiplier,
-                "holy_multiplier": obj.holy_multiplier,
-                "soldier_multiplier": obj.soldier_multiplier,
-                "worker_multiplier": obj.worker_multiplier,
-                "monster_multiplier": obj.monster_multiplier,
-                "citizen_multiplier": obj.citizen_multiplier,
-                "domain_multiplier": obj.domain_multiplier,
-                "boss_multiplier": obj.boss_multiplier,
-                "minion_multiplier": obj.minion_multiplier,
-                "beast_multiplier": obj.beast_multiplier,
-                "titan_multiplier": obj.titan_multiplier,
-                "expansion": obj.expansion,
-            }
+            return obj.to_dict()
         elif isinstance(obj, Monster):
-            return {
-                **super().default(obj),
-                "monster_id": obj.monster_id,
-                "name": obj.name,
-                "area": obj.area,
-                "monster_type": obj.monster_type,
-                "order": obj.order,
-                "strength_cost": obj.strength_cost,
-                "magic_cost": obj.magic_cost,
-                "vp_reward": obj.vp_reward,
-                "gold_reward": obj.gold_reward,
-                "strength_reward": obj.strength_reward,
-                "magic_reward": obj.magic_reward,
-                "has_special_reward": obj.has_special_reward,
-                "special_reward": obj.special_reward,
-                "has_special_cost": obj.has_special_cost,
-                "special_cost": obj.special_cost,
-                "is_extra": obj.is_extra,
-                "expansion": obj.expansion,
-            }
+            return obj.to_dict()
         elif isinstance(obj, Starter):
-            return {
-                **super().default(obj),
-                "starter_id": obj.starter_id,
-                "name": obj.name,
-                "roll_match1": obj.rollMatch1,
-                "roll_match2": obj.rollMatch2,
-                "gold_payout_on_turn": obj.goldPayoutOnTurn,
-                "gold_payout_off_turn": obj.goldPayoutOffTurn,
-                "strength_payout_on_turn": obj.strengthPayoutOnTurn,
-                "strength_payout_off_turn": obj.strengthPayoutOffTurn,
-                "magic_payout_on_turn": obj.magicPayoutOnTurn,
-                "magic_payout_off_turn": obj.magicPayoutOffTurn,
-                "has_special_payout_on_turn": obj.hasSpecialPayoutOnTurn,
-                "has_special_payout_off_turn": obj.hasSpecialPayoutOffTurn,
-                "special_payout_on_turn": obj.specialPayoutOnTurn,
-                "special_payout_off_turn": obj.specialPayoutOffTurn,
-                "expansion": obj.expansion,
-            }
+            return obj.to_dict()
         elif isinstance(obj, Citizen):
-            return {
-                **super().default(obj),
-                "citizen_id": obj.citizen_id,
-                "name": obj.name,
-                "gold_cost": obj.gold_cost,
-                "roll_match1": obj.roll_match1,
-                "roll_match2": obj.roll_match2,
-                "shadow_count": obj.shadow_count,
-                "holy_count": obj.holy_count,
-                "soldier_count": obj.soldier_count,
-                "worker_count": obj.worker_count,
-                "gold_payout_on_turn": obj.gold_payout_on_turn,
-                "gold_payout_off_turn": obj.gold_payout_off_turn,
-                "strength_payout_on_turn": obj.strength_payout_on_turn,
-                "strength_payout_off_turn": obj.strength_payout_off_turn,
-                "magic_payout_on_turn": obj.magic_payout_on_turn,
-                "magic_payout_off_turn": obj.magic_payout_off_turn,
-                "has_special_payout_on_turn": obj.has_special_payout_on_turn,
-                "has_special_payout_off_turn": obj.has_special_payout_off_turn,
-                "special_payout_on_turn": obj.special_payout_on_turn,
-                "special_payout_off_turn": obj.special_payout_off_turn,
-                "special_citizen": obj.special_citizen,
-                "expansion": obj.expansion,
-                }
+            return obj.to_dict()
         elif isinstance(obj, Domain):
-            return {
-                'domain_id': obj.domain_id,
-                'name': obj.name,
-                'gold_cost': obj.gold_cost,
-                'shadow_count': obj.shadow_count,
-                'holy_count': obj.holy_count,
-                'soldier_count': obj.soldier_count,
-                'worker_count': obj.worker_count,
-                'vp_reward': obj.vp_reward,
-                'has_activation_effect': obj.has_activation_effect,
-                'has_passive_effect': obj.has_passive_effect,
-                'passive_effect': obj.passive_effect,
-                'activation_effect': obj.activation_effect,
-                'text': obj.text,
-                'expansion': obj.expansion
-            }
+            return obj.to_dict()
         elif isinstance(obj, Game):
             return {
                 "game_id": obj.game_id,
@@ -644,9 +658,9 @@ class GameObjectEncoder(JSONEncoder):
                 "preset": obj.preset,
                 "number_of_dukes": obj.number_of_dukes,
                 "player_list": obj.player_list,
+                "monster_grid": obj.monster_grid,
                 "citizen_grid": obj.citizen_grid,
                 "domain_grid": obj.domain_grid,
-                "monster_grid": obj.monster_grid,
                 "duke_stack": obj.duke_stack,
                 "domain_stack": obj.domain_stack,
                 "citizen_stack": obj.citizen_stack,

@@ -2,6 +2,7 @@ import wx
 import socket
 from constants import *
 import json
+import pprint
 
 
 class ClientVCKO(wx.App):
@@ -18,6 +19,7 @@ class ClientVCKO(wx.App):
         self.lobby_frame = LobbyFrame(self)
         self.game_frame = GameFrame(self)
         self.last_lobby_state = ""
+        self.last_game_state = ""
         self.debug_frame.set_connection_status()
         return True
 
@@ -45,6 +47,12 @@ class ClientVCKO(wx.App):
                     self.in_game = True
                     self.in_lobby = False
                     self.lobby_frame.enter_game()
+                elif full_command[1] == "state":
+                    json_response = ' '.join(full_command[2:])
+                    new_game_state = json.loads(json_response)
+                    if new_game_state == self.last_game_state:
+                        return
+                    self.last_game_state = new_game_state
 
     def update_lobby_status(self):
         return self.in_lobby
@@ -55,21 +63,52 @@ class GameFrame(wx.Frame):
         super().__init__(parent=None, title='VCK Online', size=Constants.default_window_size)
         self.app = app
         self.panel = wx.Panel(self)
+
+        # Create a static box sizer with padding
+        vbox = wx.StaticBoxSizer(wx.StaticBox(self.panel, label=""), wx.VERTICAL)
+        vbox.AddSpacer(10)  # Add a bit of padding at the top
+
+        # Wrap the list control widget inside a scrolled window
+        sw = wx.ScrolledWindow(vbox.GetStaticBox(), style=wx.VSCROLL)
+        sw.SetScrollbars(1, 1, 1, 1)  # Show the scrollbars
+        self.game_state_list = wx.ListCtrl(sw, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+        sw.SetSizer(wx.BoxSizer(wx.VERTICAL))
+        sw.GetSizer().Add(self.game_state_list, proportion=1, flag=wx.EXPAND | wx.ALL, border=10)
+
+        vbox.Add(sw, proportion=1, flag=wx.EXPAND | wx.ALL, border=10)  # Add the scrolled window to the sizer
+
+        vbox.AddSpacer(10)  # Add a bit of padding at the bottom
+
+        # Set the sizer for the panel
+        self.panel.SetSizer(vbox)
+
         self.SetMinSize(Constants.minimum_window_size)
-        self.last_lobby_state = []
+        self.last_pretty_game_state = ""
+        self.timer_interval = 500
         self.timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.get_game_status, self.timer)
-        self.timer.Start(500)
+        self.timer.Start(self.timer_interval)
 
     def get_game_status(self, event=None):
         if connection_check() and self.app.in_game:
             self.app.parse_response(send(f"game get_status {self.app.game_id}"))
-            if self.app.lobby == self.last_lobby_state:
-                # If the current lobby state is the same as the last one, don't update the list control
+            new_pretty_game_state = pprint.pformat(self.app.last_game_state)
+            if self.last_pretty_game_state == new_pretty_game_state:
+                # If the current game state is the same as the last one, don't update the list control
+                if self.timer_interval < 9500:
+                    self.timer_interval += 500
+                    self.timer.Start(self.timer_interval)
                 return
-
-            # Save the new lobby state
-            self.last_lobby_state = self.app.lobby
+            self.game_state_list.ClearAll()
+            self.game_state_list.InsertColumn(0, "Game State")
+            for idx, state in enumerate(new_pretty_game_state.split('\n')):
+                self.game_state_list.InsertItem(idx, state.strip())
+            self.game_state_list.SetColumnWidth(0, wx.LIST_AUTOSIZE)
+            # Save the new game state
+            self.last_pretty_game_state = new_pretty_game_state
+            self.timer_interval = 500
+        else:
+            self.timer.Stop()
 
 
 class LobbyFrame(wx.Frame):
@@ -99,9 +138,10 @@ class LobbyFrame(wx.Frame):
         self.Bind(wx.EVT_SIZE, self.on_size)
         self.Bind(wx.EVT_CLOSE, self.on_close)
 
+        self.timer_interval = 500
         self.timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.get_lobby_status, self.timer)
-        self.timer.Start(500)
+        self.timer.Start(self.timer_interval)
 
     def on_size(self, event):
         # Calculate the width of each column based on the width of the list control
@@ -116,6 +156,9 @@ class LobbyFrame(wx.Frame):
             self.app.parse_response(send(f"lobby get_status {self.app.player_id}"))
             if self.app.lobby == self.last_lobby_state:
                 # If the current lobby state is the same as the last one, don't update the list control
+                if self.timer_interval < 9500:
+                    self.timer_interval += 500
+                    self.timer.Start(self.timer_interval)
                 return
             self.list_ctrl.DeleteAllItems()
             for index, player in enumerate(self.app.lobby):
@@ -266,7 +309,6 @@ def connection_check():
 def _send(msg, input_socket):
     message = msg.encode(Constants.text_format)
     msg_length = len(message)
-    print(msg_length)
     send_length = str(msg_length).encode(Constants.text_format)
     send_length += b' ' * (Constants.header_size - len(send_length))
     input_socket.send(send_length)

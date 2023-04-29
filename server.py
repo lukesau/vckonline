@@ -15,6 +15,16 @@ class ServerVCKO:
         self.lobby = []
         self.gamers = []
 
+        # Start the thread to remove inactive players
+        self.inactive_player_thread = threading.Thread(target=self.remove_inactive_players, daemon=True)
+        self.inactive_player_thread.start()
+
+    def remove_inactive_players(self):
+        while True:
+            current_time = time.time()
+            self.lobby = [player for player in self.lobby if current_time - player.last_active_time <= 60]
+            time.sleep(10)  # check for inactive players every 10 seconds
+
     def handle_client(self, conn, addr):
         print(f"Connection from: {addr}")
         connected = True
@@ -49,6 +59,7 @@ class ServerVCKO:
                             found = False
                             for player in self.lobby:
                                 if full_command[2] == player.player_id:
+                                    player.last_active_time = time.time() # update last active time
                                     self.send_lobby_state(conn)
                                     found = True
                             for player in self.gamers:
@@ -80,7 +91,8 @@ class ServerVCKO:
                                         players_to_remove.append(player)
                                 for player in players_to_remove:
                                     self.lobby.remove(player)
-                                new_game = Game(new_game_id, self.gamers)
+                                # START GAME
+                                new_game = Game(new_game_id, self.gamers, "base1", 2)
                                 self.game_dict[new_game.game_id] = new_game
                                 print(f"size of game dict: {len(self.game_dict)}")
                                 message = f"game joined {new_game_id}"
