@@ -60,7 +60,7 @@ class ClientVCKO(wx.App):
 
 class GameFrame(wx.Frame):
     def __init__(self, app):
-        super().__init__(parent=None, title='VCK Online', size=Constants.default_window_size)
+        super().__init__(parent=None, title='VCK Online', size=Constants.medium_window_size)
         self.app = app
         self.panel = wx.Panel(self)
 
@@ -82,22 +82,18 @@ class GameFrame(wx.Frame):
         # Set the sizer for the panel
         self.panel.SetSizer(vbox)
 
-        self.SetMinSize(Constants.minimum_window_size)
-        self.last_pretty_game_state = ""
-        self.timer_interval = 500
+        self.SetMinSize(Constants.small_window_size)
+        self.last_game_state = ""
         self.timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.get_game_status, self.timer)
-        self.timer.Start(self.timer_interval)
+        self.timer.Start(500)
 
     def get_game_status(self, event=None):
         if connection_check() and self.app.in_game:
             self.app.parse_response(send(f"game get_status {self.app.game_id}"))
             new_pretty_game_state = pprint.pformat(self.app.last_game_state)
-            if self.last_pretty_game_state == new_pretty_game_state:
+            if self.last_game_state == self.app.game_state:
                 # If the current game state is the same as the last one, don't update the list control
-                if self.timer_interval < 9500:
-                    self.timer_interval += 500
-                    self.timer.Start(self.timer_interval)
                 return
             self.game_state_list.ClearAll()
             self.game_state_list.InsertColumn(0, "Game State")
@@ -105,15 +101,14 @@ class GameFrame(wx.Frame):
                 self.game_state_list.InsertItem(idx, state.strip())
             self.game_state_list.SetColumnWidth(0, wx.LIST_AUTOSIZE)
             # Save the new game state
-            self.last_pretty_game_state = new_pretty_game_state
-            self.timer_interval = 500
+            self.last_game_state = self.app.game_state
         else:
             self.timer.Stop()
 
 
 class LobbyFrame(wx.Frame):
     def __init__(self, app):
-        super().__init__(parent=None, title='VCK Online Lobby', size=(250, 300))
+        super().__init__(parent=None, title='VCK Online Lobby', size=Constants.medium_window_size)
         self.app = app
         self.panel = wx.Panel(self)
         self.vertical_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -132,7 +127,7 @@ class LobbyFrame(wx.Frame):
         self.vertical_sizer.Add(self.list_ctrl, 1, wx.ALL | wx.EXPAND, 5)
         self.vertical_sizer.Add(ready_button, 0, wx.ALL | wx.CENTER, 5)
         self.panel.SetSizer(self.vertical_sizer)
-        self.SetMinSize(Constants.minimum_window_size)
+        self.SetMinSize(Constants.small_window_size)
 
         # Bind the size event to adjust the column widths
         self.Bind(wx.EVT_SIZE, self.on_size)
@@ -200,7 +195,7 @@ class LobbyFrame(wx.Frame):
 
 class StartFrame(wx.Frame):
     def __init__(self, parent):
-        super().__init__(parent=None, title='Enter Name', size=Constants.minimum_window_size)
+        super().__init__(parent=None, title='Enter Name', size=Constants.small_window_size)
         self.panel = wx.Panel(self)
         self.app = parent
         # Create text field with suggestion text
@@ -243,7 +238,7 @@ class StartFrame(wx.Frame):
 
 class DebugFrame(wx.Frame):
     def __init__(self, app):
-        super().__init__(parent=None, title='VCKO Debug Console', size=Constants.default_window_size)
+        super().__init__(parent=None, title='VCKO Debug Console', size=Constants.small_window_size)
         self.app = app
         self.panel = wx.Panel(self)
         self.vertical_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -264,7 +259,7 @@ class DebugFrame(wx.Frame):
         self.vertical_sizer.AddStretchSpacer()
         self.vertical_sizer.Add(self.status_sizer, 0, wx.ALIGN_LEFT | wx.BOTTOM, 5)
         self.panel.SetSizer(self.vertical_sizer)
-        self.SetMinSize(Constants.minimum_window_size)
+        self.SetMinSize(Constants.small_window_size)
         self.Show()
         # Create a timer to call the connection_check method every 2 seconds
         self.timer = wx.Timer(self)

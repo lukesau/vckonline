@@ -152,7 +152,7 @@ class ServerVCKO:
         if not game:
             response = "game state error: game not found"
         else:
-            game_json = json.dumps(game, cls=GameObjectEncoder)
+            game_json = json.dumps(game, cls=GameObjectEncoder, indent=2)
             response = f"game state {game_json}"
         conn.send(response.encode(Constants.text_format))
 
