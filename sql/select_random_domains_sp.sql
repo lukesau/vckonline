@@ -1,0 +1,8 @@
+DELIMITER //
+
+CREATE PROCEDURE select_random_domains()
+BEGIN
+    SELECT * FROM domains ORDER BY RAND() LIMIT 15;
+END //
+
+DELIMITER ;

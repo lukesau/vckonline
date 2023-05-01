@@ -1,9 +1,9 @@
 import json
-from json import JSONEncoder
-
+from json import JSONEncoder, JSONDecoder
 import mysql.connector
 import random
 from typing import List, Dict
+from constants import *
 import shortuuid
 import uuid
 
@@ -45,6 +45,26 @@ class Player:
         self.holy_count = 0
         self.soldier_count = 0
         self.worker_count = 0
+
+    @classmethod
+    def from_dict(cls, data):
+        player_id = data['player_id']
+        name = data['name']
+        player = cls(player_id, name)
+        player.owned_starters = [Starter.from_dict(s) for s in data['owned_starters']]
+        player.owned_citizens = [Citizen.from_dict(c) for c in data['owned_citizens']]
+        player.owned_domains = [Domain.from_dict(d) for d in data['owned_domains']]
+        player.owned_dukes = [Duke.from_dict(d) for d in data['owned_dukes']]
+        player.owned_monsters = [Monster.from_dict(m) for m in data['owned_monsters']]
+        player.gold_score = data['gold_score']
+        player.strength_score = data['strength_score']
+        player.magic_score = data['magic_score']
+        player.is_first = data['is_first']
+        player.shadow_count = data['shadow_count']
+        player.holy_count = data['holy_count']
+        player.soldier_count = data['soldier_count']
+        player.worker_count = data['worker_count']
+        return player
 
     def calc_roles(self):
         for citizen in self.owned_citizens:
@@ -100,6 +120,15 @@ class Starter(Card):
             "expansion": self.expansion
         }
 
+    @classmethod
+    def from_dict(cls, data):
+        return cls(data["starter_id"], data["name"], data["roll_match1"], data["roll_match2"],
+                   data["gold_payout_on_turn"], data["gold_payout_off_turn"], data["strength_payout_on_turn"],
+                   data["strength_payout_off_turn"], data["magic_payout_on_turn"], data["magic_payout_off_turn"],
+                   data["has_special_payout_on_turn"], data["has_special_payout_off_turn"],
+                   data["special_payout_on_turn"],
+                   data["special_payout_off_turn"], data["expansion"])
+
 
 class Citizen(Card):
     def __init__(self, citizen_id, name, gold_cost, roll_match1, roll_match2, shadow_count, holy_count, soldier_count,
@@ -154,6 +183,30 @@ class Citizen(Card):
                 "special_citizen": self.special_citizen,
                 "expansion": self.expansion}
 
+    @classmethod
+    def from_dict(cls, dict_):
+        return cls(citizen_id=dict_["citizen_id"],
+                   name=dict_["name"],
+                   gold_cost=dict_["gold_cost"],
+                   roll_match1=dict_["roll_match1"],
+                   roll_match2=dict_["roll_match2"],
+                   shadow_count=dict_["shadow_count"],
+                   holy_count=dict_["holy_count"],
+                   soldier_count=dict_["soldier_count"],
+                   worker_count=dict_["worker_count"],
+                   gold_payout_on_turn=dict_["gold_payout_on_turn"],
+                   gold_payout_off_turn=dict_["gold_payout_off_turn"],
+                   strength_payout_on_turn=dict_["strength_payout_on_turn"],
+                   strength_payout_off_turn=dict_["strength_payout_off_turn"],
+                   magic_payout_on_turn=dict_["magic_payout_on_turn"],
+                   magic_payout_off_turn=dict_["magic_payout_off_turn"],
+                   has_special_payout_on_turn=dict_["has_special_payout_on_turn"],
+                   has_special_payout_off_turn=dict_["has_special_payout_off_turn"],
+                   special_payout_on_turn=dict_["special_payout_on_turn"],
+                   special_payout_off_turn=dict_["special_payout_off_turn"],
+                   special_citizen=dict_["special_citizen"],
+                   expansion=dict_["expansion"])
+
 
 class Domain(Card):
     def __init__(self, domain_id, name, gold_cost, shadow_count, holy_count, soldier_count, worker_count, vp_reward,
@@ -192,6 +245,25 @@ class Domain(Card):
             "text": self.text,
             "expansion": self.expansion
         }
+
+    @classmethod
+    def from_dict(cls, dict_):
+        return cls(
+            domain_id=dict_['domain_id'],
+            name=dict_['name'],
+            gold_cost=dict_['gold_cost'],
+            shadow_count=dict_['shadow_count'],
+            holy_count=dict_['holy_count'],
+            soldier_count=dict_['soldier_count'],
+            worker_count=dict_['worker_count'],
+            vp_reward=dict_['vp_reward'],
+            has_activation_effect=dict_['has_activation_effect'],
+            has_passive_effect=dict_['has_passive_effect'],
+            passive_effect=dict_['passive_effect'],
+            activation_effect=dict_['activation_effect'],
+            text=dict_['text'],
+            expansion=dict_['expansion']
+        )
 
 
 class Monster(Card):
@@ -238,6 +310,28 @@ class Monster(Card):
             "expansion": self.expansion,
         }
         return {**card_dict, **monster_dict}
+
+    @classmethod
+    def from_dict(cls, d):
+        return cls(
+            d['monster_id'],
+            d['name'],
+            d['area'],
+            d['monster_type'],
+            d['order'],
+            d['strength_cost'],
+            d['magic_cost'],
+            d['vp_reward'],
+            d['gold_reward'],
+            d['strength_reward'],
+            d['magic_reward'],
+            d['has_special_reward'],
+            d['special_reward'],
+            d['has_special_cost'],
+            d['special_cost'],
+            d['is_extra'],
+            d['expansion'],
+        )
 
     def add_strength_cost(self, added_strength):
         self.strength_cost = self.strength_cost + added_strength
@@ -290,304 +384,41 @@ class Duke(Card):
             "expansion": self.expansion
         }
 
+    @classmethod
+    def from_dict(cls, data):
+        duke_id = data["duke_id"]
+        name = data["name"]
+        gold_mult = data["gold_multiplier"]
+        strength_mult = data["strength_multiplier"]
+        magic_mult = data["magic_multiplier"]
+        shadow_mult = data["shadow_multiplier"]
+        holy_mult = data["holy_multiplier"]
+        soldier_mult = data["soldier_multiplier"]
+        worker_mult = data["worker_multiplier"]
+        monster_mult = data["monster_multiplier"]
+        citizen_mult = data["citizen_multiplier"]
+        domain_mult = data["domain_multiplier"]
+        boss_mult = data["boss_multiplier"]
+        minion_mult = data["minion_multiplier"]
+        beast_mult = data["beast_multiplier"]
+        titan_mult = data["titan_multiplier"]
+        expansion = data["expansion"]
+        return cls(duke_id, name, gold_mult, strength_mult, magic_mult, shadow_mult, holy_mult, soldier_mult,
+                   worker_mult, monster_mult, citizen_mult, domain_mult, boss_mult, minion_mult, beast_mult,
+                   titan_mult, expansion)
+
 
 class Game:
-    def __init__(self, game_id, player_list_from_lobby, preset="shuffled", number_of_dukes=2):
-        self.game_id = game_id
-        self.player_count = len(player_list_from_lobby)
-        self.preset = preset
-        self.number_of_dukes = number_of_dukes
-        self.player_list = []
-        self.citizen_grid: List[List[Citizen]] = [[] for _ in range(10)]
-        self.domain_grid: List[List[Domain]] = [[] for _ in range(5)]
-        self.monster_grid: List[List[Monster]] = [[] for _ in range(5)]
-        self.duke_stack = []
-        self.domain_stack = []
-        self.citizen_stack = []
-        self.monster_stack = []
-        self.starter_stack = []
-        self.graveyard = []
-        self.die_one = 0
-        self.die_two = 0
-        self.die_sum = 0
-        self.exhausted_count = 0
-
-        my_connect = mysql.connector.connect(user='vckonline', password='vckonline', host='localhost',
-                                             database='vckonline')
-        my_cursor = my_connect.cursor(dictionary=True)
-
-        # load game data
-        my_cursor.execute("SELECT * FROM dukes")
-        my_result = my_cursor.fetchall()
-        for row in my_result:
-            my_duke = Duke(row['id_dukes'], row['name'], row['gold_mult'], row['strength_mult'], row['magic_mult'],
-                           row['shadow_mult'], row['holy_mult'], row['soldier_mult'], row['worker_mult'],
-                           row['monster_mult'], row['citizen_mult'], row['domain_mult'], row['boss_mult'],
-                           row['minion_mult'], row['beast_mult'], row['titan_mult'], row['expansion'])
-            self.duke_stack.append(my_duke)
-        random.shuffle(self.duke_stack)
-        my_cursor.execute("SELECT * FROM domains")
-        my_result = my_cursor.fetchall()
-        for row in my_result:
-            my_domain = Domain(row['id_domains'], row['name'], row['gold_cost'], row['shadow_count'], row['holy_count'],
-                               row['soldier_count'], row['worker_count'], row['vp_reward'],
-                               row['has_activation_effect'], row['has_passive_effect'], row['passive_effect'],
-                               row['activation_effect'], row['text'], row['expansion'])
-            self.domain_stack.append(my_domain)
-        random.shuffle(self.domain_stack)
-
-        my_cursor.execute("SELECT * FROM citizens")
-        my_result = my_cursor.fetchall()
-        for row in my_result:
-            for i in range(6):
-                my_citizen = Citizen(row['id_citizens'], row['name'], row['gold_cost'], row['roll_match1'],
-                                     row['roll_match2'], row['shadow_count'], row['holy_count'], row['soldier_count'],
-                                     row['worker_count'], row['gold_payout_on_turn'], row['gold_payout_off_turn'],
-                                     row['strength_payout_on_turn'], row['strength_payout_off_turn'],
-                                     row['magic_payout_on_turn'], row['magic_payout_off_turn'],
-                                     row['has_special_payout_on_turn'], row['has_special_payout_off_turn'],
-                                     row['special_payout_on_turn'], row['special_payout_off_turn'],
-                                     row['special_citizen'],
-                                     row['expansion'])
-                self.citizen_stack.append(my_citizen)
-
-        my_cursor.execute("SELECT * FROM starters")
-        my_result = my_cursor.fetchall()
-        for row in my_result:
-            my_starter = Starter(row['id_starters'], row['name'], row['roll_match1'], row['roll_match2'],
-                                 row['gold_payout_on_turn'], row['gold_payout_off_turn'],
-                                 row['strength_payout_on_turn'], row['strength_payout_off_turn'],
-                                 row['magic_payout_on_turn'], row['magic_payout_off_turn'],
-                                 row['has_special_payout_on_turn'], row['has_special_payout_off_turn'],
-                                 row['special_payout_on_turn'], row['special_payout_off_turn'], row['expansion'])
-            self.starter_stack.append(my_starter)
-
-        my_cursor.execute("SELECT * FROM monsters")
-        my_result = my_cursor.fetchall()
-        for row in my_result:
-            my_monster = Monster(row['id_monsters'], row['name'], row['area'], row['monster_type'],
-                                 row['monster_order'], row['strength_cost'], row['magic_cost'], row['vp_reward'],
-                                 row['gold_reward'], row['strength_reward'], row['magic_reward'],
-                                 row['has_special_reward'], row['special_reward'], row['has_special_cost'],
-                                 row['special_cost'], row['is_extra'], row['expansion'])
-            self.monster_stack.append(my_monster)
-        my_connect.close()
-        # end load game data
-        # remove extra cards
-        if self.player_count != 5:
-            extra_monsters = []
-            remaining_monsters = []
-            for monster in self.monster_stack:
-                if monster.is_extra == 1:
-                    extra_monsters.append(monster)
-                else:
-                    remaining_monsters.append(monster)
-            self.monster_stack = remaining_monsters
-            self.graveyard.extend(extra_monsters)
-        match self.preset:
-            case "base1":
-                base1_monsters = []
-                other_expansion_monsters = []
-                for monster in self.monster_stack:
-                    if monster.expansion == "base1":
-                        base1_monsters.append(monster)
-                    else:
-                        other_expansion_monsters.append(monster)
-                self.monster_stack = base1_monsters
-                self.graveyard.extend(other_expansion_monsters)
-                base1_citizens = []
-                other_expansion_citizens = []
-                for citizen in self.citizen_stack:
-                    if citizen.expansion == "base1":
-                        base1_citizens.append(citizen)
-                    else:
-                        other_expansion_citizens.append(citizen)
-                self.citizen_stack = base1_citizens
-                self.graveyard.extend(other_expansion_citizens)
-            case "base2":
-                base1_monsters = []
-                base2_monsters = []
-                other_expansion_monsters = []
-                for monster in self.monster_stack:
-                    if monster.expansion == "base1":
-                        base1_monsters.append(monster)
-                    elif monster.expansion == "base2":
-                        base2_monsters.append(monster)
-                    else:
-                        other_expansion_monsters.append(monster)
-                # add 2 random monster areas from base1 to fill out base2 monsters
-                grouped_monsters = {}
-                for base1_monster in base1_monsters:
-                    area = base1_monster.area
-                    if area in grouped_monsters:
-                        grouped_monsters[area].append(base1_monster)
-                    else:
-                        grouped_monsters[area] = [base1_monster]
-                areas = list(grouped_monsters.keys())
-                chosen_areas = random.sample(areas, 2)
-                not_chosen_monsters = [monster for area, monsters in grouped_monsters.items() if
-                                       area not in chosen_areas for monster in monsters]
-                self.graveyard.extend(not_chosen_monsters)
-                for i, area in enumerate(chosen_areas):
-                    monsters = grouped_monsters[area]
-                    base2_monsters.extend(monsters)
-                self.monster_stack = base2_monsters
-                self.graveyard.extend(other_expansion_monsters)
-                base2_citizens = []
-                other_expansion_citizens = []
-                for citizen in self.citizen_stack:
-                    if citizen.expansion == "base2":
-                        base2_citizens.append(citizen)
-                    else:
-                        other_expansion_citizens.append(citizen)
-                # add peasant and knight from base1
-                for citizen in other_expansion_citizens:
-                    if citizen.name == "Peasant" and citizen.expansion == "base1":
-                        base2_citizens.append(citizen)
-                    elif citizen.name == "Knight" and citizen.expansion == "base1":
-                        base2_citizens.append(citizen)
-                self.citizen_stack = base2_citizens
-                # put the rest of the cards in the graveyard
-                grouped_citizens = {}
-                for citizen in other_expansion_citizens:
-                    expansion = citizen.expansion
-                    if expansion in grouped_citizens:
-                        grouped_citizens[expansion].append(citizen)
-                    else:
-                        grouped_citizens[expansion] = [citizen]
-                if "base1" in grouped_citizens:
-                    base1_citizens = grouped_citizens["base1"]
-                    base1_citizens = [citizen for citizen in base1_citizens if
-                                      citizen.name not in ("Peasant", "Knight")]
-                    grouped_citizens["base1"] = base1_citizens
-                    other_expansion_citizens = []
-                    for expansion in grouped_citizens.values():
-                        other_expansion_citizens.extend(expansion)
-                self.graveyard.extend(other_expansion_citizens)
-            case "shadowvale":
-                shadowvale_monsters = []
-                other_expansion_monsters = []
-                for monster in self.monster_stack:
-                    if monster.expansion == "shadowvale":
-                        shadowvale_monsters.append(monster)
-                    else:
-                        other_expansion_monsters.append(monster)
-                self.monster_stack = shadowvale_monsters
-                self.graveyard.extend(other_expansion_monsters)
-                shadowvale_citizens = []
-                other_expansion_citizens = []
-                for citizen in self.citizen_stack:
-                    if citizen.expansion == "shadowvale":
-                        shadowvale_citizens.append(citizen)
-                    else:
-                        other_expansion_citizens.append(citizen)
-                self.citizen_stack = shadowvale_citizens
-                self.graveyard.extend(other_expansion_citizens)
-            case "flamesandfrost":
-                flamesandfrost_monsters = []
-                other_expansion_monsters = []
-                for monster in self.monster_stack:
-                    if monster.expansion == "flamesandfrost":
-                        flamesandfrost_monsters.append(monster)
-                    else:
-                        other_expansion_monsters.append(monster)
-                self.monster_stack = flamesandfrost_monsters
-                self.graveyard.extend(other_expansion_monsters)
-                flamesandfrost_citizens = []
-                other_expansion_citizens = []
-                for citizen in self.citizen_stack:
-                    if citizen.expansion == "flamesandfrost":
-                        flamesandfrost_citizens.append(citizen)
-                    else:
-                        other_expansion_citizens.append(citizen)
-                self.citizen_stack = flamesandfrost_citizens
-                self.graveyard.extend(other_expansion_citizens)
-            case _:
-                if self.player_count != 5:
-                    for stack in self.monster_grid:
-                        # Remove monsters with isExtra = True from each stack
-                        stack[:] = [monster for monster in stack if not monster.is_extra]
-        # end remove extra cards
-        # create players and determine order
-        for player in player_list_from_lobby:
-            my_player = Player(player.player_id, player.name)
-            self.player_list.append(my_player)
-        random.shuffle(self.player_list)
-        self.player_list[0].is_first = True
-        # give players starters and dukes
-        for player in self.player_list:
-            player.owned_starters.append(self.starter_stack[0])
-            player.owned_starters.append(self.starter_stack[1])
-            for i in range(number_of_dukes):
-                player.owned_dukes.append(self.duke_stack.pop())
-        # deal monsters onto the board
-        grouped_monsters = {}
-        for monster in self.monster_stack:
-            area = monster.area
-            if area in grouped_monsters:
-                grouped_monsters[area].append(monster)
-            else:
-                grouped_monsters[area] = [monster]
-        # Reverse the order of each group by monster_order
-        for area, monsters in grouped_monsters.items():
-            monsters.sort(key=lambda item: item.order, reverse=True)
-        areas = list(grouped_monsters.keys())
-        chosen_areas = random.sample(areas, 5)
-        for i, area in enumerate(chosen_areas):
-            monsters = grouped_monsters[area]
-            self.monster_grid[i].extend(monsters)
-        for i, stack in enumerate(self.monster_grid):
-            for monster in stack:
-                monster.toggle_visibility(True)
-            # Make the last monster in the stack accessible
-            stack[-1].toggle_accessibility(True)
-        self.monster_stack = []
-        # deal citizens onto the board
-        # Create a dictionary to store citizen lists with roll numbers as keys
-        citizens_by_roll = {roll: [] for roll in [1, 2, 3, 4, 5, 6, 7, 8, 9, 11]}
-        # Group citizens by roll number
-        for citizen in self.citizen_stack:
-            citizen.toggle_visibility()
-            citizens_by_roll[citizen.roll_match1].append(citizen)
-        for roll in citizens_by_roll:
-            # Map 11 roll to index 9
-            index = roll - 1 if roll < 11 else 9
-            citizens = citizens_by_roll[roll]
-            self.citizen_grid[index].extend(list(citizens))
-            # Make the first citizen in each list accessible
-            self.citizen_grid[index][-1].toggle_accessibility(True)
-        self.citizen_stack = []
-        # Deal the domains into the stacks
-        for i in range(5):
-            stack = self.domain_grid[i]
-            for j in range(3):
-                if j == 2:  # top domain is visible and accessible
-                    domain = self.domain_stack.pop()
-                    domain.toggle_visibility(True)
-                    domain.toggle_accessibility(True)
-                    stack.append(domain)
-                else:  # other domains are not visible or accessible
-                    domain = self.domain_stack.pop()
-                    stack.append(domain)
-        self.get_game_state()
-
-    def get_game_state(self):
-        for i, monster_list in enumerate(self.monster_grid):
-            print(
-                f"Monster Stack {i + 1}: {[f'{monster.name} ({monster.monster_id})' + ('E' if monster.is_extra else '') + ('V' if monster.is_visible else '') + ('A' if monster.is_accessible else '') for monster in monster_list]}")
-        for i, citizen_list in enumerate(self.citizen_grid):
-            print(
-                f"Citizen Stack {i + 1}: {[f'{citizen.name} ({citizen.citizen_id})' + ('V' if citizen.is_visible else '') + ('A' if citizen.is_accessible else '') for citizen in citizen_list]}")
-        for i, domain_list in enumerate(self.domain_grid):
-            print(
-                f"Domain Stack {i + 1}: {[f'{domain.name} ({domain.domain_id})' + ('V' if domain.is_visible else '') + ('A' if domain.is_accessible else '') for domain in domain_list]}")
-        for i, player in enumerate(self.player_list):
-            print(
-                f"Player {i + 1}: {[f'{player.player_id}' + (' *' if player.is_first else '') + f' G{player.gold_score} S{player.strength_score} M{player.magic_score}']}")
-        print(f"monster stack size {len(self.monster_stack)}")
-        print(f"citizen stack size {len(self.citizen_stack)}")
-        print(f"domain stack size {len(self.domain_stack)}")
-        print(f"graveyard stack size {len(self.graveyard)}")
+    def __init__(self, game_state):
+        self.game_id = game_state['game_id']
+        self.player_list = game_state['player_list']
+        self.monster_grid = game_state['monster_grid']
+        self.citizen_grid = game_state['citizen_grid']
+        self.domain_grid = game_state['domain_grid']
+        self.die_one = game_state['die_one']
+        self.die_two = game_state['die_two']
+        self.die_sum = game_state['die_sum']
+        self.exhausted_count = game_state['exhausted_count']
 
     def roll_phase(self):
         self.die_one = random.randint(1, 6)
@@ -617,7 +448,7 @@ class Game:
         self.roll_phase()
 
     def end_check(self):
-        if self.exhausted_count <= (self.player_count * 2):
+        if self.exhausted_count <= (len(self.player_list) * 2):
             return False
 
 
@@ -654,19 +485,10 @@ class GameObjectEncoder(JSONEncoder):
         elif isinstance(obj, Game):
             return {
                 "game_id": obj.game_id,
-                "player_count": obj.player_count,
-                "preset": obj.preset,
-                "number_of_dukes": obj.number_of_dukes,
                 "player_list": obj.player_list,
                 "monster_grid": obj.monster_grid,
                 "citizen_grid": obj.citizen_grid,
                 "domain_grid": obj.domain_grid,
-                "duke_stack": obj.duke_stack,
-                "domain_stack": obj.domain_stack,
-                "citizen_stack": obj.citizen_stack,
-                "monster_stack": obj.monster_stack,
-                "starter_stack": obj.starter_stack,
-                "graveyard": obj.graveyard,
                 "die_one": obj.die_one,
                 "die_two": obj.die_two,
                 "die_sum": obj.die_sum,
@@ -675,3 +497,34 @@ class GameObjectEncoder(JSONEncoder):
         else:
             return super().default(obj)
 
+
+def send_data(conn, data):
+    header = f"{len(data):<{Constants.header_size}}"
+    conn.send(header.encode(Constants.encoding))
+    offset = 0
+    while offset < len(data):
+        chunk = data[offset:offset + Constants.buffer_size]
+        conn.send(chunk)
+        offset += Constants.buffer_size
+
+
+def receive_data(conn):
+    # Read the header to determine the message length
+    header = b""
+    while len(header) < Constants.header_size:
+        chunk = conn.recv(Constants.header_size - len(header))
+        if not chunk:
+            raise ConnectionError("Connection closed by server")
+        header += chunk
+    msg_length = int(header.decode(Constants.encoding).strip())
+
+    # Read the message in chunks until the entire message is received
+    data = b""
+    while len(data) < msg_length:
+        chunk_size = min(Constants.buffer_size, msg_length - len(data))
+        chunk = conn.recv(chunk_size)
+        if not chunk:
+            raise ConnectionError("Connection closed by server")
+        data += chunk
+
+    return data

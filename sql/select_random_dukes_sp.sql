@@ -1,0 +1,8 @@
+DELIMITER //
+
+CREATE PROCEDURE select_random_dukes()
+BEGIN
+    SELECT * FROM dukes ORDER BY RAND();
+END //
+
+DELIMITER ;

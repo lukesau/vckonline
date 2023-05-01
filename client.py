@@ -1,8 +1,6 @@
 import wx
 import socket
-from constants import *
-import json
-import pprint
+from common import *
 
 
 class ClientVCKO(wx.App):
@@ -14,6 +12,7 @@ class ClientVCKO(wx.App):
         self.in_lobby = False
         self.in_game = False
         self.game_id = ""
+        self.game = None
         self.debug_frame = DebugFrame(self)
         self.start_frame = StartFrame(self)
         self.lobby_frame = LobbyFrame(self)
@@ -24,7 +23,10 @@ class ClientVCKO(wx.App):
         return True
 
     def parse_response(self, response):
-        print(f"{response}")
+        if len(response) > 1000:
+            print(f"{response[:1000]}...")
+        else:
+            print(response)
         first_word = response.split()[0]
         full_command = response.split()
         match first_word:
@@ -60,7 +62,7 @@ class ClientVCKO(wx.App):
 
 class GameFrame(wx.Frame):
     def __init__(self, app):
-        super().__init__(parent=None, title='VCK Online', size=Constants.medium_window_size)
+        super().__init__(parent=None, title='VCK Online', size=Constants.large_window_size)
         self.app = app
         self.panel = wx.Panel(self)
 
@@ -82,28 +84,30 @@ class GameFrame(wx.Frame):
         # Set the sizer for the panel
         self.panel.SetSizer(vbox)
 
-        self.SetMinSize(Constants.small_window_size)
+        self.SetMinSize(Constants.medium_window_size)
         self.last_game_state = ""
+        self.timer_interval = 500
         self.timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.get_game_status, self.timer)
-        self.timer.Start(500)
+        self.timer.Start(self.timer_interval)
 
     def get_game_status(self, event=None):
-        if connection_check() and self.app.in_game:
+        if self.app.in_game and connection_check():
             self.app.parse_response(send(f"game get_status {self.app.game_id}"))
-            new_pretty_game_state = pprint.pformat(self.app.last_game_state)
-            if self.last_game_state == self.app.game_state:
+            if self.last_game_state == self.app.last_game_state:
+                if self.timer_interval < 9500:
+                    self.timer_interval += 500
+                    self.timer.Start(self.timer_interval)
                 # If the current game state is the same as the last one, don't update the list control
                 return
+            pretty_json_str = json.dumps(self.app.last_game_state, indent=4, sort_keys=False)
             self.game_state_list.ClearAll()
             self.game_state_list.InsertColumn(0, "Game State")
-            for idx, state in enumerate(new_pretty_game_state.split('\n')):
+            for idx, state in enumerate(pretty_json_str.split('\n')):
                 self.game_state_list.InsertItem(idx, state.strip())
             self.game_state_list.SetColumnWidth(0, wx.LIST_AUTOSIZE)
             # Save the new game state
-            self.last_game_state = self.app.game_state
-        else:
-            self.timer.Stop()
+            self.last_game_state = self.app.last_game_state
 
 
 class LobbyFrame(wx.Frame):
@@ -147,7 +151,7 @@ class LobbyFrame(wx.Frame):
         event.Skip()
 
     def get_lobby_status(self, event=None):
-        if connection_check() and self.app.in_lobby:
+        if self.app.in_lobby and connection_check():
             self.app.parse_response(send(f"lobby get_status {self.app.player_id}"))
             if self.app.lobby == self.last_lobby_state:
                 # If the current lobby state is the same as the last one, don't update the list control
@@ -301,30 +305,14 @@ def connection_check():
         return False
 
 
-def _send(msg, input_socket):
-    message = msg.encode(Constants.text_format)
-    msg_length = len(message)
-    send_length = str(msg_length).encode(Constants.text_format)
-    send_length += b' ' * (Constants.header_size - len(send_length))
-    input_socket.send(send_length)
-    input_socket.send(message)
-
-    # Receive the response
-    response = b""
-    while True:
-        chunk = input_socket.recv(2048)
-        response += chunk
-        if len(chunk) < 2048:
-            break
-
-    return response.decode(Constants.text_format)
-
-
 def send(message):
     client_socket = socket.socket()
     client_socket.connect((Constants.host, Constants.port))
-    response = _send(message, client_socket)
-    return response
+    message_bytes = message.encode(Constants.encoding)
+    send_data(client_socket, message_bytes)
+    response = receive_data(client_socket)
+    client_socket.close()
+    return response.decode(Constants.encoding)
 
 
 if __name__ == '__main__':
