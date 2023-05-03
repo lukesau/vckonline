@@ -39,6 +39,7 @@ __pycache__/
 *.so
 
 # Distribution / packaging
+gamestate.txt
 python3-vckonline/
 .idea/
 .Python
