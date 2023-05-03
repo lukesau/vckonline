@@ -1,8 +1,9 @@
 class Constants:
     green = (106, 171, 115)
     red = (219, 92, 92)
+    server_host = '192.168.1.99'
     host = "lukesau.com"
-    #  host = "127.0.1.1"
+    # host = "127.0.1.1"
     port = 8328
     text_format = "utf-8"
     small_window_size = (300, 150)

@@ -1,4 +1,5 @@
 import json
+import time
 from json import JSONEncoder, JSONDecoder
 import mysql.connector
 import random
@@ -40,11 +41,17 @@ class Player:
         self.gold_score = 2
         self.strength_score = 0
         self.magic_score = 1
+        self.victory_score = 0
         self.is_first = False
         self.shadow_count = 0
         self.holy_count = 0
         self.soldier_count = 0
         self.worker_count = 0
+        self.effects = {
+            "roll_phase": [],
+            "harvest_phase": [],
+            "action_phase": []
+        }
 
     @classmethod
     def from_dict(cls, data):
@@ -59,25 +66,37 @@ class Player:
         player.gold_score = data['gold_score']
         player.strength_score = data['strength_score']
         player.magic_score = data['magic_score']
+        player.victory_score = data['victory_score']
         player.is_first = data['is_first']
         player.shadow_count = data['shadow_count']
         player.holy_count = data['holy_count']
         player.soldier_count = data['soldier_count']
         player.worker_count = data['worker_count']
+        player.effects = data['effects']
         return player
 
     def calc_roles(self):
+        shadow_count = 0
+        holy_count = 0
+        soldier_count = 0
+        worker_count = 0
         for citizen in self.owned_citizens:
-            self.shadow_count = self.shadow_count + citizen.shadow_count
-            self.holy_count = self.holy_count + citizen.holy_count
-            self.soldier_count = self.soldier_count + citizen.soldier_count
-            self.worker_count = self.worker_count + citizen.worker_count
+            shadow_count = shadow_count + citizen.shadow_count
+            holy_count = holy_count + citizen.holy_count
+            soldier_count = soldier_count + citizen.soldier_count
+            worker_count = worker_count + citizen.worker_count
         for domain in self.owned_domains:
-            self.shadow_count = self.shadow_count + domain.shadow_count
-            self.holy_count = self.holy_count + domain.holy_count
-            self.soldier_count = self.soldier_count + domain.soldier_count
-            self.worker_count = self.worker_count + domain.worker_count
-
+            shadow_count = shadow_count + domain.shadow_count
+            holy_count = holy_count + domain.holy_count
+            soldier_count = soldier_count + domain.soldier_count
+            worker_count = worker_count + domain.worker_count
+        roles_dict = {
+            "shadow_count": shadow_count,
+            "holy_count": holy_count,
+            "soldier_count": soldier_count,
+            "worker_count": worker_count
+        }
+        return roles_dict
 
 class Starter(Card):
     def __init__(self, starter_id, name, roll_match1, roll_match2, gold_payout_on_turn, gold_payout_off_turn,
@@ -159,6 +178,8 @@ class Citizen(Card):
         self.special_citizen = special_citizen
         self.expansion = expansion
 
+    def get_special_payout_on_turn(self):
+        return self.special_payout_on_turn
     def to_dict(self):
         base_dict = super().to_dict()
         return {**base_dict,
@@ -419,21 +440,36 @@ class Game:
         self.die_two = game_state['die_two']
         self.die_sum = game_state['die_sum']
         self.exhausted_count = game_state['exhausted_count']
+        self.effects = game_state['effects']
+        self.action_required = game_state['action_required']
 
     def roll_phase(self):
         self.die_one = random.randint(1, 6)
         self.die_two = random.randint(1, 6)
         self.die_sum = self.die_one + self.die_two
         print(f"{self.die_one} | {self.die_two} | {self.die_sum}")
+        # check for player effects that are able to change roll
+        # check for board effects that trigger from rolls
+
+    def harvest_phase(self):
+        # steal activates first
         for citizen in self.player_list[0].owned_citizens:
             if (citizen.roll_match1 == self.die_one) or (citizen.roll_match1 == self.die_two) or (
                     citizen.roll_match1 == self.die_sum) or (citizen.roll_match2 == self.die_sum):
+                count = 1
+                if self.die_one == self.die_two:
+                    count = 2
                 print(f"{citizen.name} Payout")
-                self.player_list[0].gold_score = self.player_list[0].gold_score + citizen.gold_payout_on_turn
-                self.player_list[0].strength_score = self.player_list[
-                                                         0].strength_score + citizen.strength_payout_on_turn
-                self.player_list[0].magic_score = self.player_list[0].magic_score + citizen.magic_payout_on_turn
-        list_iterator = iter(self.player_list)
+                for i in range(count):
+                    self.player_list[0].gold_score = self.player_list[0].gold_score + citizen.gold_payout_on_turn
+                    self.player_list[0].strength_score = self.player_list[
+                                                             0].strength_score + citizen.strength_payout_on_turn
+                    self.player_list[0].magic_score = self.player_list[0].magic_score + citizen.magic_payout_on_turn
+                    if citizen.has_special_payout_on_turn:
+                        payout = self.execute_special_payout(citizen.special_payout_on_turn(),
+                                                             self.player_list[0].player_id)
+
+        list_iterator = iter(self.player_list)  # skip first player when paying out the rest of the board
         next(list_iterator)
         for player in list_iterator:
             for citizen in player.owned_citizens:
@@ -444,12 +480,165 @@ class Game:
                     player.strength_score = player.strength_score + citizen.strength_payout_off_turn
                     player.magic_score = player.magic_score + citizen.magic_payout_off_turn
 
+    def execute_special_payout(self, command, player_id):
+        payout = [0, 0, 0, 0]  # gp, sp, mp, vp, todo: citizen, monster, domain
+        split_command = command.split()
+        first_word = split_command[0]
+        second_word = split_command[1]
+        third_word = split_command[2]
+        fourth_word = split_command[3]
+        fifth_word = split_command[4]
+        match first_word:
+            case "count":
+                match second_word:
+                    case "owned_shadow":
+                        self.update_payout_for_role('shadow_count', player_id, payout, split_command)
+                    case "owned_holy":
+                        self.update_payout_for_role('holy_count', player_id, payout, split_command)
+                    case "owned_soldier":
+                        self.update_payout_for_role('soldier_count', player_id, payout, split_command)
+                    case "owned_worker":
+                        self.update_payout_for_role('worker_count', player_id, payout, split_command)
+                    case "owned_monsters":
+                        self.update_payout_for_role('owned_monsters', player_id, payout, split_command)
+                    case "owned_citizens":
+                        self.update_payout_for_role('owned_citizens', player_id, payout, split_command)
+                    case "owned_domains":
+                        self.update_payout_for_role('owned_domains', player_id, payout, split_command)
+                    case _:
+                        payout[0] = -9999
+            case "exchange":
+                match second_word:
+                    case 'g':
+                        payout[0] = payout[0] - third_word
+                    case 's':
+                        payout[1] = payout[1] - third_word
+                    case 'm':
+                        payout[2] = payout[2] - third_word
+                    case 'v':
+                        payout[3] = payout[3] - third_word
+                    case _:
+                        payout[0] = -9999
+                match fourth_word:
+                    case 'g':
+                        payout[0] = payout[0] + fifth_word
+                    case 's':
+                        payout[1] = payout[1] + fifth_word
+                    case 'm':
+                        payout[2] = payout[2] + fifth_word
+                    case 'v':
+                        payout[3] = payout[3] + fifth_word
+                    case _:
+                        payout[0] = -9999
+            case "choose":
+                # need to pause execution here until we get player input
+                self.action_required['player_id'] = player_id
+                self.action_required['action'] = command
+                while self.action_required['player_id'] != self.game_id:
+                    time.sleep(1)
+                choice = []
+                match self.action_required['action']:
+                    case 'choose left':
+                        choice = [second_word, third_word]
+                    case 'choose right':
+                        choice = [fourth_word, fifth_word]
+                    case _:
+                        payout[0] = -9999
+                match choice[0]:
+                    case 'g':
+                        payout[0] = payout[0] + choice[1]
+                    case 's':
+                        payout[1] = payout[1] + choice[1]
+                    case 'm':
+                        payout[2] = payout[2] + choice[1]
+                    case 'v':
+                        payout[3] = payout[3] + choice[1]
+                    case _:
+                        payout[0] = -9999
+            case _:
+                payout[0] = -9999
+        return payout
+
+    def update_payout_for_role(self, role_name, player_id, payout, split_command):
+        role_count = 0
+        for player in self.player_list:
+            if player.player_id == player_id:
+                role_count = player.calc_roles()[role_name]
+                break
+        if role_count > 0:
+            match split_command[2]:
+                case 'g':
+                    payout[0] = split_command[3] * role_count
+                case 's':
+                    payout[1] = split_command[3] * role_count
+                case 'm':
+                    payout[2] = split_command[3] * role_count
+                case 'v':
+                    payout[3] = split_command[3] * role_count
+                case _:
+                    payout[0] = -9999
+        else:
+            payout[0] = -9999
+
+    def hire_citizen(self, citizen_id, gp, mp=0):
+        available_citizens = []
+        for citizen_stack in self.citizen_grid:
+            for citizen in citizen_stack:
+                if citizen.citizen_id == citizen_id and citizen.is_accessible:
+                    self.player_list[0].gold_score = self.player_list[0].gold_score - gp
+                    self.player_list[0].magic_score = self.player_list[0].magic_score - mp
+                    self.player_list[0].owned_citizens.append(citizen_stack.pop(-1))
+                    citizen_stack[-1].toggle_accessibility(True)
+
+    def action_phase(self):
+        return
+
     def play_turn(self):
         self.roll_phase()
+        self.harvest_phase()
+        self.action_phase()
 
     def end_check(self):
         if self.exhausted_count <= (len(self.player_list) * 2):
             return False
+
+    def prompt(self):
+        return
+
+
+class SummaryEncoder(JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Player):
+            return {
+                'player_id': obj.player_id,
+                'name': obj.name,
+                'owned_citizens': len(obj.owned_citizens),
+                'owned_domains': len(obj.owned_domains),
+                'owned_monsters': len(obj.owned_monsters),
+                'gold_score': obj.gold_score,
+                'strength_score': obj.strength_score,
+                'magic_score': obj.magic_score,
+                'victory_score': obj.victory_score,
+                'is_first': obj.is_first
+            }
+        elif isinstance(obj, LobbyMember):
+            return {
+                "player_name": obj.name,
+                "player_id": obj.player_id,
+                "is_ready": obj.is_ready
+            }
+        elif isinstance(obj, GameMember):
+            return {
+                "player_name": obj.name,
+                "player_id": obj.player_id
+            }
+        elif isinstance(obj, Game):
+            return {
+                "game_id": obj.game_id,
+                "player_list": obj.player_list
+            }
+        else:
+            return super().default(obj)
 
 
 class GameObjectEncoder(JSONEncoder):
@@ -466,11 +655,13 @@ class GameObjectEncoder(JSONEncoder):
                 'gold_score': obj.gold_score,
                 'strength_score': obj.strength_score,
                 'magic_score': obj.magic_score,
+                'victory_score': obj.victory_score,
                 'is_first': obj.is_first,
                 'shadow_count': obj.shadow_count,
                 'holy_count': obj.holy_count,
                 'soldier_count': obj.soldier_count,
-                'worker_count': obj.worker_count
+                'worker_count': obj.worker_count,
+                'effects': obj.effects
             }
         elif isinstance(obj, Duke):
             return obj.to_dict()
@@ -492,7 +683,9 @@ class GameObjectEncoder(JSONEncoder):
                 "die_one": obj.die_one,
                 "die_two": obj.die_two,
                 "die_sum": obj.die_sum,
-                "exhausted_count": obj.exhausted_count
+                "exhausted_count": obj.exhausted_count,
+                "effects": obj.effects,
+                "action_required": obj.action_required
             }
         else:
             return super().default(obj)
@@ -528,3 +721,18 @@ def receive_data(conn):
         data += chunk
 
     return data
+
+
+class LobbyMember:
+    def __init__(self, player_name, player_id):
+        self.name = player_name
+        self.player_id = player_id
+        self.is_ready = False
+        self.last_active_time = 0
+
+
+class GameMember:
+    def __init__(self, player_id, player_name, game_id):
+        self.name = player_name
+        self.player_id = player_id
+        self.game_id = game_id

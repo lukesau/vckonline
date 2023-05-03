@@ -299,6 +299,8 @@ def connection_check():
         response = send("connection_check")
         if response == "received":
             return True
+        else:
+            return False
     except ConnectionRefusedError:
         return False
     except BrokenPipeError:

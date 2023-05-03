@@ -8,7 +8,7 @@ import mariadb
 
 class ServerVCKO:
     def __init__(self):
-        self.host = socket.gethostname()
+        self.host = socket.gethostbyname(socket.gethostname())
         self.server_socket = socket.socket()
         self.server_socket.bind((self.host, Constants.port))
         self.game_dict = {}
@@ -39,11 +39,21 @@ class ServerVCKO:
                     case "connection_check":
                         connected = False
                         send_data(conn, "received".encode(Constants.encoding))
+                    case "server":
+                        connected = False
+                        response_dict = {
+                            "threads": threading.active_count(),
+                            "lobby": self.lobby,
+                            "game_count": len(self.game_dict),
+                            "games": self.game_dict
+                        }
+                        lobby_state = json.dumps(response_dict, cls=SummaryEncoder, indent=2)
+                        send_data(conn, lobby_state.encode(Constants.encoding))
                     case "lobby":
                         connected = False
                         if full_command[1] == "join" and len(full_command) > 2:
                             joining_player_name = ' '.join(full_command[2:])
-                            joining_player_id = shortuuid.uuid()
+                            joining_player_id = str(shortuuid.uuid())
                             joining_player = LobbyMember(joining_player_name, joining_player_id)
                             self.lobby.append(joining_player)
                             message = f"lobby joined {joining_player_id}"
@@ -128,7 +138,7 @@ class ServerVCKO:
 
     def start(self):
         self.server_socket.listen()
-        print(f"server is listening on {socket.gethostbyname(self.host)}")
+        print(f"server is listening on {socket.gethostbyname(socket.gethostname())}")
         while True:
             conn, addr = self.server_socket.accept()
             thread = threading.Thread(target=self.handle_client, args=(conn, addr))
@@ -157,20 +167,6 @@ class ServerVCKO:
         send_data(conn, response.encode(Constants.encoding))
 
 
-class LobbyMember:
-    def __init__(self, player_name, player_id):
-        self.name = player_name
-        self.player_id = player_id
-        self.is_ready = False
-
-
-class GameMember:
-    def __init__(self, player_id, player_name, game_id):
-        self.name = player_name
-        self.player_id = player_id
-        self.game_id = game_id
-
-
 def load_game_data(game_id, preset, player_list_from_lobby):
     monster_query = ""
     monster_stack = []
@@ -186,11 +182,19 @@ def load_game_data(game_id, preset, player_list_from_lobby):
     citizen_grid: List[List[Citizen]] = [[] for _ in range(10)]
     domain_grid: List[List[Domain]] = [[] for _ in range(5)]
     monster_grid: List[List[Monster]] = [[] for _ in range(5)]
-    graveyard = []
     die_one = 0
     die_two = 0
     die_sum = 0
     exhausted_count = 0
+    effects = {
+        "roll_phase": [],
+        "harvest_phase": [],
+        "action_phase": []
+    }
+    action_required = {
+        "player_id": "",
+        "action": ""
+    }
     match preset:
         case "base1":
             monster_query = "select_base1_monsters"
@@ -341,7 +345,9 @@ def load_game_data(game_id, preset, player_list_from_lobby):
                   'die_one': die_one,
                   'die_two': die_two,
                   'die_sum': die_sum,
-                  'exhausted_count': exhausted_count}
+                  'exhausted_count': exhausted_count,
+                  'effects': effects,
+                  'action_required': action_required}
 
     # Return the dictionary
     return game_state
