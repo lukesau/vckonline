@@ -14,7 +14,6 @@ class ClientVCKO(wx.App):
         self.game_id = ""
         self.game = None
         self.debug_frame = DebugFrame(self)
-        self.start_frame = StartFrame(self)
         self.lobby_frame = LobbyFrame(self)
         self.game_frame = GameFrame(self)
         self.last_lobby_state = ""
@@ -34,7 +33,6 @@ class ClientVCKO(wx.App):
                 if full_command[1] == "joined" and len(full_command) == 3:
                     self.player_id = full_command[2]
                     self.in_lobby = True
-                    self.start_frame.enter_lobby(None)
                 elif full_command[1] == "state":
                     json_response = ' '.join(full_command[2:])
                     new_lobby_state = json.loads(json_response)
@@ -114,23 +112,55 @@ class LobbyFrame(wx.Frame):
     def __init__(self, app):
         super().__init__(parent=None, title='VCK Online Lobby', size=Constants.medium_window_size)
         self.app = app
+
+        self.timer_interval = 500
+        self.timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.get_lobby_status, self.timer)
+        self.timer.Start(self.timer_interval)
+
         self.panel = wx.Panel(self)
         self.vertical_sizer = wx.BoxSizer(wx.VERTICAL)
+
+        splitter = wx.SplitterWindow(self.panel)
+
+        left_panel = wx.Panel(splitter)
+        left_sizer = wx.BoxSizer(wx.VERTICAL)
+        text = wx.StaticText(left_panel, label='Enter name:')
+        self.name_field = wx.TextCtrl(left_panel, style=wx.TE_PROCESS_ENTER, value='')
+        submit_button = wx.Button(left_panel, label='Submit')
+        submit_button.Bind(wx.EVT_BUTTON, self.on_submit)
+        self.name_field.Bind(wx.EVT_TEXT_ENTER, self.on_text_enter)
+        left_sizer.Add(text, 0, wx.ALL, 5)
+        left_sizer.Add(self.name_field, 0, wx.EXPAND | wx.ALL, 5)
+        left_sizer.Add(submit_button, 0, wx.ALL | wx.CENTER, 5)
+        left_panel.SetSizer(left_sizer)
+
         self.last_lobby_state = []
         self.current_player_index = None
+
         # Create the list control and columns
-        self.list_ctrl = wx.ListCtrl(self.panel, style=wx.LC_REPORT)
+        right_panel = wx.Panel(splitter)
+        self.list_ctrl = wx.ListCtrl(right_panel, style=wx.LC_REPORT)
         self.list_ctrl.InsertColumn(0, "Player Name")
         self.list_ctrl.InsertColumn(1, "Ready Status", format=wx.LIST_FORMAT_RIGHT)
         self.get_lobby_status()
         # Create the ready button
-        ready_button = wx.Button(self.panel, label="Ready Up")
+        ready_button = wx.Button(right_panel, label="Ready Up")
         ready_button.Bind(wx.EVT_BUTTON, self.on_ready_up)
         self.list_ctrl.Bind(wx.EVT_LIST_ITEM_SELECTED, self.highlight_current_player)
         # Add the list control and ready button to the vertical sizer
-        self.vertical_sizer.Add(self.list_ctrl, 1, wx.ALL | wx.EXPAND, 5)
-        self.vertical_sizer.Add(ready_button, 0, wx.ALL | wx.CENTER, 5)
+        right_sizer = wx.BoxSizer(wx.VERTICAL)
+        right_sizer.Add(self.list_ctrl, 1, wx.ALL | wx.EXPAND, 5)
+        right_sizer.Add(ready_button, 0, wx.ALL | wx.CENTER, 5)
+        right_panel.SetSizer(right_sizer)
+
+        splitter.SplitVertically(left_panel, right_panel)
+        splitter.SetMinimumPaneSize(250)
+        splitter.SetSashGravity(0.0)
+
+        self.vertical_sizer.Add(splitter, 1, wx.EXPAND)
         self.panel.SetSizer(self.vertical_sizer)
+
         self.SetMinSize(Constants.small_window_size)
 
         # Bind the size event to adjust the column widths
@@ -141,6 +171,7 @@ class LobbyFrame(wx.Frame):
         self.timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.get_lobby_status, self.timer)
         self.timer.Start(self.timer_interval)
+        self.Show()
 
     def on_size(self, event):
         # Calculate the width of each column based on the width of the list control
@@ -150,8 +181,35 @@ class LobbyFrame(wx.Frame):
         self.list_ctrl.SetColumnWidth(1, col_width)
         event.Skip()
 
+    def on_submit(self, event):
+        name = self.name_field.GetValue()
+        if not name:
+            print("You didn't enter anything!")
+        else:
+            # Check if the player has already joined the lobby
+            player_exists = False
+            for player in self.last_lobby_state:
+                if player['player_id'] == self.app.player_id:
+                    player_exists = True
+                    break
+            if player_exists:
+                # If the player already exists, rename them
+                self.app.parse_response(send(f"lobby rename {self.app.player_id} {name}"))
+            else:
+                # If the player doesn't exist, join the lobby
+                self.app.parse_response(send(f"lobby join {name}"))
+            self.name_field.SetValue("")
+
+    def on_text_enter(self, event):
+        self.on_submit(event)
+
+    def api_call(self, message):
+        if connection_check():
+            self.app.parse_response(send(message))
+            self.name_field.SetValue("")
+
     def get_lobby_status(self, event=None):
-        if self.app.in_lobby and connection_check():
+        if connection_check():
             self.app.parse_response(send(f"lobby get_status {self.app.player_id}"))
             if self.app.lobby == self.last_lobby_state:
                 # If the current lobby state is the same as the last one, don't update the list control
@@ -195,49 +253,6 @@ class LobbyFrame(wx.Frame):
     def on_close(self, event):
         self.app.parse_response(send(f"lobby leave {self.app.player_id}"))
         self.Destroy()
-
-
-class StartFrame(wx.Frame):
-    def __init__(self, parent):
-        super().__init__(parent=None, title='Enter Name', size=Constants.small_window_size)
-        self.panel = wx.Panel(self)
-        self.app = parent
-        # Create text field with suggestion text
-        text = wx.StaticText(self.panel, label='Enter name:')
-        self.name_field = wx.TextCtrl(self.panel, style=wx.TE_PROCESS_ENTER, value='')
-
-        # Create submit button
-        submit_button = wx.Button(self.panel, label='Submit')
-        submit_button.Bind(wx.EVT_BUTTON, self.on_submit)
-        self.name_field.Bind(wx.EVT_TEXT_ENTER, self.on_text_enter)
-
-        # Add text field and submit button to vertical sizer
-        vertical_sizer = wx.BoxSizer(wx.VERTICAL)
-        vertical_sizer.Add(text, 0, wx.ALL, 5)
-        vertical_sizer.Add(self.name_field, 0, wx.EXPAND | wx.ALL, 5)
-        vertical_sizer.Add(submit_button, 0, wx.ALL | wx.CENTER, 5)
-
-        self.panel.SetSizer(vertical_sizer)
-        self.Show()
-
-    def on_submit(self, event):
-        message = self.name_field.GetValue()
-        if not message:
-            print("You didn't enter anything!")
-        else:
-            self.api_call(f"lobby join {message}")
-
-    def on_text_enter(self, event):
-        self.on_submit(event)
-
-    def enter_lobby(self, event):
-        self.app.lobby_frame.Show()
-        self.Hide()
-
-    def api_call(self, message):
-        if connection_check():
-            self.app.parse_response(send(message))
-            self.name_field.SetValue("")
 
 
 class DebugFrame(wx.Frame):

@@ -7,7 +7,7 @@ class Constants:
     port = 8328
     text_format = "utf-8"
     small_window_size = (300, 150)
-    medium_window_size = (300, 500)
+    medium_window_size = (600, 400)
     large_window_size = (1440, 900)
     header_size = 512
     buffer_size = 4096

@@ -601,7 +601,7 @@ class Game:
                     case 'choose 1':
                         choice = [second_word, third_word]
                     case 'choose 2':
-                        choice = [fourth_word, fifth_word]
+                        choice = [fourth_word, split_command[4]]
                     case 'choose 3':
                         choice = [split_command[5], split_command[6]]  # [sixth_word, seventh_word]
                     case _:
@@ -675,6 +675,7 @@ class Game:
                             player.magic_score = player.magic_score - mp
                             player.owned_domains.append(domain_stack.pop(-1))
                     domain_stack[-1].toggle_accessibility(True)
+
     def action_phase(self):
         return
 

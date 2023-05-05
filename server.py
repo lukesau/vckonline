@@ -58,6 +58,14 @@ class ServerVCKO:
                             self.lobby.append(joining_player)
                             message = f"lobby joined {joining_player_id}"
                             send_data(conn, message.encode(Constants.encoding))
+                        elif full_command[1] == "rename" and len(full_command) > 3:
+                            for player in self.lobby:
+                                if player.player_id == full_command[2]:
+                                    player.name = ' '.join(full_command[3:])
+                                    message = f"lobby renamed {player.player_id}"
+                                    send_data(conn, message.encode(Constants.encoding))
+                                else:
+                                    send_data(conn, "invalid message".encode(Constants.encoding))
                         elif full_command[1] == "leave" and len(full_command) > 2:
                             temp_lobby = []
                             for player in self.lobby:
@@ -65,22 +73,19 @@ class ServerVCKO:
                                     temp_lobby.append(player)
                             self.lobby = temp_lobby
                             self.send_lobby_state(conn)
-                        elif full_command[1] == "get_status" and len(full_command) == 3:
+                        elif full_command[1] == "get_status" and len(full_command) >= 2:
                             found = False
-                            for player in self.lobby:
-                                if full_command[2] == player.player_id:
-                                    player.last_active_time = time.time()  # update last active time
-                                    self.send_lobby_state(conn)
-                                    found = True
-                            for player in self.gamers:
-                                if full_command[2] == player.player_id:
-                                    message = f"game joined {player.game_id}"
-                                    send_data(conn, message.encode(Constants.encoding))
-                                    found = True
-                            # this only runs if we somehow receive an invalid player id
-                            if not found:
-                                message = f"Unable to find any player with player id: {full_command[2]}"
-                                send_data(conn, message.encode(Constants.encoding))
+                            if len(full_command) == 3:
+                                for player in self.lobby:
+                                    if full_command[2] == player.player_id:
+                                        player.last_active_time = time.time()  # update last active time
+                                        self.send_lobby_state(conn)
+                                for player in self.gamers:
+                                    if full_command[2] == player.player_id:
+                                        message = f"game joined {player.game_id}"
+                                        send_data(conn, message.encode(Constants.encoding))
+                            else:
+                                self.send_lobby_state(conn)
                         elif full_command[1] == "ready" and len(full_command) > 2:
                             ready_check = 0
                             for player in self.lobby:
