@@ -40,6 +40,7 @@ __pycache__/
 
 # Distribution / packaging
 gamestate.txt
+game_state.txt
 python3-vckonline/
 .idea/
 .Python

@@ -1,11 +1,34 @@
 from common import *
 from server import load_game_data
-player1 = Player(shortuuid.uuid(), "Player 1")
-player2 = Player(shortuuid.uuid(), "Player 2")
+player1_id = shortuuid.uuid()
+player2_id = shortuuid.uuid()
+player1 = Player(player1_id, "Player 1")
+player2 = Player(player2_id, "Player 2")
 player_list = [player1, player2]
-base1_new_game_state = load_game_data(str(uuid.uuid4()), "base1", player_list)
-game_board = Game(base1_new_game_state)
-game_board.play_turn()
-game_json = json.dumps(game_board, cls=GameObjectEncoder, indent=2)
-with open("gamestate.txt", "w") as dump:
-    dump.write(game_json)
+try:
+    base1_new_game_state = load_game_data(str(uuid.uuid4()), "base1", player_list)
+    game = Game(base1_new_game_state)
+    game.hire_citizen(player1_id, 1, 0, 0)
+    game.hire_citizen(player1_id, 3, 0, 0)
+    game.hire_citizen(player1_id, 4, 0, 0)
+    game.hire_citizen(player1_id, 5, 0, 0)
+    game.hire_citizen(player1_id, 6, 0, 0)
+    game.hire_citizen(player1_id, 7, 0, 0)
+    game.hire_citizen(player1_id, 8, 0, 0)
+    game.hire_citizen(player1_id, 9, 0, 0)
+    game.hire_citizen(player1_id, 10, 0, 0)
+    game.hire_citizen(player2_id, 1, 0, 0)
+    game.hire_citizen(player2_id, 3, 0, 0)
+    game.hire_citizen(player2_id, 4, 0, 0)
+    game.hire_citizen(player2_id, 5, 0, 0)
+    game.hire_citizen(player2_id, 6, 0, 0)
+    game.hire_citizen(player2_id, 7, 0, 0)
+    game.hire_citizen(player2_id, 8, 0, 0)
+    game.hire_citizen(player2_id, 9, 0, 0)
+    game.hire_citizen(player2_id, 10, 0, 0)
+    game.play_turn()
+    game_json = json.dumps(game, cls=GameObjectEncoder, indent=2)
+    with open("game_state.txt", "w") as dump:
+        dump.write(game_json)
+except ValueError:
+    print("Error: Failed to load game data")

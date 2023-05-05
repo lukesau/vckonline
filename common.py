@@ -1,7 +1,6 @@
 import json
 import time
 from json import JSONEncoder, JSONDecoder
-import mysql.connector
 import random
 from typing import List, Dict
 from constants import *
@@ -98,6 +97,7 @@ class Player:
         }
         return roles_dict
 
+
 class Starter(Card):
     def __init__(self, starter_id, name, roll_match1, roll_match2, gold_payout_on_turn, gold_payout_off_turn,
                  strength_payout_on_turn, strength_payout_off_turn, magic_payout_on_turn, magic_payout_off_turn,
@@ -106,36 +106,36 @@ class Starter(Card):
         super().__init__()
         self.starter_id = starter_id
         self.name = name
-        self.rollMatch1 = roll_match1
-        self.rollMatch2 = roll_match2
-        self.goldPayoutOnTurn = gold_payout_on_turn
-        self.goldPayoutOffTurn = gold_payout_off_turn
-        self.strengthPayoutOnTurn = strength_payout_on_turn
-        self.strengthPayoutOffTurn = strength_payout_off_turn
-        self.magicPayoutOnTurn = magic_payout_on_turn
-        self.magicPayoutOffTurn = magic_payout_off_turn
-        self.hasSpecialPayoutOnTurn = has_special_payout_on_turn
-        self.hasSpecialPayoutOffTurn = has_special_payout_off_turn
-        self.specialPayoutOnTurn = special_payout_on_turn
-        self.specialPayoutOffTurn = special_payout_off_turn
+        self.roll_match1 = roll_match1
+        self.roll_match2 = roll_match2
+        self.gold_payout_on_turn = gold_payout_on_turn
+        self.gold_payout_off_turn = gold_payout_off_turn
+        self.strength_payout_on_turn = strength_payout_on_turn
+        self.strength_payout_off_turn = strength_payout_off_turn
+        self.magic_payout_on_turn = magic_payout_on_turn
+        self.magic_payout_off_turn = magic_payout_off_turn
+        self.has_special_payout_on_turn = has_special_payout_on_turn
+        self.has_special_payout_off_turn = has_special_payout_off_turn
+        self.special_payout_on_turn = special_payout_on_turn
+        self.special_payout_off_turn = special_payout_off_turn
         self.expansion = expansion
 
     def to_dict(self):
         return {
             "starter_id": self.starter_id,
             "name": self.name,
-            "roll_match1": self.rollMatch1,
-            "roll_match2": self.rollMatch2,
-            "gold_payout_on_turn": self.goldPayoutOnTurn,
-            "gold_payout_off_turn": self.goldPayoutOffTurn,
-            "strength_payout_on_turn": self.strengthPayoutOnTurn,
-            "strength_payout_off_turn": self.strengthPayoutOffTurn,
-            "magic_payout_on_turn": self.magicPayoutOnTurn,
-            "magic_payout_off_turn": self.magicPayoutOffTurn,
-            "has_special_payout_on_turn": self.hasSpecialPayoutOnTurn,
-            "has_special_payout_off_turn": self.hasSpecialPayoutOffTurn,
-            "special_payout_on_turn": self.specialPayoutOnTurn,
-            "special_payout_off_turn": self.specialPayoutOffTurn,
+            "roll_match1": self.roll_match1,
+            "roll_match2": self.roll_match2,
+            "gold_payout_on_turn": self.gold_payout_on_turn,
+            "gold_payout_off_turn": self.gold_payout_off_turn,
+            "strength_payout_on_turn": self.strength_payout_on_turn,
+            "strength_payout_off_turn": self.strength_payout_off_turn,
+            "magic_payout_on_turn": self.magic_payout_on_turn,
+            "magic_payout_off_turn": self.magic_payout_off_turn,
+            "has_special_payout_on_turn": self.has_special_payout_on_turn,
+            "has_special_payout_off_turn": self.has_special_payout_off_turn,
+            "special_payout_on_turn": self.special_payout_on_turn,
+            "special_payout_off_turn": self.special_payout_off_turn,
             "expansion": self.expansion
         }
 
@@ -180,6 +180,7 @@ class Citizen(Card):
 
     def get_special_payout_on_turn(self):
         return self.special_payout_on_turn
+
     def to_dict(self):
         base_dict = super().to_dict()
         return {**base_dict,
@@ -453,43 +454,99 @@ class Game:
 
     def harvest_phase(self):
         # steal activates first
+        for starter in self.player_list[0].owned_starters:
+            if (starter.roll_match1 == self.die_one) or (starter.roll_match1 == self.die_two) or (
+                    starter.roll_match1 == self.die_sum) or (starter.roll_match2 == self.die_sum):
+                count = 1
+                if starter.roll_match1 == self.die_one == self.die_two:
+                    count = 2
+                print(f"Payout for {self.player_list[0].name}: Starter {starter.name}{' x2' if count == 2 else ''}")
+                for i in range(count):
+                    self.player_list[0].gold_score = self.player_list[0].gold_score + starter.gold_payout_on_turn
+                    self.player_list[0].strength_score = self.player_list[
+                                                             0].strength_score + starter.strength_payout_on_turn
+                    self.player_list[0].magic_score = self.player_list[0].magic_score + starter.magic_payout_on_turn
+                    if starter.has_special_payout_on_turn:
+                        payout = self.execute_special_payout(starter.special_payout_on_turn,
+                                                             self.player_list[0].player_id)
+                        self.player_list[0].gold_score = self.player_list[0].gold_score + payout[0]
+                        self.player_list[0].strength_score = self.player_list[0].strength_score + payout[1]
+                        self.player_list[0].magic_score = self.player_list[0].magic_score + payout[2]
         for citizen in self.player_list[0].owned_citizens:
             if (citizen.roll_match1 == self.die_one) or (citizen.roll_match1 == self.die_two) or (
                     citizen.roll_match1 == self.die_sum) or (citizen.roll_match2 == self.die_sum):
                 count = 1
-                if self.die_one == self.die_two:
+                if citizen.roll_match1 == self.die_one == self.die_two:
                     count = 2
-                print(f"{citizen.name} Payout")
+                print(f"Payout for {self.player_list[0].name}: Citizen {citizen.name}{' x2' if count == 2 else ''}")
                 for i in range(count):
                     self.player_list[0].gold_score = self.player_list[0].gold_score + citizen.gold_payout_on_turn
                     self.player_list[0].strength_score = self.player_list[
                                                              0].strength_score + citizen.strength_payout_on_turn
                     self.player_list[0].magic_score = self.player_list[0].magic_score + citizen.magic_payout_on_turn
                     if citizen.has_special_payout_on_turn:
-                        payout = self.execute_special_payout(citizen.special_payout_on_turn(),
+                        print(f"Citizen {citizen.name} special payout text: {citizen.special_payout_on_turn}")
+                        payout = self.execute_special_payout(citizen.special_payout_on_turn,
                                                              self.player_list[0].player_id)
+                        print(f"right after running execute special payout {payout}")
+                        self.player_list[0].gold_score = self.player_list[0].gold_score + payout[0]
+                        self.player_list[0].strength_score = self.player_list[0].strength_score + payout[1]
+                        self.player_list[0].magic_score = self.player_list[0].magic_score + payout[2]
 
         list_iterator = iter(self.player_list)  # skip first player when paying out the rest of the board
         next(list_iterator)
         for player in list_iterator:
+            for starter in player.owned_starters:
+                if (starter.roll_match1 == self.die_one) or (starter.roll_match1 == self.die_two) or (
+                        starter.roll_match1 == self.die_sum) or (starter.roll_match2 == self.die_sum):
+                    count = 1
+                    if starter.roll_match1 == self.die_one == self.die_two:
+                        count = 2
+                    print(f"Payout for {player.name}: Starter {starter.name}{' x2' if count == 2 else ''}")
+                    for i in range(count):
+                        player.gold_score = player.gold_score + starter.gold_payout_off_turn
+                        player.strength_score = player.strength_score + starter.strength_payout_off_turn
+                        player.magic_score = player.magic_score + starter.magic_payout_off_turn
+                        if starter.has_special_payout_off_turn:
+                            payout = self.execute_special_payout(starter.special_payout_off_turn, player.player_id)
+                            player.gold_score = player.gold_score + payout[0]
+                            player.strength_score = player.strength_score + payout[1]
+                            player.magic_score = player.magic_score + payout[2]
+
             for citizen in player.owned_citizens:
                 if (citizen.roll_match1 == self.die_one) or (citizen.roll_match1 == self.die_two) or (
                         citizen.roll_match1 == self.die_sum) or (citizen.roll_match2 == self.die_sum):
-                    print(f"{citizen.name} Payout")
-                    player.gold_score = player.gold_score + citizen.gold_payout_off_turn
-                    player.strength_score = player.strength_score + citizen.strength_payout_off_turn
-                    player.magic_score = player.magic_score + citizen.magic_payout_off_turn
+                    count = 1
+                    if citizen.roll_match1 == self.die_one == self.die_two:
+                        count = 2
+                    print(f"Payout for {player.name}: Citizen {citizen.name}{' x2' if count == 2 else ''}")
+                    for i in range(count):
+                        player.gold_score = player.gold_score + citizen.gold_payout_off_turn
+                        player.strength_score = player.strength_score + citizen.strength_payout_off_turn
+                        player.magic_score = player.magic_score + citizen.magic_payout_off_turn
+                        if citizen.has_special_payout_off_turn:
+                            print("special payout off turn triggered")
+                            print(citizen.special_payout_off_turn)
+                            payout = self.execute_special_payout(citizen.special_payout_off_turn, player.player_id)
+                            player.gold_score = player.gold_score + payout[0]
+                            player.strength_score = player.strength_score + payout[1]
+                            player.magic_score = player.magic_score + payout[2]
+        for player in self.player_list:
+            print(f"Player {player.name}: {player.gold_score} G, {player.strength_score} S, {player.magic_score} M,"
+                  f" {player.victory_score} VP, Monsters: {len(player.owned_monsters)}, "
+                  f"Citizens: {len(player.owned_citizens)}, Domains {len(player.owned_domains)}")
 
     def execute_special_payout(self, command, player_id):
+        print("executing special payout")
         payout = [0, 0, 0, 0]  # gp, sp, mp, vp, todo: citizen, monster, domain
         split_command = command.split()
         first_word = split_command[0]
         second_word = split_command[1]
         third_word = split_command[2]
         fourth_word = split_command[3]
-        fifth_word = split_command[4]
         match first_word:
             case "count":
+                print("Matched count")
                 match second_word:
                     case "owned_shadow":
                         self.update_payout_for_role('shadow_count', player_id, payout, split_command)
@@ -498,6 +555,7 @@ class Game:
                     case "owned_soldier":
                         self.update_payout_for_role('soldier_count', player_id, payout, split_command)
                     case "owned_worker":
+
                         self.update_payout_for_role('worker_count', player_id, payout, split_command)
                     case "owned_monsters":
                         self.update_payout_for_role('owned_monsters', player_id, payout, split_command)
@@ -508,40 +566,44 @@ class Game:
                     case _:
                         payout[0] = -9999
             case "exchange":
+                print("Matched exchange")
                 match second_word:
                     case 'g':
-                        payout[0] = payout[0] - third_word
+                        payout[0] = payout[0] - int(third_word)
                     case 's':
-                        payout[1] = payout[1] - third_word
+                        payout[1] = payout[1] - int(third_word)
                     case 'm':
-                        payout[2] = payout[2] - third_word
+                        payout[2] = payout[2] - int(third_word)
                     case 'v':
-                        payout[3] = payout[3] - third_word
+                        payout[3] = payout[3] - int(third_word)
                     case _:
                         payout[0] = -9999
                 match fourth_word:
                     case 'g':
-                        payout[0] = payout[0] + fifth_word
+                        payout[0] = payout[0] + int(split_command[4])
                     case 's':
-                        payout[1] = payout[1] + fifth_word
+                        payout[1] = payout[1] + int(split_command[4])
                     case 'm':
-                        payout[2] = payout[2] + fifth_word
+                        payout[2] = payout[2] + int(split_command[4])
                     case 'v':
-                        payout[3] = payout[3] + fifth_word
+                        payout[3] = payout[3] + int(split_command[4])
                     case _:
                         payout[0] = -9999
             case "choose":
-                # need to pause execution here until we get player input
+                print("Matched choose")
                 self.action_required['player_id'] = player_id
                 self.action_required['action'] = command
+                # need to pause execution here until we get player input
                 while self.action_required['player_id'] != self.game_id:
                     time.sleep(1)
                 choice = []
                 match self.action_required['action']:
-                    case 'choose left':
+                    case 'choose 1':
                         choice = [second_word, third_word]
-                    case 'choose right':
+                    case 'choose 2':
                         choice = [fourth_word, fifth_word]
+                    case 'choose 3':
+                        choice = [split_command[5], split_command[6]]  # [sixth_word, seventh_word]
                     case _:
                         payout[0] = -9999
                 match choice[0]:
@@ -557,6 +619,7 @@ class Game:
                         payout[0] = -9999
             case _:
                 payout[0] = -9999
+        print(payout)
         return payout
 
     def update_payout_for_role(self, role_name, player_id, payout, split_command):
@@ -568,28 +631,50 @@ class Game:
         if role_count > 0:
             match split_command[2]:
                 case 'g':
-                    payout[0] = split_command[3] * role_count
+                    payout[0] = int(split_command[3]) * role_count
                 case 's':
-                    payout[1] = split_command[3] * role_count
+                    payout[1] = int(split_command[3]) * role_count
                 case 'm':
-                    payout[2] = split_command[3] * role_count
+                    payout[2] = int(split_command[3]) * role_count
                 case 'v':
-                    payout[3] = split_command[3] * role_count
+                    payout[3] = int(split_command[3]) * role_count
                 case _:
                     payout[0] = -9999
         else:
             payout[0] = -9999
 
-    def hire_citizen(self, citizen_id, gp, mp=0):
-        available_citizens = []
+    def hire_citizen(self, player_id, citizen_id, gp, mp=0):
         for citizen_stack in self.citizen_grid:
             for citizen in citizen_stack:
                 if citizen.citizen_id == citizen_id and citizen.is_accessible:
-                    self.player_list[0].gold_score = self.player_list[0].gold_score - gp
-                    self.player_list[0].magic_score = self.player_list[0].magic_score - mp
-                    self.player_list[0].owned_citizens.append(citizen_stack.pop(-1))
+                    for player in self.player_list:
+                        if player.player_id == player_id:
+                            player.gold_score = player.gold_score - gp
+                            player.magic_score = player.magic_score - mp
+                            player.owned_citizens.append(citizen_stack.pop(-1))
                     citizen_stack[-1].toggle_accessibility(True)
 
+    def slay_monster(self, player_id, monster_id, sp, mp=0):
+        for monster_stack in self.monster_grid:
+            for monster in monster_stack:
+                if monster.monster_id == monster_id and monster.is_accessible:
+                    for player in self.player_list:
+                        if player.player_id == player_id:
+                            player.strength_score = player.strength_score - sp
+                            player.magic_score = player.magic_score - mp
+                            player.owned_monsters.append(monster_stack.pop(-1))
+                    monster_stack[-1].toggle_accessibility(True)
+
+    def buy_domain(self, player_id, domain_id, gp, mp=0):
+        for domain_stack in self.domain_grid:
+            for domain in domain_stack:
+                if domain.domain_id == domain_id and domain.is_accessible:
+                    for player in self.player_list:
+                        if player.player_id == player_id:
+                            player.gold_score = player.gold_score - gp
+                            player.magic_score = player.magic_score - mp
+                            player.owned_domains.append(domain_stack.pop(-1))
+                    domain_stack[-1].toggle_accessibility(True)
     def action_phase(self):
         return
 

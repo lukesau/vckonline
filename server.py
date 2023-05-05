@@ -264,93 +264,94 @@ def load_game_data(game_id, preset, player_list_from_lobby):
                                  row['has_special_payout_on_turn'], row['has_special_payout_off_turn'],
                                  row['special_payout_on_turn'], row['special_payout_off_turn'], row['expansion'])
             starter_stack.append(my_starter)
-    except Exception as e:
-        print(f"Error: {e}")
-    finally:
         my_cursor.close()
         my_connect.close()
-    print(f"size of monster stack: {len(monster_stack)}")
-    print(f"size of citizen stack: {len(citizen_stack)}")
-    print(f"size of domain stack: {len(domain_stack)}")
-    print(f"size of duke stack: {len(duke_stack)}")
-    print(f"size of starter stack: {len(starter_stack)}")
+    except Exception as e:
+        print(f"Error: {e}")
+    # print(f"size of monster stack: {len(monster_stack)}")
+    # print(f"size of citizen stack: {len(citizen_stack)}")
+    # print(f"size of domain stack: {len(domain_stack)}")
+    # print(f"size of duke stack: {len(duke_stack)}")
+    # print(f"size of starter stack: {len(starter_stack)}")
     # create players and determine order
-    for player in player_list_from_lobby:
-        my_player = Player(player.player_id, player.name)
-        player_list.append(my_player)
-    random.shuffle(player_list)
-    player_list[0].is_first = True
-    # give players starters and dukes
-    for player in player_list:
-        player.owned_starters.append(starter_stack[0])
-        player.owned_starters.append(starter_stack[1])
-        for i in range(2):
-            player.owned_dukes.append(duke_stack.pop())
-    # deal monsters onto the board
-    grouped_monsters = {}
-    for monster in monster_stack:
-        area = monster.area
-        if area in grouped_monsters:
-            grouped_monsters[area].append(monster)
-        else:
-            grouped_monsters[area] = [monster]
-    # Reverse the order of each group by monster_order
-    for area, monsters in grouped_monsters.items():
-        monsters.sort(key=lambda item: item.order, reverse=True)
-    areas = list(grouped_monsters.keys())
-    chosen_areas = random.sample(areas, 5)
-    for i, area in enumerate(chosen_areas):
-        monsters = grouped_monsters[area]
-        monster_grid[i].extend(monsters)
-    for i, stack in enumerate(monster_grid):
-        for monster in stack:
-            monster.toggle_visibility(True)
-        # Make the last monster in the stack accessible
-        stack[-1].toggle_accessibility(True)
-    monster_stack = []
-    # deal citizens onto the board
-    # Create a dictionary to store citizen lists with roll numbers as keys
-    citizens_by_roll = {roll: [] for roll in [1, 2, 3, 4, 5, 6, 7, 8, 9, 11]}
-    # Group citizens by roll number
-    for citizen in citizen_stack:
-        citizen.toggle_visibility()
-        citizens_by_roll[citizen.roll_match1].append(citizen)
-    for roll in citizens_by_roll:
-        # Map 11 roll to index 9
-        index = roll - 1 if roll < 11 else 9
-        citizens = citizens_by_roll[roll]
-        citizen_grid[index].extend(list(citizens))
-        # Make the first citizen in each list accessible
-        citizen_grid[index][-1].toggle_accessibility(True)
-    citizen_stack = []
-    # Deal the domains into the stacks
-    for i in range(5):
-        stack = domain_grid[i]
-        for j in range(3):
-            if j == 2:  # top domain is visible and accessible
-                domain = domain_stack.pop()
-                domain.toggle_visibility(True)
-                domain.toggle_accessibility(True)
-                stack.append(domain)
-            else:  # other domains are not visible or accessible
-                domain = domain_stack.pop()
-                stack.append(domain)
+    if not all([player_list_from_lobby, starter_query, monster_stack, citizen_stack, domain_stack, duke_stack]):
+        raise ValueError("One or more required lists are empty.")
+    else:
+        for player in player_list_from_lobby:
+            my_player = Player(player.player_id, player.name)
+            player_list.append(my_player)
+        random.shuffle(player_list)
+        player_list[0].is_first = True
+        # give players starters and dukes
+        for player in player_list:
+            player.owned_starters.append(starter_stack[0])
+            player.owned_starters.append(starter_stack[1])
+            for i in range(2):
+                player.owned_dukes.append(duke_stack.pop())
+        # deal monsters onto the board
+        grouped_monsters = {}
+        for monster in monster_stack:
+            area = monster.area
+            if area in grouped_monsters:
+                grouped_monsters[area].append(monster)
+            else:
+                grouped_monsters[area] = [monster]
+        # Reverse the order of each group by monster_order
+        for area, monsters in grouped_monsters.items():
+            monsters.sort(key=lambda item: item.order, reverse=True)
+        areas = list(grouped_monsters.keys())
+        chosen_areas = random.sample(areas, 5)
+        for i, area in enumerate(chosen_areas):
+            monsters = grouped_monsters[area]
+            monster_grid[i].extend(monsters)
+        for i, stack in enumerate(monster_grid):
+            for monster in stack:
+                monster.toggle_visibility(True)
+            # Make the last monster in the stack accessible
+            stack[-1].toggle_accessibility(True)
+        monster_stack = []
+        # deal citizens onto the board
+        # Create a dictionary to store citizen lists with roll numbers as keys
+        citizens_by_roll = {roll: [] for roll in [1, 2, 3, 4, 5, 6, 7, 8, 9, 11]}
+        # Group citizens by roll number
+        for citizen in citizen_stack:
+            citizen.toggle_visibility()
+            citizens_by_roll[citizen.roll_match1].append(citizen)
+        for roll in citizens_by_roll:
+            # Map 11 roll to index 9
+            index = roll - 1 if roll < 11 else 9
+            citizens = citizens_by_roll[roll]
+            citizen_grid[index].extend(list(citizens))
+            # Make the first citizen in each list accessible
+            citizen_grid[index][-1].toggle_accessibility(True)
+        citizen_stack = []
+        # Deal the domains into the stacks
+        for i in range(5):
+            stack = domain_grid[i]
+            for j in range(3):
+                if j == 2:  # top domain is visible and accessible
+                    domain = domain_stack.pop()
+                    domain.toggle_visibility(True)
+                    domain.toggle_accessibility(True)
+                    stack.append(domain)
+                else:  # other domains are not visible or accessible
+                    domain = domain_stack.pop()
+                    stack.append(domain)
 
-    # Create a dictionary to store all the stacks
-    game_state = {'game_id': game_id,
-                  'player_list': player_list,
-                  'monster_grid': monster_grid,
-                  'citizen_grid': citizen_grid,
-                  'domain_grid': domain_grid,
-                  'die_one': die_one,
-                  'die_two': die_two,
-                  'die_sum': die_sum,
-                  'exhausted_count': exhausted_count,
-                  'effects': effects,
-                  'action_required': action_required}
-
+        # Create a dictionary to store all the stacks
+        game_state = {'game_id': game_id,
+                      'player_list': player_list,
+                      'monster_grid': monster_grid,
+                      'citizen_grid': citizen_grid,
+                      'domain_grid': domain_grid,
+                      'die_one': die_one,
+                      'die_two': die_two,
+                      'die_sum': die_sum,
+                      'exhausted_count': exhausted_count,
+                      'effects': effects,
+                      'action_required': action_required}
     # Return the dictionary
-    return game_state
+        return game_state
 
 
 if __name__ == '__main__':
