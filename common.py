@@ -655,14 +655,27 @@ class Game:
                     citizen_stack[-1].toggle_accessibility(True)
 
     def slay_monster(self, player_id, monster_id, sp, mp=0):
+        payout = [0, 0, 0, 0]
         for monster_stack in self.monster_grid:
             for monster in monster_stack:
-                if monster.monster_id == monster_id and monster.is_accessible:
+                if monster.monster_id == monster_id:  # and monster.is_accessible:
                     for player in self.player_list:
                         if player.player_id == player_id:
                             player.strength_score = player.strength_score - sp
                             player.magic_score = player.magic_score - mp
                             player.owned_monsters.append(monster_stack.pop(-1))
+                    if monster.has_special_reward:
+                        payout = self.execute_special_payout(monster.special_reward, player_id)
+                    payout[0] = payout[0] + monster.gold_reward
+                    payout[1] = payout[1] + monster.strength_reward
+                    payout[2] = payout[2] + monster.magic_reward
+                    payout[3] = payout[3] + monster.vp_reward
+                    for player in self.player_list:
+                        if player.player_id == player_id:
+                            player.gold_score = player.gold_score + payout[0]
+                            player.strength_score = player.strength_score + payout[1]
+                            player.magic_score = player.magic_score + payout[2]
+                            player.victory_score = player.victory_score + payout[3]
                     monster_stack[-1].toggle_accessibility(True)
 
     def buy_domain(self, player_id, domain_id, gp, mp=0):

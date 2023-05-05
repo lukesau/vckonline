@@ -8,7 +8,9 @@ player_list = [player1, player2]
 try:
     base1_new_game_state = load_game_data(str(uuid.uuid4()), "base1", player_list)
     game = Game(base1_new_game_state)
-    game.play_turn()
+    game.slay_monster(player1_id, 1, 1, 0)
+
+    game.harvest_phase()
     game_json = json.dumps(game, cls=GameObjectEncoder, indent=2)
     with open("game_state.txt", "w") as dump:
         dump.write(game_json)
