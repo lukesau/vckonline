@@ -1,4 +1,8 @@
-from common import *
+import json
+import shortuuid
+import uuid
+from game import *
+
 player1_id = shortuuid.uuid()
 player2_id = shortuuid.uuid()
 player1 = Player(player1_id, "Player 1")
