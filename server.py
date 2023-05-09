@@ -16,14 +16,18 @@ class ServerVCKO:
         self.gamers = []
 
         # Start the thread to remove inactive players
-        self.inactive_player_thread = threading.Thread(target=self.remove_inactive_players, daemon=True)
+        self.inactive_player_thread = threading.Thread(target=self.remove_inactive, daemon=True)
         self.inactive_player_thread.start()
 
-    def remove_inactive_players(self):
+    def remove_inactive(self):
         while True:
             current_time = time.time()
             self.lobby = [player for player in self.lobby if current_time - player.last_active_time <= 60]
-            time.sleep(10)  # check for inactive players every 10 seconds
+            inactive_games = [game_id for game_id, game in self.game_dict.items() if
+                              current_time - game.last_active_time > 180]
+            for game_id in inactive_games:
+                del self.game_dict[game_id]
+            time.sleep(10)
 
     def handle_client(self, conn, addr):
         print(f"Connection from: {addr}")
@@ -39,16 +43,6 @@ class ServerVCKO:
                     case "connection_check":
                         connected = False
                         send_data(conn, "received".encode(Constants.encoding))
-                    case "server":
-                        connected = False
-                        response_dict = {
-                            "threads": threading.active_count(),
-                            "lobby": self.lobby,
-                            "game_count": len(self.game_dict),
-                            "games": self.game_dict
-                        }
-                        lobby_state = json.dumps(response_dict, cls=SummaryEncoder, indent=2)
-                        send_data(conn, lobby_state.encode(Constants.encoding))
                     case "lobby":
                         connected = False
                         if full_command[1] == "join" and len(full_command) > 2:
@@ -134,6 +128,7 @@ class ServerVCKO:
                                 message = "game state error: game not found"
                                 send_data(conn, message.encode(Constants.encoding))
                             else:
+                                game.last_active_time = time.time()
                                 self.send_game_state(conn, full_command[2])
                     case _:
                         connected = False
@@ -159,7 +154,9 @@ class ServerVCKO:
                 "is_ready": lobby_member.is_ready
             }
             lobby_data.append(player_dict)
+        lobby_data.append({'game_count': len(self.game_dict)})
         response = f"lobby state {json.dumps(lobby_data)}"
+        print(response)
         send_data(conn, response.encode(Constants.encoding))
 
     def send_game_state(self, conn, game_id):

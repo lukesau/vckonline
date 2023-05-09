@@ -443,6 +443,7 @@ class Game:
         self.exhausted_count = game_state['exhausted_count']
         self.effects = game_state['effects']
         self.action_required = game_state['action_required']
+        self.last_active_time = 0
 
     def roll_phase(self):
         self.die_one = random.randint(1, 6)
@@ -621,6 +622,20 @@ class Game:
                 payout[0] = -9999
         print(payout)
         return payout
+
+    def owned_monster_attributes(self, player_id):
+        return_dict = {attr: 0 for attr in Constants.areas + Constants.types}
+        for player in self.player_list:
+            if player.player_id == player_id:
+                for monster in player.owned_monsters:
+                    for area in Constants.areas:
+                        if monster.area == area:
+                            return_dict[area] += 1
+                    for monster_type in Constants.types:
+                        if monster.monster_type == monster_type:
+                            return_dict[monster_type] += 1
+
+        return return_dict
 
     def update_payout_for_role(self, role_name, player_id, payout, split_command):
         role_count = 0

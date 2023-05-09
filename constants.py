@@ -2,8 +2,8 @@ class Constants:
     green = (106, 171, 115)
     red = (219, 92, 92)
     server_host = '192.168.1.99'
-    host = "lukesau.com"
-    # host = "127.0.1.1"
+    # host = "lukesau.com"
+    host = "127.0.1.1"
     port = 8328
     text_format = "utf-8"
     small_window_size = (300, 150)
@@ -12,3 +12,5 @@ class Constants:
     header_size = 512
     buffer_size = 4096
     encoding = "utf-8"
+    areas = ['Hills', 'Ruins', 'Forest', 'Valley', 'Mountains']
+    types = ['Minion', 'Titan', 'Warden', 'Boss', 'Beast']
