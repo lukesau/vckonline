@@ -1,5 +1,4 @@
 from common import *
-from server import load_game_data
 player1_id = shortuuid.uuid()
 player2_id = shortuuid.uuid()
 player1 = Player(player1_id, "Player 1")
