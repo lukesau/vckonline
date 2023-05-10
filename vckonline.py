@@ -2,7 +2,6 @@ import json
 import shortuuid
 import uuid
 from game import *
-
 player1_id = shortuuid.uuid()
 player2_id = shortuuid.uuid()
 player1 = Player(player1_id, "Player 1")
@@ -11,25 +10,7 @@ player_list = [player1, player2]
 try:
     base1_new_game_state = load_game_data(str(uuid.uuid4()), "base1", player_list)
     game = Game(base1_new_game_state)
-    game.slay_monster(player1_id, 1, 1, 0)
-    game.hire_citizen(player1_id, 1, 0, 0)
-    game.hire_citizen(player1_id, 3, 0, 0)
-    game.hire_citizen(player1_id, 4, 0, 0)
-    game.hire_citizen(player1_id, 5, 0, 0)
-    game.hire_citizen(player1_id, 6, 0, 0)
-    game.hire_citizen(player1_id, 7, 0, 0)
-    game.hire_citizen(player1_id, 8, 0, 0)
-    game.hire_citizen(player1_id, 9, 0, 0)
-    game.hire_citizen(player1_id, 10, 0, 0)
-    game.hire_citizen(player2_id, 1, 0, 0)
-    game.hire_citizen(player2_id, 3, 0, 0)
-    game.hire_citizen(player2_id, 4, 0, 0)
-    game.hire_citizen(player2_id, 5, 0, 0)
-    game.hire_citizen(player2_id, 6, 0, 0)
-    game.hire_citizen(player2_id, 7, 0, 0)
-    game.hire_citizen(player2_id, 8, 0, 0)
-    game.hire_citizen(player2_id, 9, 0, 0)
-    game.hire_citizen(player2_id, 10, 0, 0)
+    game.slay_monster(player1_id, 14, 0, 0)
 
     game.harvest_phase()
     game_json = json.dumps(game, cls=GameObjectEncoder, indent=2)

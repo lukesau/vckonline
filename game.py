@@ -7,76 +7,6 @@ from constants import *
 from cards import *
 
 
-class Player:
-    def __init__(self, player_id, name):
-        self.player_id = player_id
-        self.name = name
-        self.owned_starters = []
-        self.owned_citizens = []
-        self.owned_domains = []
-        self.owned_dukes = []
-        self.owned_monsters = []
-        self.gold_score = 2
-        self.strength_score = 0
-        self.magic_score = 1
-        self.victory_score = 0
-        self.is_first = False
-        self.shadow_count = 0
-        self.holy_count = 0
-        self.soldier_count = 0
-        self.worker_count = 0
-        self.effects = {
-            "roll_phase": [],
-            "harvest_phase": [],
-            "action_phase": []
-        }
-
-    @classmethod
-    def from_dict(cls, data):
-        player_id = data['player_id']
-        name = data['name']
-        player = cls(player_id, name)
-        player.owned_starters = [Starter.from_dict(s) for s in data['owned_starters']]
-        player.owned_citizens = [Citizen.from_dict(c) for c in data['owned_citizens']]
-        player.owned_domains = [Domain.from_dict(d) for d in data['owned_domains']]
-        player.owned_dukes = [Duke.from_dict(d) for d in data['owned_dukes']]
-        player.owned_monsters = [Monster.from_dict(m) for m in data['owned_monsters']]
-        player.gold_score = data['gold_score']
-        player.strength_score = data['strength_score']
-        player.magic_score = data['magic_score']
-        player.victory_score = data['victory_score']
-        player.is_first = data['is_first']
-        player.shadow_count = data['shadow_count']
-        player.holy_count = data['holy_count']
-        player.soldier_count = data['soldier_count']
-        player.worker_count = data['worker_count']
-        player.effects = data['effects']
-        return player
-
-    def calc_roles(self):
-        shadow_count = 0
-        holy_count = 0
-        soldier_count = 0
-        worker_count = 0
-        for citizen in self.owned_citizens:
-            shadow_count = shadow_count + citizen.shadow_count
-            holy_count = holy_count + citizen.holy_count
-            soldier_count = soldier_count + citizen.soldier_count
-            worker_count = worker_count + citizen.worker_count
-        for domain in self.owned_domains:
-            shadow_count = shadow_count + domain.shadow_count
-            holy_count = holy_count + domain.holy_count
-            soldier_count = soldier_count + domain.soldier_count
-            worker_count = worker_count + domain.worker_count
-        roles_dict = {
-            "shadow_count": shadow_count,
-            "holy_count": holy_count,
-            "soldier_count": soldier_count,
-            "worker_count": worker_count
-        }
-        return roles_dict
-
-
 class Game:
     def __init__(self, game_state):
         self.game_id = game_state['game_id']
@@ -203,7 +133,6 @@ class Game:
                     case "owned_soldier":
                         self.update_payout_for_role('soldier_count', player_id, payout, split_command)
                     case "owned_worker":
-
                         self.update_payout_for_role('worker_count', player_id, payout, split_command)
                     case "owned_monsters":
                         self.update_payout_for_role('owned_monsters', player_id, payout, split_command)
@@ -211,6 +140,32 @@ class Game:
                         self.update_payout_for_role('owned_citizens', player_id, payout, split_command)
                     case "owned_domains":
                         self.update_payout_for_role('owned_domains', player_id, payout, split_command)
+                    case "area":
+                        area_count = self.owned_monster_attributes(player_id)[third_word]
+                        match fourth_word:
+                            case 'g':
+                                payout[0] = area_count * int(split_command[4])
+                            case 's':
+                                payout[1] = area_count * int(split_command[4])
+                            case 'm':
+                                payout[2] = area_count * int(split_command[4])
+                            case 'v':
+                                payout[3] = area_count * int(split_command[4])
+                            case _:
+                                payout[0] = -9999
+                    case "type":
+                        type_count = self.owned_monster_attributes(player_id)[third_word]
+                        match fourth_word:
+                            case 'g':
+                                payout[0] = type_count * int(split_command[4])
+                            case 's':
+                                payout[1] = type_count * int(split_command[4])
+                            case 'm':
+                                payout[2] = type_count * int(split_command[4])
+                            case 'v':
+                                payout[3] = type_count * int(split_command[4])
+                            case _:
+                                payout[0] = -9999
                     case _:
                         payout[0] = -9999
             case "exchange":
@@ -321,11 +276,13 @@ class Game:
         for monster_stack in self.monster_grid:
             for monster in monster_stack:
                 if monster.monster_id == monster_id:  # and monster.is_accessible:
+                    monster_to_add = monster_stack[-1]
+                    monster_stack.pop(-1)
                     for player in self.player_list:
                         if player.player_id == player_id:
                             player.strength_score = player.strength_score - sp
                             player.magic_score = player.magic_score - mp
-                            player.owned_monsters.append(monster_stack.pop(-1))
+                            player.owned_monsters.append(monster_to_add)
                     if monster.has_special_reward:
                         payout = self.execute_special_payout(monster.special_reward, player_id)
                     payout[0] = payout[0] + monster.gold_reward
@@ -338,6 +295,7 @@ class Game:
                             player.strength_score = player.strength_score + payout[1]
                             player.magic_score = player.magic_score + payout[2]
                             player.victory_score = player.victory_score + payout[3]
+                            player.owned_monster_attributes = self.owned_monster_attributes(player_id)
                     monster_stack[-1].toggle_accessibility(True)
 
     def buy_domain(self, player_id, domain_id, gp, mp=0):
@@ -365,6 +323,76 @@ class Game:
 
     def prompt(self):
         return
+
+
+class Player:
+    def __init__(self, player_id, name):
+        self.player_id = player_id
+        self.name = name
+        self.owned_starters = []
+        self.owned_citizens = []
+        self.owned_domains = []
+        self.owned_dukes = []
+        self.owned_monsters = []
+        self.gold_score = 2
+        self.strength_score = 0
+        self.magic_score = 1
+        self.victory_score = 0
+        self.is_first = False
+        self.shadow_count = 0
+        self.holy_count = 0
+        self.soldier_count = 0
+        self.worker_count = 0
+        self.effects = {
+            "roll_phase": [],
+            "harvest_phase": [],
+            "action_phase": []
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        player_id = data['player_id']
+        name = data['name']
+        player = cls(player_id, name)
+        player.owned_starters = [Starter.from_dict(s) for s in data['owned_starters']]
+        player.owned_citizens = [Citizen.from_dict(c) for c in data['owned_citizens']]
+        player.owned_domains = [Domain.from_dict(d) for d in data['owned_domains']]
+        player.owned_dukes = [Duke.from_dict(d) for d in data['owned_dukes']]
+        player.owned_monsters = [Monster.from_dict(m) for m in data['owned_monsters']]
+        player.gold_score = data['gold_score']
+        player.strength_score = data['strength_score']
+        player.magic_score = data['magic_score']
+        player.victory_score = data['victory_score']
+        player.is_first = data['is_first']
+        player.shadow_count = data['shadow_count']
+        player.holy_count = data['holy_count']
+        player.soldier_count = data['soldier_count']
+        player.worker_count = data['worker_count']
+        player.effects = data['effects']
+        return player
+
+    def calc_roles(self):
+        shadow_count = 0
+        holy_count = 0
+        soldier_count = 0
+        worker_count = 0
+        for citizen in self.owned_citizens:
+            shadow_count = shadow_count + citizen.shadow_count
+            holy_count = holy_count + citizen.holy_count
+            soldier_count = soldier_count + citizen.soldier_count
+            worker_count = worker_count + citizen.worker_count
+        for domain in self.owned_domains:
+            shadow_count = shadow_count + domain.shadow_count
+            holy_count = holy_count + domain.holy_count
+            soldier_count = soldier_count + domain.soldier_count
+            worker_count = worker_count + domain.worker_count
+        roles_dict = {
+            "shadow_count": shadow_count,
+            "holy_count": holy_count,
+            "soldier_count": soldier_count,
+            "worker_count": worker_count
+        }
+        return roles_dict
 
 
 class LobbyMember:
