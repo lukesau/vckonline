@@ -5,6 +5,7 @@ from typing import List
 import mariadb
 from constants import *
 from cards import *
+import threading
 
 
 class Game:
@@ -194,32 +195,12 @@ class Game:
                         payout[0] = -9999
             case "choose":
                 print("Matched choose")
-                self.action_required['player_id'] = player_id
+                self.action_required['id'] = player_id
                 self.action_required['action'] = command
                 # need to pause execution here until we get player input
-                while self.action_required['player_id'] != self.game_id:
-                    time.sleep(1)
-                choice = []
-                match self.action_required['action']:
-                    case 'choose 1':
-                        choice = [second_word, third_word]
-                    case 'choose 2':
-                        choice = [fourth_word, split_command[4]]
-                    case 'choose 3':
-                        choice = [split_command[5], split_command[6]]  # [sixth_word, seventh_word]
-                    case _:
-                        payout[0] = -9999
-                match choice[0]:
-                    case 'g':
-                        payout[0] = payout[0] + choice[1]
-                    case 's':
-                        payout[1] = payout[1] + choice[1]
-                    case 'm':
-                        payout[2] = payout[2] + choice[1]
-                    case 'v':
-                        payout[3] = payout[3] + choice[1]
-                    case _:
-                        payout[0] = -9999
+                print("pee")
+                input_thread = threading.Thread(target=self.wait_for_input, args=(split_command, player_id))
+                input_thread.start()
             case _:
                 payout[0] = -9999
         print(payout)
@@ -238,6 +219,50 @@ class Game:
                             return_dict[monster_type] += 1
 
         return return_dict
+
+    def wait_for_input(self, command, player_id):
+        print("waiting for input")
+        while self.action_required["id"] != self.game_id:
+            time.sleep(1)  # wait for 1 second before checking again
+        print("input received")
+        choice = []
+        payout = [0, 0, 0, 0]
+        match self.action_required['action']:
+            case 'choose 1':
+                choice = [command[1], command[2]]
+            case 'choose 2':
+                choice = [command[3], command[4]]
+            case 'choose 3':
+                choice = [command[5], command[6]]  # [sixth_word, seventh_word]
+            case _:
+                payout[0] = -9999
+        match choice[0]:
+            case 'g':
+                payout[0] = payout[0] + int(choice[1])
+            case 's':
+                payout[1] = payout[1] + int(choice[1])
+            case 'm':
+                payout[2] = payout[2] + int(choice[1])
+            case 'v':
+                payout[3] = payout[3] + int(choice[1])
+            case _:
+                payout[0] = -9999
+        for player in self.player_list:
+            if player.player_id == player_id:
+                player.gold_score = player.gold_score + payout[0]
+                player.strength_score = player.strength_score + payout[1]
+                player.magic_score = player.magic_score + payout[2]
+                player.victory_score = player.victory_score + payout[3]
+        for player in self.player_list:
+            print(f"Player {player.name}: {player.gold_score} G, {player.strength_score} S, {player.magic_score} M,"
+                  f" {player.victory_score} VP, Monsters: {len(player.owned_monsters)}, "
+                  f"Citizens: {len(player.owned_citizens)}, Domains {len(player.owned_domains)}")
+
+    def act_on_required_action(self, player_id, action):
+        if self.action_required['id'] == player_id:
+            print("correct player responded to action")
+            self.action_required['action'] = action
+            self.action_required['id'] = self.game_id
 
     def update_payout_for_role(self, role_name, player_id, payout, split_command):
         role_count = 0
@@ -435,7 +460,7 @@ def load_game_data(game_id, preset, player_list_from_lobby):
         "action_phase": []
     }
     action_required = {
-        "player_id": "",
+        "id": "",
         "action": ""
     }
     match preset:
