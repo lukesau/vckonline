@@ -1,3 +1,14 @@
+def _coerce_int(val, default=0):
+    if val is None:
+        return default
+    if isinstance(val, bool):
+        return int(val)
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
 class Card:
     def __init__(self):
         self.name = ""
@@ -81,10 +92,10 @@ class Citizen(Card):
         self.gold_cost = gold_cost
         self.roll_match1 = roll_match1
         self.roll_match2 = roll_match2
-        self.shadow_count = shadow_count
-        self.holy_count = holy_count
-        self.soldier_count = soldier_count
-        self.worker_count = worker_count
+        self.shadow_count = _coerce_int(shadow_count)
+        self.holy_count = _coerce_int(holy_count)
+        self.soldier_count = _coerce_int(soldier_count)
+        self.worker_count = _coerce_int(worker_count)
         self.gold_payout_on_turn = gold_payout_on_turn
         self.gold_payout_off_turn = gold_payout_off_turn
         self.strength_payout_on_turn = strength_payout_on_turn
@@ -112,6 +123,12 @@ class Citizen(Card):
                 "holy_count": self.holy_count,
                 "soldier_count": self.soldier_count,
                 "worker_count": self.worker_count,
+                "roles": {
+                    "shadow": self.shadow_count,
+                    "holy": self.holy_count,
+                    "soldier": self.soldier_count,
+                    "worker": self.worker_count,
+                },
                 "gold_payout_on_turn": self.gold_payout_on_turn,
                 "gold_payout_off_turn": self.gold_payout_off_turn,
                 "strength_payout_on_turn": self.strength_payout_on_turn,
@@ -132,10 +149,10 @@ class Citizen(Card):
                    gold_cost=dict_["gold_cost"],
                    roll_match1=dict_["roll_match1"],
                    roll_match2=dict_["roll_match2"],
-                   shadow_count=dict_["shadow_count"],
-                   holy_count=dict_["holy_count"],
-                   soldier_count=dict_["soldier_count"],
-                   worker_count=dict_["worker_count"],
+                   shadow_count=dict_.get("shadow_count"),
+                   holy_count=dict_.get("holy_count"),
+                   soldier_count=dict_.get("soldier_count"),
+                   worker_count=dict_.get("worker_count"),
                    gold_payout_on_turn=dict_["gold_payout_on_turn"],
                    gold_payout_off_turn=dict_["gold_payout_off_turn"],
                    strength_payout_on_turn=dict_["strength_payout_on_turn"],
@@ -157,10 +174,10 @@ class Domain(Card):
         self.domain_id = domain_id
         self.name = name
         self.gold_cost = gold_cost
-        self.shadow_count = shadow_count
-        self.holy_count = holy_count
-        self.soldier_count = soldier_count
-        self.worker_count = worker_count
+        self.shadow_count = _coerce_int(shadow_count)
+        self.holy_count = _coerce_int(holy_count)
+        self.soldier_count = _coerce_int(soldier_count)
+        self.worker_count = _coerce_int(worker_count)
         self.vp_reward = vp_reward
         self.has_activation_effect = has_activation_effect
         self.has_passive_effect = has_passive_effect
@@ -179,6 +196,12 @@ class Domain(Card):
             "holy_count": self.holy_count,
             "soldier_count": self.soldier_count,
             "worker_count": self.worker_count,
+            "roles": {
+                "shadow": self.shadow_count,
+                "holy": self.holy_count,
+                "soldier": self.soldier_count,
+                "worker": self.worker_count,
+            },
             "vp_reward": self.vp_reward,
             "has_activation_effect": self.has_activation_effect,
             "has_passive_effect": self.has_passive_effect,
@@ -194,10 +217,10 @@ class Domain(Card):
             domain_id=dict_['domain_id'],
             name=dict_['name'],
             gold_cost=dict_['gold_cost'],
-            shadow_count=dict_['shadow_count'],
-            holy_count=dict_['holy_count'],
-            soldier_count=dict_['soldier_count'],
-            worker_count=dict_['worker_count'],
+            shadow_count=dict_.get('shadow_count'),
+            holy_count=dict_.get('holy_count'),
+            soldier_count=dict_.get('soldier_count'),
+            worker_count=dict_.get('worker_count'),
             vp_reward=dict_['vp_reward'],
             has_activation_effect=dict_['has_activation_effect'],
             has_passive_effect=dict_['has_passive_effect'],

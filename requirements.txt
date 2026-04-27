@@ -1,0 +1,22 @@
+# Core database connection
+# NOTE: mariadb package requires MariaDB Connector/C to be installed first
+# 
+# Installation:
+#   1. Install MariaDB Connector/C:
+#      macOS: brew install mariadb-connector-c
+#      Linux: sudo apt-get install libmariadb-dev (Debian/Ubuntu) or equivalent
+#
+#   2. Set MARIADB_CONFIG environment variable before pip install:
+#      export MARIADB_CONFIG="/opt/homebrew/Cellar/mariadb-connector-c/3.4.8/bin/mariadb_config"
+#      (or run: ./setup_venv.sh which does this automatically)
+#
+#   3. Then install: pip install -r requirements.txt
+mariadb>=1.1.0
+
+# UUID generation
+shortuuid>=1.0.0
+
+# Web framework for API server
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
