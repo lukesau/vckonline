@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+    <html>
+    <head>
+        <title>VCK Online - Dev Client</title>
+        <link rel="stylesheet" href="/static/dev-client/dev-client.css">
+
+    </head>
+    <body>
+        <h1>VCK Online - Development Client</h1>
+        
+        <div class="section">
+            <h2>Lobby</h2>
+            <div>
+                <input type="text" id="playerName" placeholder="Enter your name">
+                <button onclick="joinLobby()">Join Lobby</button>
+                <button onclick="getLobbyStatus()">Refresh</button>
+            </div>
+            <div style="margin-top: 8px;">
+                <label>
+                    <input type="checkbox" id="debugStartingResourcesEnabled">
+                    Debug start resources (100 gold / 100 strength / 100 magic)
+                </label>
+            </div>
+            <div id="lobbyStatus"></div>
+            <div id="playerId" style="margin-top: 10px; font-weight: bold;"></div>
+        </div>
+        
+            <div class="section">
+                <h2>Game</h2>
+                <div id="gameStatus"></div>
+                <div class="dice-row">
+                    <div class="dice-meta" id="diceMeta"></div>
+                    <div class="dice-panel" id="dicePanel">
+                        <div class="dice-panel-layout">
+                            <div class="dice-panel-col">
+                                <div class="dice" id="dice"></div>
+                            </div>
+                            <div class="dice-panel-col">
+                                <div class="roll-effects" id="rollEffects"></div>
+                            </div>
+                            <div class="dice-panel-col">
+                                <label>
+                                    <input type="checkbox" id="diceOverrideEnabled">
+                                    Use custom dice finalize (dev)
+                                </label>
+                                <div class="dice-panel-fields">
+                                    <label>Die 1
+                                        <input type="number" id="diceOverrideDie1" min="1" max="6" step="1">
+                                    </label>
+                                    <label>Die 2
+                                        <input type="number" id="diceOverrideDie2" min="1" max="6" step="1">
+                                    </label>
+                                </div>
+                                <div class="dice-panel-hint" id="dicePanelHint"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="delta-wrap" id="harvestDeltas" style="margin-top: 6px;"></div>
+                    <div style="margin-top: 8px;">
+                        <label>
+                            <input type="checkbox" id="autoHarvestEnabled">
+                            Auto-harvest single-option resource prompts
+                        </label>
+                    </div>
+                    <div id="choicePanel" style="margin-top: 8px;"></div>
+                </div>
+            <div class="game-log-wrap">
+                <h3>Game log</h3>
+                <div id="gameLog" aria-live="polite"></div>
+            </div>
+            <button onclick="getGameState()">Refresh Game State</button>
+            <div class="tableau-actions">
+                <div class="mini"><strong>Tableau seats:</strong> buttons are arranged in turn order around the Board.</div>
+                <div id="tableauSeatLayout" class="tableau-seat-layout" aria-label="Tableau seats"></div>
+            </div>
+            <details>
+                <summary>Game state JSON</summary>
+                <pre id="gameState"></pre>
+            </details>
+        </div>
+
+        <div id="tableauModal" class="modal-backdrop" onclick="onTableauBackdropClick(event)">
+            <div class="modal-panel" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <div class="modal-title" id="tableauTitle">My Tableau</div>
+                    <button class="modal-close" onclick="closeTableau()">Close</button>
+                </div>
+                <div class="modal-body" id="tableauBody"></div>
+            </div>
+        </div>
+        
+        <script src="/static/dev-client/dev-client.js" defer></script>
+
+    </body>
+    </html>
