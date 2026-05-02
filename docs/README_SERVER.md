@@ -54,11 +54,11 @@ The server will start on `http://localhost:8000`
   ```json
   {
     "player_id": "...",
-    "action_type": "hire_citizen|buy_domain|slay_monster|act_on_required_action|roll_phase|harvest_phase|play_turn",
+    "action_type": "hire_citizen|build_domain|slay_monster|act_on_required_action|roll_phase|harvest_phase|play_turn",
     "citizen_id": 123,  // for hire_citizen
-    "domain_id": 456,   // for buy_domain
+    "domain_id": 456,   // for build_domain
     "monster_id": 789,   // for slay_monster
-    "gold_cost": 5,     // for hire_citizen/buy_domain
+    "gold_cost": 5,     // for hire_citizen/build_domain
     "strength_cost": 3,  // for slay_monster
     "magic_cost": 0,    // optional
     "action": "choose 1" // for act_on_required_action

@@ -45,7 +45,7 @@ Lobby cleanup:
 Supported `action_type` values currently include:
 
 - `hire_citizen`
-- `buy_domain`
+- `build_domain`
 - `slay_monster`
 - `take_resource`
 - `harvest_card`

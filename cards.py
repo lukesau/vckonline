@@ -85,7 +85,7 @@ class Citizen(Card):
                  worker_count, gold_payout_on_turn, gold_payout_off_turn, strength_payout_on_turn,
                  strength_payout_off_turn, magic_payout_on_turn, magic_payout_off_turn, has_special_payout_on_turn,
                  has_special_payout_off_turn, special_payout_on_turn, special_payout_off_turn, special_citizen,
-                 expansion):
+                 expansion, is_flipped=False):
         super().__init__()
         self.citizen_id = citizen_id
         self.name = name
@@ -108,6 +108,7 @@ class Citizen(Card):
         self.special_payout_off_turn = special_payout_off_turn
         self.special_citizen = special_citizen
         self.expansion = expansion
+        self.is_flipped = bool(is_flipped)
 
     def get_special_payout_on_turn(self):
         return self.special_payout_on_turn
@@ -115,6 +116,7 @@ class Citizen(Card):
     def to_dict(self):
         base_dict = super().to_dict()
         return {**base_dict,
+                "is_flipped": bool(getattr(self, "is_flipped", False)),
                 "citizen_id": self.citizen_id,
                 "gold_cost": self.gold_cost,
                 "roll_match1": self.roll_match1,
@@ -164,12 +166,14 @@ class Citizen(Card):
                    special_payout_on_turn=dict_["special_payout_on_turn"],
                    special_payout_off_turn=dict_["special_payout_off_turn"],
                    special_citizen=dict_["special_citizen"],
-                   expansion=dict_["expansion"])
+                   expansion=dict_["expansion"],
+                   is_flipped=bool(dict_.get("is_flipped", False)))
 
 
 class Domain(Card):
     def __init__(self, domain_id, name, gold_cost, shadow_count, holy_count, soldier_count, worker_count, vp_reward,
-                 has_activation_effect, has_passive_effect, passive_effect, activation_effect, text, expansion):
+                 has_activation_effect, has_passive_effect, passive_effect, activation_effect, text, expansion,
+                 acquired_turn_number=None):
         super().__init__()
         self.domain_id = domain_id
         self.name = name
@@ -185,6 +189,7 @@ class Domain(Card):
         self.activation_effect = activation_effect
         self.text = text
         self.expansion = expansion
+        self.acquired_turn_number = acquired_turn_number
 
     def to_dict(self):
         return {
@@ -208,7 +213,8 @@ class Domain(Card):
             "passive_effect": self.passive_effect,
             "activation_effect": self.activation_effect,
             "text": self.text,
-            "expansion": self.expansion
+            "expansion": self.expansion,
+            "acquired_turn_number": getattr(self, "acquired_turn_number", None),
         }
 
     @classmethod
@@ -227,7 +233,8 @@ class Domain(Card):
             passive_effect=dict_['passive_effect'],
             activation_effect=dict_['activation_effect'],
             text=dict_['text'],
-            expansion=dict_['expansion']
+            expansion=dict_['expansion'],
+            acquired_turn_number=dict_.get('acquired_turn_number'),
         )
 
 

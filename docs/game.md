@@ -58,7 +58,7 @@ Common paths:
 
 - `roll_phase()` rolls two dice and computes a sum
 - `harvest_phase()` pays out from owned starters/citizens for all players based on the roll
-- `hire_citizen(...)`, `buy_domain(...)`, `slay_monster(...)` mutate board stacks and player resources
+- `hire_citizen(...)`, `build_domain(...)`, `slay_monster(...)` mutate board stacks and player resources
 
 ### “choose …” actions
 

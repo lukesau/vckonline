@@ -46,6 +46,7 @@ class RenameRequest(BaseModel):
 
 class ReadyRequest(BaseModel):
     player_id: str
+    debug_starting_resources: bool = False
 
 
 class ResourcePayment(BaseModel):
@@ -57,7 +58,7 @@ class ResourcePayment(BaseModel):
 
 class GameActionRequest(BaseModel):
     player_id: str
-    action_type: str  # "hire_citizen", "buy_domain", "slay_monster", "take_resource", "act_on_required_action", "submit_concurrent_action"
+    action_type: str  # "hire_citizen", "build_domain", "slay_monster", "take_resource", "act_on_required_action", "submit_concurrent_action"
     # Action parameters (varies by action type)
     citizen_id: Optional[int] = None
     domain_id: Optional[int] = None
@@ -92,7 +93,7 @@ def resolve_action_payment(req: GameActionRequest):
         return 0, int(req.strength_cost or 0), int(req.magic_cost or 0)
     if req.action_type == "hire_citizen":
         return int(req.gold_cost or 0), 0, int(req.magic_cost or 0)
-    if req.action_type == "buy_domain":
+    if req.action_type == "build_domain":
         return int(req.gold_cost or 0), 0, int(req.magic_cost or 0)
     return int(req.gold_cost or 0), int(req.strength_cost or 0), int(req.magic_cost or 0)
 
@@ -133,6 +134,7 @@ async def set_ready(request: ReadyRequest):
     for player in lobby:
         if player.player_id == request.player_id:
             player.is_ready = True
+            player.debug_starting_resources = bool(request.debug_starting_resources)
             player.last_active_time = time.time()
             
             # Check if all players are ready
@@ -147,6 +149,7 @@ async def set_ready(request: ReadyRequest):
                         gamer = GameMember(p.player_id, p.name, new_game_id)
                         gamers.append(gamer)
                         players_to_remove.append(p)
+                debug_starting_resources = any(bool(getattr(p, "debug_starting_resources", False)) for p in players_to_remove)
                 
                 # Remove ready players from lobby
                 for p in players_to_remove:
@@ -156,7 +159,12 @@ async def set_ready(request: ReadyRequest):
                 try:
                     # Get only the gamers for this new game
                     game_gamers = [g for g in gamers if g.game_id == new_game_id]
-                    game_state = load_game_data(new_game_id, "base1", game_gamers)
+                    game_state = load_game_data(
+                        new_game_id,
+                        "base1",
+                        game_gamers,
+                        debug_starting_resources=debug_starting_resources,
+                    )
                     new_game = Game(game_state)
                     new_game.last_active_time = time.time()
                     # Auto-run the start-of-game roll/harvest so the first state is actionable.
@@ -201,7 +209,8 @@ async def get_lobby_status(player_id: Optional[str] = None):
         lobby_data.append({
             "player_id": member.player_id,
             "name": member.name,
-            "is_ready": member.is_ready
+            "is_ready": member.is_ready,
+            "debug_starting_resources": bool(getattr(member, "debug_starting_resources", False)),
         })
     
     response = {
@@ -266,7 +275,7 @@ async def get_game_state(game_id: str, player_id: Optional[str] = None):
 
 @app.post("/api/game/{game_id}/action")
 async def perform_game_action(game_id: str, request: GameActionRequest):
-    """Perform a game action (hire citizen, buy domain, slay monster, etc.)"""
+    """Perform a game action (hire citizen, build domain, slay monster, etc.)"""
     game = games.get(game_id)
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
@@ -291,8 +300,8 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 _rollback_consumed_action(game)
                 raise
             game.finish_turn_if_no_actions_remaining()
-        
-        elif request.action_type == "buy_domain":
+
+        elif request.action_type == "build_domain":
             if request.domain_id is None:
                 raise HTTPException(status_code=400, detail="domain_id required")
             if request.payment is None and request.gold_cost is None and request.magic_cost is None:
@@ -301,7 +310,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             g, s, m = resolve_action_payment(request)
             try:
-                game.buy_domain(request.player_id, request.domain_id, g, m, s)
+                game.build_domain(request.player_id, request.domain_id, g, m, s)
             except ValueError as e:
                 _rollback_consumed_action(game)
                 raise HTTPException(status_code=400, detail=str(e))
@@ -458,19 +467,31 @@ async def root():
             pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
             details { margin-top: 10px; }
             details > summary { cursor: pointer; font-weight: 700; user-select: none; }
-            .dice-row { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+            .dice-row { margin: 10px 0; }
             .dice { display: flex; gap: 10px; align-items: center; }
-            .dice-rig {
+            .dice-panel {
                 margin-top: 8px;
                 padding: 8px 10px;
                 border: 1px solid #ddd;
                 border-radius: 10px;
                 background: #fff;
             }
-            .dice-rig label { font-size: 13px; }
-            .dice-rig-fields { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
-            .dice-rig-fields input[type="number"] { width: 70px; }
-            .dice-rig-hint { margin-top: 6px; font-size: 12px; color: #444; }
+            .dice-panel-layout {
+                display: grid;
+                grid-template-columns: auto minmax(260px, 1fr) auto;
+                gap: 14px;
+                align-items: start;
+            }
+            .dice-panel-col { min-width: 0; }
+            .dice-panel label { font-size: 13px; }
+            .dice-panel-fields { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
+            .dice-panel-fields input[type="number"] { width: 70px; }
+            .dice-panel-hint { margin-top: 6px; font-size: 12px; color: #444; }
+            .roll-effects { margin-top: 8px; font-size: 12px; color: #333; }
+            .roll-effects ul { margin: 4px 0 0 18px; padding: 0; }
+            @media (max-width: 980px) {
+                .dice-panel-layout { grid-template-columns: 1fr; }
+            }
             .die {
                 width: 44px; height: 44px;
                 border: 2px solid #222;
@@ -482,7 +503,11 @@ async def root():
                 padding: 6px;
                 box-shadow: 0 1px 2px rgba(0,0,0,0.08);
             }
+            .die.increase { border-color: #0a6; color: #0a6; }
+            .die.decrease { border-color: #b00; color: #b00; }
             .pip { width: 8px; height: 8px; border-radius: 50%; background: #111; justify-self: center; align-self: center; }
+            .die.increase .pip { background: currentColor; }
+            .die.decrease .pip { background: currentColor; }
             .pip.off { opacity: 0; }
             .dice-meta { color: #333; font-size: 14px; }
             .delta-wrap { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -615,11 +640,10 @@ async def root():
                 color: #fff;
             }
 
-            /* Payment editor (hire / buy / slay) */
+            /* Payment editor (hire / build / slay) */
             .pay-row { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
             .cost-line { flex: 1; min-width: 200px; }
-            .pay-controls { display: none; margin-top: 4px; }
-            .pay-controls.open { display: block; }
+            .pay-controls { display: block; margin-top: 4px; }
             .pay-controls input[type="number"] { width: 58px; }
 
             .game-log-wrap {
@@ -659,36 +683,55 @@ async def root():
                 <button onclick="joinLobby()">Join Lobby</button>
                 <button onclick="getLobbyStatus()">Refresh</button>
             </div>
+            <div style="margin-top: 8px;">
+                <label>
+                    <input type="checkbox" id="debugStartingResourcesEnabled">
+                    Debug start resources (100 gold / 100 strength / 100 magic)
+                </label>
+            </div>
             <div id="lobbyStatus"></div>
             <div id="playerId" style="margin-top: 10px; font-weight: bold;"></div>
         </div>
         
-        <div class="section">
-            <h2>Game</h2>
-            <div id="gameStatus"></div>
-            <div class="dice-row">
-                <div class="dice" id="dice"></div>
-                <div>
+            <div class="section">
+                <h2>Game</h2>
+                <div id="gameStatus"></div>
+                <div class="dice-row">
                     <div class="dice-meta" id="diceMeta"></div>
-                    <div class="dice-rig" id="diceRig">
-                        <label>
-                            <input type="checkbox" id="rigEnabled">
-                            Use rigged dice (dev)
-                        </label>
-                        <div class="dice-rig-fields">
-                            <label>Die 1
-                                <input type="number" id="rigDie1" min="1" max="6" step="1">
-                            </label>
-                            <label>Die 2
-                                <input type="number" id="rigDie2" min="1" max="6" step="1">
-                            </label>
+                    <div class="dice-panel" id="dicePanel">
+                        <div class="dice-panel-layout">
+                            <div class="dice-panel-col">
+                                <div class="dice" id="dice"></div>
+                            </div>
+                            <div class="dice-panel-col">
+                                <div class="roll-effects" id="rollEffects"></div>
+                            </div>
+                            <div class="dice-panel-col">
+                                <label>
+                                    <input type="checkbox" id="diceOverrideEnabled">
+                                    Use custom dice finalize (dev)
+                                </label>
+                                <div class="dice-panel-fields">
+                                    <label>Die 1
+                                        <input type="number" id="diceOverrideDie1" min="1" max="6" step="1">
+                                    </label>
+                                    <label>Die 2
+                                        <input type="number" id="diceOverrideDie2" min="1" max="6" step="1">
+                                    </label>
+                                </div>
+                                <div class="dice-panel-hint" id="dicePanelHint"></div>
+                            </div>
                         </div>
-                        <div class="dice-rig-hint" id="rigHint"></div>
                     </div>
                     <div class="delta-wrap" id="harvestDeltas" style="margin-top: 6px;"></div>
+                    <div style="margin-top: 8px;">
+                        <label>
+                            <input type="checkbox" id="autoHarvestEnabled">
+                            Auto-harvest single-option resource prompts
+                        </label>
+                    </div>
                     <div id="choicePanel" style="margin-top: 8px;"></div>
                 </div>
-            </div>
             <div class="game-log-wrap">
                 <h3>Game log</h3>
                 <div id="gameLog" aria-live="polite"></div>
@@ -718,7 +761,49 @@ async def root():
             let playerId = localStorage.getItem('playerId') || '';
             let currentGameId = localStorage.getItem('gameId') || '';
             let lastGameState = null;
+            let lastRenderedGameLogKey = null;
             let finalizeRollInFlight = false;
+            let autoHarvestInFlight = false;
+
+            function getDebugStartingResourcesEnabled() {
+                return localStorage.getItem('debugStartingResourcesEnabled') === 'true';
+            }
+
+            function getAutoHarvestEnabled() {
+                const v = localStorage.getItem('autoHarvestEnabled');
+                if (v === null) return true;
+                return v === 'true';
+            }
+
+            function syncDebugStartingResourcesUiFromStorage() {
+                const el = document.getElementById('debugStartingResourcesEnabled');
+                if (!el) return;
+                el.checked = getDebugStartingResourcesEnabled();
+            }
+
+            function wireDebugStartingResourcesUi() {
+                const el = document.getElementById('debugStartingResourcesEnabled');
+                if (!el) return;
+                el.addEventListener('change', () => {
+                    localStorage.setItem('debugStartingResourcesEnabled', String(!!el.checked));
+                });
+                syncDebugStartingResourcesUiFromStorage();
+            }
+
+            function syncAutoHarvestUiFromStorage() {
+                const el = document.getElementById('autoHarvestEnabled');
+                if (!el) return;
+                el.checked = getAutoHarvestEnabled();
+            }
+
+            function wireAutoHarvestUi() {
+                const el = document.getElementById('autoHarvestEnabled');
+                if (!el) return;
+                el.addEventListener('change', () => {
+                    localStorage.setItem('autoHarvestEnabled', String(!!el.checked));
+                });
+                syncAutoHarvestUiFromStorage();
+            }
 
             function clampDie(n) {
                 const x = Number(n);
@@ -740,9 +825,9 @@ async def root():
             }
 
             function syncDiceRigUiFromStorage() {
-                const enabledEl = document.getElementById('rigEnabled');
-                const d1El = document.getElementById('rigDie1');
-                const d2El = document.getElementById('rigDie2');
+                const enabledEl = document.getElementById('diceOverrideEnabled');
+                const d1El = document.getElementById('diceOverrideDie1');
+                const d2El = document.getElementById('diceOverrideDie2');
                 if (!enabledEl || !d1El || !d2El) return;
                 const s = getDiceRigSettings();
                 enabledEl.checked = !!s.enabled;
@@ -753,9 +838,9 @@ async def root():
             }
 
             function wireDiceRigUi() {
-                const enabledEl = document.getElementById('rigEnabled');
-                const d1El = document.getElementById('rigDie1');
-                const d2El = document.getElementById('rigDie2');
+                const enabledEl = document.getElementById('diceOverrideEnabled');
+                const d1El = document.getElementById('diceOverrideDie1');
+                const d2El = document.getElementById('diceOverrideDie2');
                 if (!enabledEl || !d1El || !d2El) return;
 
                 const onChange = () => {
@@ -788,6 +873,8 @@ async def root():
                 document.getElementById('playerId').textContent = 'Player ID: ' + playerId;
             }
             wireDiceRigUi();
+            wireDebugStartingResourcesUi();
+            wireAutoHarvestUi();
             
             async function joinLobby() {
                 const name = document.getElementById('playerName').value;
@@ -819,8 +906,9 @@ async def root():
                     
                     let html = '<h3>Players in Lobby:</h3>';
                     data.lobby.forEach(p => {
+                        const debugTag = p.debug_starting_resources ? ' <span class="mini">(debug 100/100/100)</span>' : '';
                         html += `<div class="lobby-player ${p.is_ready ? 'ready' : ''}">
-                            ${p.name} - ${p.is_ready ? 'Ready' : 'Not Ready'}
+                            ${p.name}${debugTag} - ${p.is_ready ? 'Ready' : 'Not Ready'}
                             ${p.player_id === playerId ? '<button onclick="toggleReady()">Toggle Ready</button>' : ''}
                         </div>`;
                     });
@@ -853,7 +941,10 @@ async def root():
                     const response = await fetch('/api/lobby/ready', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({player_id: playerId})
+                        body: JSON.stringify({
+                            player_id: playerId,
+                            debug_starting_resources: getDebugStartingResourcesEnabled(),
+                        })
                     });
                     const data = await response.json();
                     if (data.game_id) {
@@ -879,6 +970,27 @@ async def root():
                 updateConcurrentPolling(data);
                 updatePassiveGamePolling(data);
                 refreshTableauActionButtons(data);
+                maybeAutoHarvest(data);
+            }
+
+            function maybeAutoHarvest(gameState) {
+                if (!playerId || !currentGameId) return;
+                if (!gameState || autoHarvestInFlight) return;
+                if (!getAutoHarvestEnabled()) return;
+                const concurrent = gameState?.concurrent_action || null;
+                if (concurrent && Array.isArray(concurrent.pending) && concurrent.pending.length > 0) return;
+                const req = gameState?.action_required || {};
+                const reqId = (req?.id || '').toString();
+                const reqAction = (req?.action || '').toString();
+                if (reqAction !== 'manual_harvest') return;
+                if (!reqId || reqId !== playerId) return;
+                const slots = Array.isArray(gameState?.harvest_prompt_slots) ? gameState.harvest_prompt_slots : [];
+                if (slots.length !== 1) return;
+                const slotKey = (slots[0]?.slot_key || '').toString().trim();
+                if (!slotKey) return;
+                autoHarvestInFlight = true;
+                sendHarvestCard(slotKey, { suppressAlert: true })
+                    .finally(() => { autoHarvestInFlight = false; });
             }
 
             async function maybeFinalizePendingRoll(gameState) {
@@ -897,6 +1009,16 @@ async def root():
                 const rolled1 = clampDie(gameState.rolled_die_one ?? gameState.die_one ?? 1);
                 const rolled2 = clampDie(gameState.rolled_die_two ?? gameState.die_two ?? 1);
                 const s = getDiceRigSettings();
+                if (!s.enabled) {
+                    const player = Array.isArray(gameState?.player_list)
+                        ? gameState.player_list.find(p => (p?.player_id || '') === playerId)
+                        : null;
+                    const opts = listRollSetOneDieOptions(player, rolled1, rolled2, gameState.turn_number);
+                    if (opts.length > 0) {
+                        // Do not auto-finalize when roll modifiers are available.
+                        return;
+                    }
+                }
                 const final1 = s.enabled ? clampDie(s.d1) : rolled1;
                 const final2 = s.enabled ? clampDie(s.d2) : rolled2;
 
@@ -922,6 +1044,123 @@ async def root():
                     } else {
                         getGameState(false);
                     }
+                } catch (e) {
+                    console.error(e);
+                } finally {
+                    finalizeRollInFlight = false;
+                }
+            }
+
+            function ownedCitizenRoleSelectorCount(player, roleSelector) {
+                const role = (roleSelector || '').toString().trim().toLowerCase();
+                if (!role) return 0;
+                const citizens = Array.isArray(player?.owned_citizens) ? player.owned_citizens : [];
+                const keyByRole = {
+                    holy_citizen: 'holy_count',
+                    shadow_citizen: 'shadow_count',
+                    soldier_citizen: 'soldier_count',
+                    worker_citizen: 'worker_count',
+                };
+                const key = keyByRole[role];
+                if (!key) return 0;
+                let n = 0;
+                citizens.forEach((c) => {
+                    if (Number(c?.[key] || 0) > 0) n += 1;
+                });
+                return n;
+            }
+
+            function domainPassiveOnBuildTurnCooldown(domain, turnNumber) {
+                const acq = domain?.acquired_turn_number;
+                if (acq === undefined || acq === null) return false;
+                const t = Number(turnNumber);
+                if (!Number.isFinite(t)) return false;
+                return Number(acq) === t;
+            }
+
+            function parseRollSetOneDieEffects(player, turnNumber) {
+                const out = [];
+                const domains = Array.isArray(player?.owned_domains) ? player.owned_domains : [];
+                domains.forEach((d) => {
+                    if (domainPassiveOnBuildTurnCooldown(d, turnNumber)) return;
+                    const raw = (d?.passive_effect ?? '').toString().trim();
+                    if (!raw) return;
+                    const parts = raw.split(/\\s+/);
+                    const head0 = (parts[0] || '').toLowerCase().replace(/:/g, '.');
+                    if (!parts.length || head0 !== 'roll.set_one_die') return;
+                    const kv = {};
+                    for (let i = 1; i < parts.length; i += 1) {
+                        const p = parts[i];
+                        const eq = p.indexOf('=');
+                        if (eq < 0) continue;
+                        const k = p.slice(0, eq).trim().toLowerCase();
+                        const v = p.slice(eq + 1).trim();
+                        kv[k] = v;
+                    }
+                    const target = Number(kv.target);
+                    const costSpec = (kv.cost || '').toString().trim().toLowerCase();
+                    if (!Number.isFinite(target) || target < 1 || target > 6 || !costSpec) return;
+                    out.push({ domainName: (d?.name || 'Domain').toString(), target, costSpec });
+                });
+                return out;
+            }
+
+            function rollEffectCostGold(player, costSpec) {
+                const spec = (costSpec || '').toString().trim().toLowerCase();
+                if (spec.startsWith('g:')) {
+                    const n = Number(spec.slice(2));
+                    if (!Number.isFinite(n) || n < 0) return null;
+                    return Math.floor(n);
+                }
+                if (spec.startsWith('g_per_owned_role:')) {
+                    const role = spec.slice('g_per_owned_role:'.length);
+                    return ownedCitizenRoleSelectorCount(player, role);
+                }
+                if (spec === 'g:per_owned_holy_citizen' || spec === 'per_owned_holy_citizen') {
+                    return ownedCitizenRoleSelectorCount(player, 'holy_citizen');
+                }
+                return null;
+            }
+
+            function listRollSetOneDieOptions(player, rolled1, rolled2, turnNumber) {
+                const effects = parseRollSetOneDieEffects(player, turnNumber);
+                const gold = Number(player?.gold_score || 0);
+                const options = [];
+                effects.forEach((e) => {
+                    const costGold = rollEffectCostGold(player, e.costSpec);
+                    if (costGold === null || gold < costGold) return;
+                    if (Number(rolled1) !== Number(e.target)) {
+                        options.push({ die: 1, target: Number(e.target), costGold, domainName: e.domainName });
+                    }
+                    if (Number(rolled2) !== Number(e.target)) {
+                        options.push({ die: 2, target: Number(e.target), costGold, domainName: e.domainName });
+                    }
+                });
+                return options;
+            }
+
+            async function sendFinalizeRollChoice(d1, d2) {
+                if (!playerId || !currentGameId) return;
+                if (finalizeRollInFlight) return;
+                finalizeRollInFlight = true;
+                try {
+                    const res = await fetch(`/api/game/${currentGameId}/action`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            player_id: playerId,
+                            action_type: 'finalize_roll',
+                            die_one: clampDie(d1),
+                            die_two: clampDie(d2)
+                        })
+                    });
+                    const payload = await res.json();
+                    if (!res.ok) {
+                        alert(payload?.detail || 'Finalize roll failed');
+                        return;
+                    }
+                    if (payload && payload.game_state) applyGameStateClientUpdate(payload.game_state);
+                    else getGameState(false);
                 } catch (e) {
                     console.error(e);
                 } finally {
@@ -1076,6 +1315,7 @@ async def root():
                 if (reqAction === 'bonus_resource_choice') return true;
                 const trimmed = reqAction.trim();
                 if (trimmed.startsWith('choose ')) return true;
+                if (trimmed === 'choose_player' || trimmed === 'choose_monster_strength' || trimmed === 'domain_self_convert') return true;
                 if (reqAction === 'standard_action' && (gameState.phase || '') === 'action') return true;
                 return false;
             }
@@ -1189,6 +1429,7 @@ async def root():
                 }
                 const name = card.name || card.title || '(unnamed)';
                 const id = card.starter_id || card.citizen_id || card.monster_id || card.domain_id || card.duke_id || card.id || '';
+                const isCitizen = card.citizen_id !== undefined && card.citizen_id !== null;
 
                 const hints = [];
                 if (card.roll_match1 !== undefined || card.roll_match2 !== undefined) {
@@ -1200,6 +1441,7 @@ async def root():
                 if (card.strength_cost !== undefined) hints.push(`Strength cost: ${card.strength_cost}`);
                 if (card.magic_cost !== undefined) hints.push(`Magic cost: ${card.magic_cost}`);
                 pushHarvestHints(hints, card);
+                if (isCitizen && card.is_flipped) hints.push('Flipped — no harvest payout / roll spend counts');
 
                 const { sn, hn, son, wn } = citizenRoleCounts(card);
                 const roleParts = [];
@@ -1207,7 +1449,6 @@ async def root():
                 if (hn > 0) roleParts.push(`Holy +${hn}`);
                 if (son > 0) roleParts.push(`Soldier +${son}`);
                 if (wn > 0) roleParts.push(`Worker +${wn}`);
-                const isCitizen = card.citizen_id !== undefined && card.citizen_id !== null;
                 const isDomain = card.domain_id !== undefined && card.domain_id !== null;
                 const showRoleRow = (isCitizen || isDomain) && roleParts.length;
                 const roleBlock = showRoleRow
@@ -1232,7 +1473,9 @@ async def root():
                     if (!c || typeof c !== 'object') return;
                     const name = (c.name || c.title || '').toString().trim();
                     const id = c.starter_id || c.citizen_id || c.monster_id || c.domain_id || c.duke_id || c.id || '';
-                    const key = `${name}||${id}`;
+                    const isCitizenKey = c.citizen_id !== undefined && c.citizen_id !== null;
+                    const flipSeg = isCitizenKey ? `||flip:${c.is_flipped ? 1 : 0}` : '';
+                    const key = `${name}||${id}${flipSeg}`;
                     const cur = map.get(key);
                     if (cur) cur.count += 1;
                     else map.set(key, { card: c, count: 1, sortName: name.toLowerCase(), sortId: String(id) });
@@ -1276,6 +1519,17 @@ async def root():
 
                 // Otherwise synthesize from other special/effect fields we already serialize.
                 const parts = [];
+                // Include baseline harvest payouts so market rows show core card behavior,
+                // not just special/passive text.
+                pushHarvestHints(parts, card);
+                // Monsters use reward fields instead of harvest payout fields.
+                if (card.monster_id !== undefined && card.monster_id !== null) {
+                    const vp = Number(card.vp_reward || 0);
+                    const gr = Number(card.gold_reward || 0);
+                    const sr = Number(card.strength_reward || 0);
+                    const mr = Number(card.magic_reward || 0);
+                    parts.push(`Reward: VP ${vp} · G ${gr} · S ${sr} · M ${mr}`);
+                }
 
                 const passive = (card.passive_effect ?? '').toString().trim();
                 const activation = (card.activation_effect ?? '').toString().trim();
@@ -1414,6 +1668,35 @@ async def root():
                 return bits.join(' · ');
             }
 
+            const expandedMonsterStacks = new Set();
+
+            function isMonsterStackExpanded(stackIndex) {
+                return expandedMonsterStacks.has(Number(stackIndex));
+            }
+
+            function toggleMonsterStackExpand(stackIndex) {
+                const idx = Number(stackIndex);
+                if (Number.isNaN(idx)) return;
+                if (expandedMonsterStacks.has(idx)) expandedMonsterStacks.delete(idx);
+                else expandedMonsterStacks.add(idx);
+                if (lastGameState) renderBoardTableau(lastGameState);
+            }
+            window.toggleMonsterStackExpand = toggleMonsterStackExpand;
+
+            function renderMonsterStackCards(stack, stackIndex) {
+                const expanded = isMonsterStackExpanded(stackIndex);
+                const top = topOfStack(stack);
+                if (!top) return '';
+                if (!expanded) {
+                    return renderCardItem(top);
+                }
+                const cards = [...stack].reverse();
+                return `<div class="list">${cards.map((card, i) => {
+                    const role = i === 0 ? 'Top (slayable)' : 'Buried';
+                    return `<div><div class="mini" style="margin-bottom:4px;">${role}</div>${renderCardItem(card)}</div>`;
+                }).join('')}</div>`;
+            }
+
             function renderBoardStackSection(title, grid, kind) {
                 const g = Array.isArray(grid) ? grid : [];
                 const blocks = g.map((stack, idx) => {
@@ -1426,10 +1709,17 @@ async def root():
                         return `<div class="item"><div class="item-title">Stack ${idx + 1}</div><div class="mini">empty</div></div>`;
                     }
                     const meta = boardStackMeta(kind, top, depth);
+                    const expandControl = kind === 'monster'
+                        ? `<button type="button" onclick="toggleMonsterStackExpand(${idx})">${isMonsterStackExpanded(idx) ? 'Collapse' : 'Expand'}</button>`
+                        : '';
+                    const cardHtml = kind === 'monster'
+                        ? renderMonsterStackCards(stack, idx)
+                        : renderCardItem(top);
                     return `<div class="item" style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #eee;">
                         <div class="item-title">Stack ${idx + 1}</div>
+                        ${expandControl ? `<div style="margin:6px 0;">${expandControl}</div>` : ''}
                         <div class="mini" style="margin-bottom:6px;">${escapeHtml(meta)}</div>
-                        ${renderCardItem(top)}
+                        ${cardHtml}
                     </div>`;
                 });
                 return `<div class="tableau-card"><h3>${escapeHtml(title)}</h3><div class="list">${blocks.join('')}</div></div>`;
@@ -1444,7 +1734,7 @@ async def root():
                 const domainGrid = Array.isArray(gameState?.domain_grid) ? gameState.domain_grid : [];
                 const monsterGrid = Array.isArray(gameState?.monster_grid) ? gameState.monster_grid : [];
                 bodyEl.innerHTML = `
-                    <div class="mini" style="margin-bottom:12px;">Top of each stack is the play surface; buried cards are not shown.</div>
+                    <div class="mini" style="margin-bottom:12px;">Top of each stack is the play surface. Monster stacks can be expanded to view buried cards, but only the top monster is slayable.</div>
                     <div class="tableau-grid">
                         ${renderBoardStackSection('Citizens (market)', citizenGrid, 'citizen')}
                         ${renderBoardStackSection('Domains', domainGrid, 'domain')}
@@ -1494,16 +1784,16 @@ async def root():
                 return masks[value] || [];
             }
 
-            function buildDie(value) {
+            function buildDie(value, status, title) {
                 const die = document.createElement('div');
-                die.className = 'die';
+                die.className = 'die' + (status ? ` ${status}` : '');
                 const on = new Set(diePipMask(value));
                 for (let i = 0; i < 9; i++) {
                     const pip = document.createElement('div');
                     pip.className = 'pip' + (on.has(i) ? '' : ' off');
                     die.appendChild(pip);
                 }
-                die.title = `d${value || 0}`;
+                die.title = title || `d${value || 0}`;
                 return die;
             }
 
@@ -1511,6 +1801,20 @@ async def root():
                 const el = document.getElementById('gameLog');
                 if (!el) return;
                 const entries = Array.isArray(gameState?.game_log) ? gameState.game_log : [];
+                const logKey = JSON.stringify([
+                    gameState?.game_id || currentGameId || '',
+                    entries.map(e => [
+                        e && e.tick !== undefined && e.tick !== null ? e.tick : '',
+                        (e && (e.msg || e.message)) || ''
+                    ])
+                ]);
+                if (logKey === lastRenderedGameLogKey) return;
+
+                const wasAtBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 8;
+                const previousScrollTop = el.scrollTop;
+                const shouldAutoScroll = lastRenderedGameLogKey === null || wasAtBottom;
+                lastRenderedGameLogKey = logKey;
+
                 if (!entries.length) {
                     el.textContent = '(No events yet.)';
                     return;
@@ -1520,7 +1824,7 @@ async def root():
                     const msg = escapeHtml(String((e && e.msg) || (e && e.message) || ''));
                     return `<div class="game-log-line"><span class="game-log-tick">[${tick}]</span>${msg}</div>`;
                 }).join('');
-                el.scrollTop = el.scrollHeight;
+                el.scrollTop = shouldAutoScroll ? el.scrollHeight : previousScrollTop;
             }
 
             function renderDice(gameState) {
@@ -1533,12 +1837,20 @@ async def root():
 
                 const diceEl = document.getElementById('dice');
                 const metaEl = document.getElementById('diceMeta');
+                const effectsEl = document.getElementById('rollEffects');
                 const deltaEl = document.getElementById('harvestDeltas');
                 if (!diceEl || !metaEl) return;
 
+                const die1Changed = rolled1 && final1 && rolled1 !== final1;
+                const die2Changed = rolled2 && final2 && rolled2 !== final2;
+                const die1Status = die1Changed ? (final1 > rolled1 ? 'increase' : 'decrease') : '';
+                const die2Status = die2Changed ? (final2 > rolled2 ? 'increase' : 'decrease') : '';
+                const die1Display = die1Changed ? final1 : rolled1;
+                const die2Display = die2Changed ? final2 : rolled2;
+
                 diceEl.innerHTML = '';
-                diceEl.appendChild(buildDie(rolled1));
-                diceEl.appendChild(buildDie(rolled2));
+                diceEl.appendChild(buildDie(die1Display, die1Status, die1Changed ? `d${final1} (rolled ${rolled1})` : `d${die1Display}`));
+                diceEl.appendChild(buildDie(die2Display, die2Status, die2Changed ? `d${final2} (rolled ${rolled2})` : `d${die2Display}`));
 
                 const turn = gameState?.turn_number;
                 const phase = gameState?.phase;
@@ -1554,6 +1866,9 @@ async def root():
                 if ((gameState?.phase || '') === 'roll_pending') {
                     parts.push(`<span style="display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid #d6b26c;background:#fff6d8;color:#5b420a;font-weight:800;font-size:12px;">Awaiting finalize</span>`);
                 }
+                if ((gameState?.phase || '') === 'action_end_pending') {
+                    parts.push(`<span style="display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid #c9d6ea;background:#eef5ff;color:#1f3a5f;font-weight:800;font-size:12px;">Action-end domains</span>`);
+                }
                 if (turn !== undefined) parts.push(`Turn <strong>${turn}</strong>`);
                 if (phase) parts.push(`Phase <strong>${phase}</strong>`);
                 if (actionsRemaining !== undefined) parts.push(`Actions remaining <strong>${actionsRemaining}</strong>`);
@@ -1563,17 +1878,32 @@ async def root():
                 renderGameLog(gameState);
 
                 // Update rig hint text.
-                const hintEl = document.getElementById('rigHint');
+                const hintEl = document.getElementById('dicePanelHint');
                 if (hintEl) {
                     const s = getDiceRigSettings();
                     const msg = s.enabled
-                        ? `Enabled: will finalize as ${clampDie(s.d1)} + ${clampDie(s.d2)} (dice graphic still shows the real roll).`
-                        : `Disabled: roll will be finalized as the real roll.`;
+                        ? `Enabled: will finalize as ${clampDie(s.d1)} + ${clampDie(s.d2)} (graphic still shows the rolled dice).`
+                        : `Disabled: roll finalizes as the rolled dice.`;
                     hintEl.textContent = msg;
                 }
 
-                if (!deltaEl) return;
+                if (effectsEl) {
+                    const players = Array.isArray(gameState?.player_list) ? gameState.player_list : [];
+                    const activePlayerId = (gameState?.active_player_id || '').toString();
+                    const activePlayer = players.find(p => (p?.player_id || '').toString() === activePlayerId) || null;
+                    const effects = parseRollSetOneDieEffects(activePlayer, gameState.turn_number);
+                    if (!effects.length) {
+                        effectsEl.innerHTML = '<strong>Roll phase effects:</strong> none';
+                    } else {
+                        const rows = effects.map((e) => {
+                            return `<li><strong>${escapeHtml(e.domainName)}</strong>: set one die to <strong>${escapeHtml(String(e.target))}</strong> (cost: <code>${escapeHtml(e.costSpec)}</code>)</li>`;
+                        }).join('');
+                        effectsEl.innerHTML = `<strong>Roll phase effects (active player):</strong><ul>${rows}</ul>`;
+                    }
+                }
+
                 const players = Array.isArray(gameState?.player_list) ? gameState.player_list : [];
+                if (deltaEl) {
                 deltaEl.innerHTML = '';
                 players.forEach(p => {
                     const d = p?.harvest_delta || {};
@@ -1610,6 +1940,7 @@ async def root():
                     `;
                     deltaEl.appendChild(card);
                 });
+                }
 
                 renderChoicePanel(gameState);
             }
@@ -1622,7 +1953,8 @@ async def root():
                 // turn-based action_required: while one is active the engine
                 // will not advance and no per-player turn prompts are valid.
                 const concurrent = gameState?.concurrent_action || null;
-                if (concurrent && Array.isArray(concurrent.pending)) {
+                const concurrentPending = concurrent && Array.isArray(concurrent.pending) ? concurrent.pending : [];
+                if (concurrentPending.length > 0) {
                     return renderConcurrentActionPanel(gameState, concurrent);
                 }
 
@@ -1645,6 +1977,21 @@ async def root():
                 if (!reqId || reqId === gameState?.game_id) {
                     panel.innerHTML = '';
                     return;
+                }
+
+                if (reqAction === 'finalize_roll') {
+                    return renderFinalizeRollPrompt(gameState);
+                }
+
+                if (reqAction === 'domain_self_convert') {
+                    return renderDomainSelfConvertPrompt(gameState);
+                }
+
+                if (reqAction === 'choose_player') {
+                    return renderDomainChoosePlayer(gameState);
+                }
+                if (reqAction === 'choose_monster_strength') {
+                    return renderDomainChooseMonster(gameState);
                 }
 
                 // Generic "choose ..." prompt from special payouts (e.g. "choose g 1 m 1")
@@ -1746,6 +2093,10 @@ async def root():
                 if (t === 's') return 'Strength';
                 if (t === 'm') return 'Magic';
                 if (t === 'v') return 'Victory';
+                if (t.startsWith('citizens.')) {
+                    const name = t.split('.', 2)[1] || '';
+                    return name ? `${name} citizen` : 'Citizen';
+                }
                 return tok;
             }
 
@@ -1761,7 +2112,7 @@ async def root():
                     const token = parts[i];
                     const amount = parts[i + 1];
                     const tl = (token || '').toString().trim().toLowerCase();
-                    if (!(tl === 'g' || tl === 's' || tl === 'm' || tl === 'v')) continue;
+                    if (!(tl === 'g' || tl === 's' || tl === 'm' || tl === 'v' || tl.startsWith('citizens.'))) continue;
                     options.push({ token, amount });
                     if (options.length >= 3) break;
                 }
@@ -1775,8 +2126,17 @@ async def root():
                 const req = gameState?.action_required || {};
                 const reqId = req?.id || '';
                 const isYou = (playerId && reqId === playerId);
+                const pendingChoice = gameState?.pending_required_choice || null;
 
-                const options = parseChooseCommand(chooseCmd);
+                let options = parseChooseCommand(chooseCmd);
+                if (
+                    pendingChoice &&
+                    pendingChoice.kind === 'special_payout_choose' &&
+                    Array.isArray(pendingChoice.options) &&
+                    pendingChoice.options.length
+                ) {
+                    options = pendingChoice.options;
+                }
                 if (!options.length) {
                     panel.innerHTML = `<div style="padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
                         Waiting on required action from <code>${reqId}</code>: <strong>${escapeHtml(chooseCmd)}</strong>
@@ -1792,9 +2152,33 @@ async def root():
                 }
 
                 const buttons = options.map((opt, idx) => {
-                    const label = labelForChoiceToken(opt.token);
+                    const token = (opt?.token || '').toString();
+                    const label = labelForChoiceToken(token);
                     const amt = Number(opt.amount);
                     const prettyAmt = Number.isFinite(amt) ? amt : opt.amount;
+                    const isCitizen = token.trim().toLowerCase().startsWith('citizens.');
+                    if ((token || '').toString().trim().toLowerCase() === 'count_area') {
+                        const area = (opt?.area ?? '').toString();
+                        const res = (opt?.resource ?? '').toString().toLowerCase();
+                        const mult = Number(opt?.mult);
+                        const rLabel = labelForChoiceToken(res);
+                        const mText = Number.isFinite(mult) ? mult : opt?.mult;
+                        return `<button onclick="sendChooseIndex(${idx + 1})">+(${escapeHtml(mText)} x ${escapeHtml(area)}) ${escapeHtml(rLabel)}</button>`;
+                    }
+                    if (isCitizen) {
+                        const name = (opt?.name ?? '').toString().trim();
+                        const extras = Array.isArray(opt?.extras) ? opt.extras : [];
+                        const extraText = extras.map(e => {
+                            const et = (e?.token ?? '').toString().toLowerCase();
+                            const ea = Number(e?.amount);
+                            const el = labelForChoiceToken(et);
+                            const an = Number.isFinite(ea) ? ea : e?.amount;
+                            return `+${an} ${el}`;
+                        }).join(' + ');
+                        const extraSuffix = extraText ? ` + ${extraText}` : '';
+                        const who = name ? `${name} citizen` : label;
+                        return `<button onclick="sendChooseIndex(${idx + 1})">Gain ${escapeHtml(prettyAmt)} ${escapeHtml(who)}${escapeHtml(extraSuffix)}</button>`;
+                    }
                     return `<button onclick="sendChooseIndex(${idx + 1})">+${escapeHtml(prettyAmt)} ${escapeHtml(label)}</button>`;
                 }).join('');
 
@@ -1804,6 +2188,50 @@ async def root():
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
                             ${buttons}
                         </div>
+                    </div>
+                `;
+            }
+
+            function renderFinalizeRollPrompt(gameState) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+                const req = gameState?.action_required || {};
+                const reqId = (req?.id || '').toString();
+                const isYou = (playerId && reqId === playerId);
+                const rolled1 = clampDie(gameState?.rolled_die_one ?? gameState?.die_one ?? 1);
+                const rolled2 = clampDie(gameState?.rolled_die_two ?? gameState?.die_two ?? 1);
+
+                if (!isYou) {
+                    panel.innerHTML = `<div style="padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        Waiting on required action from <code>${escapeHtml(reqId)}</code>: <strong>finalize_roll</strong>
+                    </div>`;
+                    return;
+                }
+
+                const player = Array.isArray(gameState?.player_list)
+                    ? gameState.player_list.find(p => (p?.player_id || '') === playerId)
+                    : null;
+                const options = listRollSetOneDieOptions(player, rolled1, rolled2, gameState.turn_number);
+                const keepBtn = `<button onclick="sendFinalizeRollChoice(${rolled1}, ${rolled2})">Keep ${rolled1} + ${rolled2}</button>`;
+                const modBtns = options.map((o) => {
+                    const fromVal = (o.die === 1) ? rolled1 : rolled2;
+                    const d1 = (o.die === 1) ? o.target : rolled1;
+                    const d2 = (o.die === 2) ? o.target : rolled2;
+                    return `<button onclick="sendFinalizeRollChoice(${d1}, ${d2})">Set die ${o.die}: ${fromVal} → ${o.target} (pay ${o.costGold}g via ${escapeHtml(o.domainName)})</button>`;
+                }).join(' ');
+                const note = options.length
+                    ? '<div class="mini" style="margin-top:6px;">Choose a roll modifier or keep the rolled dice.</div>'
+                    : '<div class="mini" style="margin-top:6px;">No roll modifiers available; finalize to continue.</div>';
+
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        <div style="font-weight:700;margin-bottom:8px;">Finalize Roll</div>
+                        <div style="margin-bottom:8px;">Rolled: <strong>${rolled1} + ${rolled2}</strong></div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            ${keepBtn}
+                            ${modBtns}
+                        </div>
+                        ${note}
                     </div>
                 `;
             }
@@ -1826,6 +2254,232 @@ async def root():
                 }
             }
 
+            async function sendChoosePlayerIndex(n) {
+                if (!playerId || !currentGameId) return;
+                try {
+                    await fetch(`/api/game/${currentGameId}/action`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            player_id: playerId,
+                            action_type: 'act_on_required_action',
+                            action: `choose_player ${Number(n)}`
+                        })
+                    });
+                    getGameState(false);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
+            async function sendChooseMonsterIndex(n) {
+                if (!playerId || !currentGameId) return;
+                try {
+                    await fetch(`/api/game/${currentGameId}/action`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            player_id: playerId,
+                            action_type: 'act_on_required_action',
+                            action: `choose_monster ${Number(n)}`
+                        })
+                    });
+                    getGameState(false);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
+            async function sendDomainManipulateSkip() {
+                if (!playerId || !currentGameId) return;
+                try {
+                    await fetch(`/api/game/${currentGameId}/action`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            player_id: playerId,
+                            action_type: 'act_on_required_action',
+                            action: 'skip'
+                        })
+                    });
+                    getGameState(false);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
+            function resourceSpecLabel(spec) {
+                const raw = (spec || '').toString().trim().toLowerCase();
+                    const m = /^(g|s|m|v|vp)\\s*:\\s*(\\d+)$/.exec(raw);
+                if (!m) return raw || '';
+                const n = Number(m[2]);
+                const k = m[1] === 'vp' ? 'v' : m[1];
+                const word = k === 'g' ? 'gold' : k === 's' ? 'strength' : k === 'm' ? 'magic' : 'VP';
+                const unit = k === 'v' ? '' : ' ';
+                return k === 'v' ? `${n} VP` : `${n}${unit}${word}`;
+            }
+
+            function domainEffectGainIsVp(kv) {
+                const g = (kv?.gain ?? '').toString().trim().toLowerCase();
+                return g.startsWith('v:') || g.startsWith('vp:');
+            }
+
+            function domainManipulateExplain(prc) {
+                const item = prc?.item || {};
+                const mode = (item.mode || '').toString().trim().toLowerCase();
+                const kv = item.kv || {};
+                if (mode === 'pay_to_player') {
+                    const pay = resourceSpecLabel(kv.pay);
+                    const gain = resourceSpecLabel(kv.gain);
+                    const gainLine = gain ? ` Gain ${gain} from the bank (not from that player).` : '';
+                    let decline = '';
+                    if (prc?.allow_skip && domainEffectGainIsVp(kv)) {
+                        decline = ' You may decline: no payment and no VP.';
+                    } else if (prc?.allow_skip) {
+                        decline = ' You may skip this optional effect.';
+                    }
+                    return `Pay ${pay || '(see rules)'} to the player you choose.${gainLine}${decline}`;
+                }
+                if (mode === 'take_from_player') {
+                    const take = resourceSpecLabel(kv.take);
+                    return `Take ${take || '(see rules)'} from the player you choose.`;
+                }
+                return 'Choose another player.';
+            }
+
+            function selfConvertExplain(kv) {
+                const pay = resourceSpecLabel(kv?.pay);
+                const gain = resourceSpecLabel(kv?.gain);
+                return `Trade ${pay || '?'} from your supply for ${gain || '?'} (bank).`;
+            }
+
+            function renderDomainSelfConvertPrompt(gameState) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+                const req = gameState?.action_required || {};
+                const reqId = (req?.id || '').toString();
+                const isYou = (playerId && reqId === playerId);
+                const prc = gameState?.pending_required_choice || null;
+                const dn = (prc?.domain_name || 'Domain').toString();
+                const kv = prc?.kv || {};
+                const explain = selfConvertExplain(kv);
+                if (!isYou) {
+                    panel.innerHTML = `<div style="padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        Waiting on <code>${escapeHtml(reqId)}</code> for <strong>${escapeHtml(dn)}</strong> optional activation trade.
+                    </div>`;
+                    return;
+                }
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(dn)}: optional trade</div>
+                        <div class="mini" style="margin-bottom:8px;color:#333;">${escapeHtml(explain)}</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button type="button" onclick="sendSelfConvertConfirm()">Confirm trade</button>
+                            <button type="button" onclick="sendSelfConvertDecline()">Decline</button>
+                        </div>
+                    </div>`;
+            }
+
+            async function sendSelfConvertConfirm() {
+                if (!playerId || !currentGameId) return;
+                try {
+                    await fetch(`/api/game/${currentGameId}/action`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            player_id: playerId,
+                            action_type: 'act_on_required_action',
+                            action: 'confirm_self_convert'
+                        })
+                    });
+                    getGameState(false);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
+            async function sendSelfConvertDecline() {
+                if (!playerId || !currentGameId) return;
+                try {
+                    await fetch(`/api/game/${currentGameId}/action`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            player_id: playerId,
+                            action_type: 'act_on_required_action',
+                            action: 'skip'
+                        })
+                    });
+                    getGameState(false);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
+            function renderDomainChoosePlayer(gameState) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+                const req = gameState?.action_required || {};
+                const reqId = (req?.id || '').toString();
+                const isYou = (playerId && reqId === playerId);
+                const prc = gameState?.pending_required_choice || null;
+                const opts = Array.isArray(prc?.options) ? prc.options : [];
+                const dn = (prc?.item?.domain_name || 'Domain').toString();
+                const explain = prc?.kind === 'domain_manipulate_player'
+                    ? domainManipulateExplain(prc)
+                    : 'Choose another player.';
+                if (!isYou) {
+                    panel.innerHTML = `<div style="padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        Waiting on <code>${escapeHtml(reqId)}</code> to choose a player for <strong>${escapeHtml(dn)}</strong>.
+                    </div>`;
+                    return;
+                }
+                const kv = prc?.item?.kv || {};
+                const skipLabel = (prc?.allow_skip && domainEffectGainIsVp(kv))
+                    ? 'Decline (no pay, no VP)'
+                    : 'Skip (optional)';
+                const skipBtn = prc?.allow_skip
+                    ? `<button type="button" onclick="sendDomainManipulateSkip()" style="margin-left:8px;">${escapeHtml(skipLabel)}</button>`
+                    : '';
+                const btns = opts.map((o, idx) => {
+                    const nm = escapeHtml((o?.name || o?.player_id || '?').toString());
+                    return `<button type="button" onclick="sendChoosePlayerIndex(${idx + 1})">${nm}</button>`;
+                }).join(' ');
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(dn)}: choose another player</div>
+                        <div class="mini" style="margin-bottom:8px;color:#333;">${escapeHtml(explain)}</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">${btns}${skipBtn}</div>
+                    </div>`;
+            }
+
+            function renderDomainChooseMonster(gameState) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+                const req = gameState?.action_required || {};
+                const reqId = (req?.id || '').toString();
+                const isYou = (playerId && reqId === playerId);
+                const prc = gameState?.pending_required_choice || null;
+                const opts = Array.isArray(prc?.options) ? prc.options : [];
+                const dn = (prc?.domain_name || 'Domain').toString();
+                const delta = Number(prc?.delta) || 0;
+                if (!isYou) {
+                    panel.innerHTML = `<div style="padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        Waiting on <code>${escapeHtml(reqId)}</code> for <strong>${escapeHtml(dn)}</strong> (monster +${delta} strength cost).
+                    </div>`;
+                    return;
+                }
+                const btns = opts.map((o, idx) => {
+                    const nm = escapeHtml((o?.name || '?').toString());
+                    return `<button type="button" onclick="sendChooseMonsterIndex(${idx + 1})">${nm}</button>`;
+                }).join(' ');
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(dn)}: add +${delta} to a center monster strength cost</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">${btns}</div>
+                    </div>`;
+            }
+
             // Concurrent (non-ordered) prompt rendering.
             //
             // The server exposes `concurrent_action = { kind, pending, completed, ... }`.
@@ -1835,6 +2489,7 @@ async def root():
             // CONCURRENT_RENDERERS keyed on the same `kind` used server-side.
             const CONCURRENT_RENDERERS = {
                 choose_duke: renderChooseDukeConcurrent,
+                flip_one_citizen: renderFlipOneCitizenConcurrent,
             };
 
             function renderConcurrentActionPanel(gameState, concurrent) {
@@ -1921,6 +2576,78 @@ async def root():
                 `;
             }
 
+            function renderFlipOneCitizenConcurrent(gameState, concurrent) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+
+                const pending = Array.isArray(concurrent.pending) ? concurrent.pending : [];
+                const completed = Array.isArray(concurrent.completed) ? concurrent.completed : [];
+                const isPending = !!(playerId && pending.includes(playerId));
+                const totalParticipants = pending.length + completed.length;
+                const data = concurrent.data || {};
+                const buyerId = (data.buyer_id || '').toString();
+
+                const players = Array.isArray(gameState?.player_list) ? gameState.player_list : [];
+                const buyer = players.find(p => (p?.player_id || '') === buyerId) || null;
+                const buyerTag = buyer?.name ? `${escapeHtml(buyer.name)}` : (buyerId ? `<code>${escapeHtml(buyerId)}</code>` : '');
+                const you = players.find(p => p?.player_id === playerId) || null;
+                const waitingLabels = pendingPlayerLabels(gameState, pending);
+
+                const statusLine = `<div class="mini" style="margin-bottom:8px;">
+                    Cursed Cavern — flip one citizen face-down: ${completed.length}/${totalParticipants} player choice(s) submitted.
+                    ${pending.length ? `Waiting on: <strong>${escapeHtml(waitingLabels.join(', '))}</strong>.` : ''}
+                    ${buyerTag ? `<div style="margin-top:6px;">Triggered by <strong>${buyerTag}</strong>.</div>` : ''}
+                </div>`;
+
+                if (!isPending) {
+                    const youDone = !!(playerId && completed.includes(playerId));
+                    const yourLine = youDone
+                        ? `<div>You already chose a citizen to flip. Waiting on other players.</div>`
+                        : `<div>You have no pending flip choice (no eligible citizens, or not in this prompt).</div>`;
+                    panel.innerHTML = `<div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        ${statusLine}${yourLine}
+                    </div>`;
+                    return;
+                }
+
+                const citizens = Array.isArray(you?.owned_citizens) ? you.owned_citizens : [];
+                const choices = [];
+                citizens.forEach((c, idx) => {
+                    if (!c || c.is_flipped) return;
+                    const nm = (c.name || `Citizen #${idx}`).toString();
+                    choices.push({ idx, card: c, nm });
+                });
+
+                if (!choices.length) {
+                    panel.innerHTML = `<div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        ${statusLine}<div>No face-up citizens on your tableau — contact host if this seems wrong.</div>
+                    </div>`;
+                    return;
+                }
+
+                const buttons = choices.map(({ idx, card, nm }) => {
+                    const rm = card.roll_match1 !== undefined || card.roll_match2 !== undefined
+                        ? ` · Roll ${card.roll_match1 ?? ''}/${card.roll_match2 ?? ''}`
+                        : '';
+                    const gc = card.gold_cost !== undefined ? ` · Cost ${card.gold_cost}g` : '';
+                    return `<div style="border:1px solid #e6e6e6;background:#fff;border-radius:10px;padding:10px;margin-bottom:8px;">
+                        <div style="font-weight:800;">${escapeHtml(nm)} <span style="color:#666;font-weight:600;">(slot #${idx})</span></div>
+                        <div style="color:#555;font-size:13px;margin-top:4px;">${escapeHtml(rm + gc)}</div>
+                        <div style="margin-top:8px;">
+                            <button type="button" onclick="submitConcurrentAction('flip_one_citizen', '${idx}')">Flip this citizen face-down</button>
+                        </div>
+                    </div>`;
+                }).join('');
+
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        ${statusLine}
+                        <div style="font-weight:800;margin-bottom:8px;">Choose 1 citizen to flip face-down</div>
+                        <div style="display:flex;flex-direction:column;">${buttons}</div>
+                    </div>
+                `;
+            }
+
             async function submitConcurrentAction(kind, response) {
                 if (!playerId || !currentGameId) return;
                 try {
@@ -1989,6 +2716,40 @@ async def root():
                 return n;
             }
 
+            function normalizedPassiveEffects(player, turnNumber) {
+                const out = [];
+                const domains = Array.isArray(player?.owned_domains) ? player.owned_domains : [];
+                domains.forEach((d) => {
+                    if (domainPassiveOnBuildTurnCooldown(d, turnNumber)) return;
+                    const name = (d?.name ?? '').toString().trim().toLowerCase();
+                    const text = (d?.text ?? '').toString().trim().toLowerCase();
+                    const raw = (d?.passive_effect ?? '').toString().trim().toLowerCase();
+                    if (raw) {
+                        out.push(raw);
+                        const nrm = raw.replace(/effect:add/g, 'effect.add').replace(/action:/g, 'action.');
+                        if (nrm.startsWith('effect.add ')) {
+                            out.push(nrm.slice('effect.add '.length).trim());
+                        }
+                    }
+                    // Backward-compatibility for seed data where passive_effect is NULL
+                    // and behavior only exists in human-readable card text.
+                    if (name.includes('emerald stronghold') || (text.includes("ignore '+'") && text.includes('buying citizens'))) {
+                        out.push('action.emeraldstronghold');
+                    }
+                    if (name.includes("pratchett") || (text.includes('1gp less') && text.includes('domain'))) {
+                        out.push('action.pratchettsplateau');
+                    }
+                });
+                return out;
+            }
+
+            function hasActionEffectFlag(player, flag, turnNumber) {
+                const target = (flag ?? '').toString().trim().toLowerCase();
+                if (!target) return false;
+                const effects = normalizedPassiveEffects(player, turnNumber);
+                return effects.includes(target);
+            }
+
             function clampPayInt(value, minV, maxV) {
                 let n = Math.floor(Number(value));
                 if (!Number.isFinite(n)) n = 0;
@@ -2010,18 +2771,58 @@ async def root():
                 return { gold: g, strength: s, magic: m };
             }
 
-            function bindPayCostToggles(panel) {
-                if (!panel) return;
-                panel.querySelectorAll('.pay-cost-toggle').forEach((el) => {
-                    el.onclick = function (e) {
-                        e.preventDefault();
-                        const key = el.getAttribute('data-pay-key');
-                        if (!key) return;
-                        const box = document.getElementById('pay-editor-' + key);
-                        if (!box) return;
-                        box.classList.toggle('open');
+            function capturePayEditorRenderState(panel) {
+                const state = {};
+                if (!panel) return state;
+                const active = document.activeElement;
+                panel.querySelectorAll('.pay-cost-key').forEach((el) => {
+                    const key = el.getAttribute('data-pay-key');
+                    if (!key) return;
+                    const row = el.closest('.pay-row');
+                    const box = document.getElementById('pay-editor-' + key);
+                    if (!row || !box) return;
+                    const gEl = row.querySelector('.pay-g');
+                    const sEl = row.querySelector('.pay-s');
+                    const mEl = row.querySelector('.pay-m');
+                    const entry = {
+                        gold: gEl ? gEl.value : '',
+                        strength: sEl ? sEl.value : '',
+                        magic: mEl ? mEl.value : '',
+                        focusClass: '',
                     };
+                    if (active && row.contains(active)) {
+                        if (active.classList.contains('pay-g')) entry.focusClass = 'pay-g';
+                        else if (active.classList.contains('pay-s')) entry.focusClass = 'pay-s';
+                        else if (active.classList.contains('pay-m')) entry.focusClass = 'pay-m';
+                    }
+                    state[key] = entry;
                 });
+                return state;
+            }
+
+            function restorePayEditorRenderState(panel, state) {
+                if (!panel || !state) return;
+                let focusTarget = null;
+                panel.querySelectorAll('.pay-cost-key').forEach((el) => {
+                    const key = el.getAttribute('data-pay-key');
+                    const entry = key ? state[key] : null;
+                    if (!entry) return;
+                    const row = el.closest('.pay-row');
+                    const box = document.getElementById('pay-editor-' + key);
+                    if (!row || !box) return;
+                    const gEl = row.querySelector('.pay-g');
+                    const sEl = row.querySelector('.pay-s');
+                    const mEl = row.querySelector('.pay-m');
+                    if (gEl) gEl.value = clampPayInt(entry.gold, gEl.min, gEl.max);
+                    if (sEl) sEl.value = clampPayInt(entry.strength, sEl.min, sEl.max);
+                    if (mEl) mEl.value = clampPayInt(entry.magic, mEl.min, mEl.max);
+                    if (entry.focusClass) {
+                        focusTarget = row.querySelector('.' + entry.focusClass);
+                    }
+                });
+                if (focusTarget) {
+                    focusTarget.focus();
+                }
             }
 
             async function hireCitizenFromRow(btn) {
@@ -2041,7 +2842,7 @@ async def root():
                 getGameState(false);
             }
 
-            async function buyDomainFromRow(btn) {
+            async function buildDomainFromRow(btn) {
                 const row = btn.closest('.pay-row');
                 if (!row || !playerId || !currentGameId) return;
                 const p = readPayRow(row);
@@ -2050,7 +2851,7 @@ async def root():
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         player_id: playerId,
-                        action_type: 'buy_domain',
+                        action_type: 'build_domain',
                         domain_id: Number(row.dataset.domainId),
                         payment: { gold: p.gold, strength: p.strength, magic: p.magic }
                     })
@@ -2078,6 +2879,7 @@ async def root():
             function renderStandardActionPanel(gameState) {
                 const panel = document.getElementById('choicePanel');
                 if (!panel) return;
+                const payEditorState = capturePayEditorRenderState(panel);
 
                 const req = gameState?.action_required || {};
                 const reqId = req?.id || '';
@@ -2099,6 +2901,9 @@ async def root():
                 const S = Number(p?.strength_score || 0);
                 const M = Number(p?.magic_score || 0);
                 const V = Number(p?.victory_score || 0);
+                const tn = Number(gameState?.turn_number);
+                const emeraldActive = hasActionEffectFlag(p, 'action.emeraldstronghold', tn);
+                const pratchettActive = hasActionEffectFlag(p, 'action.pratchettsplateau', tn);
 
                 const affordCitizens = [];
                 const affordDomains = [];
@@ -2110,12 +2915,12 @@ async def root():
                     const top = topOfStack(stack);
                     if (!top) return;
                     const baseCost = Number(top.gold_cost || 0);
-                    const surcharge = ownedNameCount(p, top.name);
+                    const surcharge = emeraldActive ? 0 : ownedNameCount(p, top.name);
                     const scaledCost = baseCost + surcharge;
                     const evalRes = canAffordCost(p, { gold: scaledCost, strength: 0, magicMin: 0 });
                     console.log('[AFFORD_CHECK] citizen', { stackIndex: idx, stackSize: stack?.length || 0, card: top, player: { G, S, M, V }, eval: evalRes });
                     if (top.is_accessible && evalRes.ok) {
-                        affordCitizens.push({ card: top, stackIndex: idx, stackSize: stack.length, pay: evalRes, scaledCost, surcharge, baseCost });
+                        affordCitizens.push({ card: top, stackIndex: idx, stackSize: stack.length, pay: evalRes, scaledCost, surcharge, baseCost, emeraldActive });
                     }
                 });
 
@@ -2124,10 +2929,12 @@ async def root():
                 domainGrid.forEach((stack, idx) => {
                     const top = topOfStack(stack);
                     if (!top) return;
-                    const evalRes = canAffordCost(p, { gold: Number(top.gold_cost || 0), strength: 0, magicMin: 0 });
+                    const baseCost = Number(top.gold_cost || 0);
+                    const effectiveGold = Math.max(0, baseCost - (pratchettActive ? 1 : 0));
+                    const evalRes = canAffordCost(p, { gold: effectiveGold, strength: 0, magicMin: 0 });
                     console.log('[AFFORD_CHECK] domain', { stackIndex: idx, stackSize: stack?.length || 0, card: top, player: { G, S, M, V }, eval: evalRes });
                     if (top.is_visible && top.is_accessible && evalRes.ok) {
-                        affordDomains.push({ card: top, stackIndex: idx, stackSize: stack.length, pay: evalRes });
+                        affordDomains.push({ card: top, stackIndex: idx, stackSize: stack.length, pay: evalRes, baseCost, effectiveGold, pratchettActive });
                     }
                 });
 
@@ -2150,6 +2957,12 @@ async def root():
                 const resourcesLine = `<div style="margin-bottom:8px;">
                     Resources: <strong>G ${G}</strong> · <strong>S ${S}</strong> · <strong>M ${M}</strong> · <strong>VP ${V}</strong>
                 </div>`;
+                const activeEffects = [];
+                if (emeraldActive) activeEffects.push('Emerald Stronghold: ignore citizen duplicate surcharge');
+                if (pratchettActive) activeEffects.push("Pratchett's Plateau: domains cost 1 less gold");
+                const effectsBanner = activeEffects.length
+                    ? `<div class="mini" style="margin-bottom:8px;padding:6px 8px;border:1px solid #d5e8ff;background:#f4f9ff;border-radius:6px;">Active effects: ${escapeHtml(activeEffects.join(' · '))}</div>`
+                    : '';
 
                 const takeResourceRow = isYou
                     ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #ccc;">
@@ -2181,13 +2994,20 @@ async def root():
                     const dupHint = Number(it.surcharge || 0)
                         ? ' <span style="color:#666;">(base ' + Number(it.baseCost || 0) + ' + ' + Number(it.surcharge || 0) + ' dupes)</span>'
                         : '';
-                    const costSummary = 'Cost: G ' + cost + ' · pay G' + pay.payGold + (pay.payMagic ? ', M' + pay.payMagic : '') + dupHint + ' · Stack ' + it.stackSize;
+                    const emeraldHint = (!Number(it.surcharge || 0) && it.emeraldActive)
+                        ? ' <span style="color:#666;">(Emerald: no duplicate surcharge)</span>'
+                        : '';
+                    const rulesText = cardFullText(c);
+                    const rulesLine = rulesText
+                        ? '<div style="margin-top:3px;color:#555;white-space:pre-wrap;">' + escapeHtml(rulesText) + '</div>'
+                        : '';
+                    const costSummary = 'Cost: G ' + cost + ' · pay G' + pay.payGold + (pay.payMagic ? ', M' + pay.payMagic : '') + dupHint + emeraldHint + ' · Stack ' + it.stackSize;
                     const btn = isYou ? '<button type="button" onclick="hireCitizenFromRow(this)">Hire</button>' : '';
                     return '<div class="pay-row" data-citizen-id="' + c.citizen_id + '">' +
                         btn +
-                        ' <span><strong>' + escapeHtml(c.name) + '</strong> (#' + c.citizen_id + ')' + roleHint + '</span>' +
+                        ' <span><strong>' + escapeHtml(c.name) + '</strong> (#' + c.citizen_id + ')' + roleHint + rulesLine + '</span>' +
                         ' <span class="cost-line" style="color:#555;">' +
-                        '<span class="pay-cost-toggle" data-pay-key="' + key + '" style="cursor:pointer;text-decoration:underline;">' + costSummary + '</span>' +
+                        '<span class="pay-cost-key" data-pay-key="' + key + '">' + costSummary + '</span>' +
                         '<div id="pay-editor-' + key + '" class="pay-controls">' +
                         '<span style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
                         '<label>G <input type="number" class="pay-g" min="0" max="' + G + '" value="' + pay.payGold + '"></label>' +
@@ -2199,15 +3019,22 @@ async def root():
                 const domainHtml = listSection('Domains (visible tops)', affordDomains, (it) => {
                     const d = it.card;
                     const key = 'd-' + d.domain_id;
-                    const cost = Number(d.gold_cost || 0);
+                    const cost = Number(it.effectiveGold ?? d.gold_cost ?? 0);
                     const pay = it.pay;
-                    const costSummary = 'Cost: G ' + cost + ' · pay G' + pay.payGold + (pay.payMagic ? ', M' + pay.payMagic : '') + ' · Stack ' + it.stackSize;
-                    const btn = isYou ? '<button type="button" onclick="buyDomainFromRow(this)">Buy</button>' : '';
+                    const pratchettHint = (it.pratchettActive && Number(it.baseCost || 0) !== cost)
+                        ? ' <span style="color:#666;">(base ' + Number(it.baseCost || 0) + ' - 1 Pratchett)</span>'
+                        : '';
+                    const rulesText = cardFullText(d);
+                    const rulesLine = rulesText
+                        ? '<div style="margin-top:3px;color:#555;white-space:pre-wrap;">' + escapeHtml(rulesText) + '</div>'
+                        : '';
+                    const costSummary = 'Cost: G ' + cost + ' · pay G' + pay.payGold + (pay.payMagic ? ', M' + pay.payMagic : '') + pratchettHint + ' · Stack ' + it.stackSize;
+                    const btn = isYou ? '<button type="button" onclick="buildDomainFromRow(this)">Build</button>' : '';
                     return '<div class="pay-row" data-domain-id="' + d.domain_id + '">' +
                         btn +
-                        ' <span><strong>' + escapeHtml(d.name) + '</strong> (#' + d.domain_id + ')</span>' +
+                        ' <span><strong>' + escapeHtml(d.name) + '</strong> (#' + d.domain_id + ')' + rulesLine + '</span>' +
                         ' <span class="cost-line" style="color:#555;">' +
-                        '<span class="pay-cost-toggle" data-pay-key="' + key + '" style="cursor:pointer;text-decoration:underline;">' + costSummary + '</span>' +
+                        '<span class="pay-cost-key" data-pay-key="' + key + '">' + costSummary + '</span>' +
                         '<div id="pay-editor-' + key + '" class="pay-controls">' +
                         '<span style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
                         '<label>G <input type="number" class="pay-g" min="0" max="' + G + '" value="' + pay.payGold + '"></label>' +
@@ -2222,13 +3049,17 @@ async def root():
                     const sCost = Number(mcard.strength_cost || 0);
                     const mMin = Number(mcard.magic_cost || 0);
                     const pay = it.pay;
+                    const rulesText = cardFullText(mcard);
+                    const rulesLine = rulesText
+                        ? '<div style="margin-top:3px;color:#555;white-space:pre-wrap;">' + escapeHtml(rulesText) + '</div>'
+                        : '';
                     const costSummary = 'Cost: S ' + sCost + ' + M ' + mMin + ' min · pay S' + pay.payStrength + ', M' + pay.payMagic + ' · Stack ' + it.stackSize;
                     const btn = isYou ? '<button type="button" onclick="slayMonsterFromRow(this)">Slay</button>' : '';
                     return '<div class="pay-row" data-monster-id="' + mcard.monster_id + '">' +
                         btn +
-                        ' <span><strong>' + escapeHtml(mcard.name) + '</strong> (#' + mcard.monster_id + ')</span>' +
+                        ' <span><strong>' + escapeHtml(mcard.name) + '</strong> (#' + mcard.monster_id + ')' + rulesLine + '</span>' +
                         ' <span class="cost-line" style="color:#555;">' +
-                        '<span class="pay-cost-toggle" data-pay-key="' + key + '" style="cursor:pointer;text-decoration:underline;">' + costSummary + '</span>' +
+                        '<span class="pay-cost-key" data-pay-key="' + key + '">' + costSummary + '</span>' +
                         '<div id="pay-editor-' + key + '" class="pay-controls">' +
                         '<span style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
                         '<label>G <input type="number" class="pay-g" min="0" max="0" value="0" title="Monsters use strength and magic only"></label>' +
@@ -2241,13 +3072,14 @@ async def root():
                     <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
                         ${header}
                         ${resourcesLine}
+                        ${effectsBanner}
                         ${takeResourceRow}
                         ${citizenHtml}
                         ${domainHtml}
                         ${monsterHtml}
                     </div>
                 `;
-                bindPayCostToggles(panel);
+                restorePayEditorRenderState(panel, payEditorState);
             }
 
             async function takeResourceFromChoice(resource) {
@@ -2285,8 +3117,9 @@ async def root():
                 }
             }
 
-            async function sendHarvestCard(slotKey) {
+            async function sendHarvestCard(slotKey, options = {}) {
                 if (!playerId || !currentGameId) return;
+                const suppressAlert = !!(options && options.suppressAlert);
                 const sk = (slotKey || '').toString().trim();
                 if (!sk) return;
                 try {
@@ -2301,13 +3134,17 @@ async def root():
                     });
                     if (!res.ok) {
                         const err = await res.json().catch(() => ({}));
-                        alert(err.detail || res.statusText || 'Harvest failed');
+                        if (!suppressAlert) {
+                            alert(err.detail || res.statusText || 'Harvest failed');
+                        }
                         return;
                     }
                     getGameState(false);
                 } catch (e) {
                     console.error(e);
-                    alert(e.message || 'Harvest failed');
+                    if (!suppressAlert) {
+                        alert(e.message || 'Harvest failed');
+                    }
                 }
             }
 
@@ -2330,14 +3167,14 @@ async def root():
                 getGameState(false);
             }
 
-            async function buyDomain(domainId, goldCost, magicCost) {
+            async function buildDomain(domainId, goldCost, magicCost) {
                 if (!playerId || !currentGameId) return;
                 await fetch(`/api/game/${currentGameId}/action`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         player_id: playerId,
-                        action_type: 'buy_domain',
+                        action_type: 'build_domain',
                         domain_id: domainId,
                         payment: {
                             gold: Number(goldCost || 0),
@@ -2379,4 +3216,3 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
