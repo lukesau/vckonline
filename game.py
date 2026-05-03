@@ -93,6 +93,28 @@ def _validate_monster_slay_payment(player, strength_cost, magic_min, gp, sp, mp)
         raise ValueError("Insufficient resources.")
 
 
+def _player_resource_balances(player):
+    if not player:
+        return None
+    return {
+        "g": int(getattr(player, "gold_score", 0)),
+        "s": int(getattr(player, "strength_score", 0)),
+        "m": int(getattr(player, "magic_score", 0)),
+        "v": int(getattr(player, "victory_score", 0)),
+    }
+
+
+def _balances_allow_payout(balances, payout_vec):
+    """balances: dict g,s,m,v; payout_vec: [dg, ds, dm, dv]."""
+    if not balances:
+        return False
+    keys = ("g", "s", "m", "v")
+    for i, k in enumerate(keys):
+        if int(balances.get(k, 0)) + int(payout_vec[i]) < 0:
+            return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Concurrent (non-ordered) action subsystem.
 #
@@ -216,6 +238,9 @@ class Game:
         self.rolled_die_two = game_state.get('rolled_die_two', self.die_two)
         self.rolled_die_sum = game_state.get('rolled_die_sum', self.die_sum)
         self.exhausted_count = game_state['exhausted_count']
+        self.exhausted_stack = list(game_state.get('exhausted_stack') or [])
+        self.end_game_triggered = game_state.get('end_game_triggered', False)
+        self.final_scores = game_state.get('final_scores', None)
         self.effects = game_state['effects']
         self.action_required = game_state['action_required']
         # Concurrent (non-ordered) prompt: all listed players must respond before progression.
@@ -237,6 +262,8 @@ class Game:
         self.last_active_time = 0
         self.game_log = list(game_state.get('game_log') or [])
         self.pending_action_end_queue = list(game_state.get("pending_action_end_queue") or [])
+        self.pending_required_choice = game_state.get("pending_required_choice")
+        self._silent_harvest_batch = False
         # Between roll and harvest we allow a small "finalization window" where effects (or dev rigging)
         # may legally change the dice. When present, the engine blocks in roll_pending until finalized.
         self.pending_roll = game_state.get('pending_roll') or None
@@ -285,6 +312,9 @@ class Game:
         Advance the game by one deterministic tick.
         This is intentionally small-grained so the server can call it implicitly.
         """
+        if self.phase == 'game_over':
+            return False
+
         # Block on any active concurrent (non-ordered) prompt first.
         if self.is_blocked_on_concurrent_action():
             return False
@@ -292,8 +322,15 @@ class Game:
         # Block only on required player choices (not on standard action prompts)
         if self.action_required and self.action_required.get("id") and self.action_required.get("id") != self.game_id:
             aa = str(self.action_required.get("action", "") or "")
-            if self.action_required.get("action") == "bonus_resource_choice" or aa.startswith("choose ") or aa.startswith(
-                    "choose_player") or aa.startswith("choose_monster") or aa == "domain_self_convert":
+            if (
+                self.action_required.get("action") == "bonus_resource_choice"
+                or aa == "manual_harvest"
+                or aa == "harvest_optional_exchange"
+                or aa.startswith("choose ")
+                or aa.startswith("choose_player")
+                or aa.startswith("choose_monster")
+                or aa == "domain_self_convert"
+            ):
                 return False
 
         if self.phase == "setup":
@@ -337,8 +374,17 @@ class Game:
             if self.pending_action_end_queue:
                 return False
             finisher = self._player_label(self.current_player_id())
+            if not self.end_game_triggered:
+                reason = self._check_end_game_condition()
+                if reason:
+                    self.end_game_triggered = True
+                    self._log_game_event(f"End-game condition met ({reason}); finishing this round.")
             self.turn_index = (self.turn_index + 1) % max(1, len(self.player_list))
             self.turn_number = int(self.turn_number) + 1
+            if self.end_game_triggered and self.player_list[self.turn_index].is_first:
+                self._log_game_event(f"{finisher} ended their turn.")
+                self._finalize_game()
+                return True
             self.phase = 'roll'
             self.actions_remaining = 0
             self.action_required["id"] = self.game_id
@@ -401,8 +447,17 @@ class Game:
             if aid and aid != self.game_id and aact and aact != "standard_action":
                 return False
             finisher = self._player_label(self.current_player_id())
+            if not self.end_game_triggered:
+                reason = self._check_end_game_condition()
+                if reason:
+                    self.end_game_triggered = True
+                    self._log_game_event(f"End-game condition met ({reason}); finishing this round.")
             self.turn_index = (self.turn_index + 1) % max(1, len(self.player_list))
             self.turn_number = int(self.turn_number) + 1
+            if self.end_game_triggered and self.player_list[self.turn_index].is_first:
+                self._log_game_event(f"{finisher} ended their turn.")
+                self._finalize_game()
+                return True
             self.phase = 'roll'
             self.actions_remaining = 0
             # Leaving action phase: clear the standard action prompt.
@@ -447,8 +502,13 @@ class Game:
         # If we're blocked on a required choice, no standard actions can be taken.
         if self.action_required and self.action_required.get("id") and self.action_required.get("id") != self.game_id:
             aa = str(self.action_required.get("action", "") or "")
-            if self.action_required.get("action") in ("bonus_resource_choice", "manual_harvest") or aa.startswith(
-                    "choose ") or aa.startswith("choose_player") or aa.startswith("choose_monster") or aa == "domain_self_convert":
+            if self.action_required.get("action") in (
+                "bonus_resource_choice",
+                "manual_harvest",
+                "harvest_optional_exchange",
+            ) or aa.startswith("choose ") or aa.startswith("choose_player") or aa.startswith(
+                "choose_monster"
+            ) or aa == "domain_self_convert":
                 return False
 
         if player_id != self.current_player_id():
@@ -970,7 +1030,7 @@ class Game:
         if not aid or aid == self.game_id:
             return False
         aa = self.action_required.get("action") or ""
-        if aa in ("bonus_resource_choice", "manual_harvest"):
+        if aa in ("bonus_resource_choice", "manual_harvest", "harvest_optional_exchange"):
             return True
         if str(aa).startswith("choose ") or str(aa).startswith("choose_player") or str(aa).startswith("choose_monster"):
             return True
@@ -1099,21 +1159,25 @@ class Game:
             p.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0}
         active = self._player_by_id(self.current_player_id())
         self._apply_harvest_jousting_passive(active)
-        order = self._harvest_player_id_order_starting_active()
-        for pid in order:
-            player = self._player_by_id(pid)
-            if not player:
-                continue
-            on_turn = pid == self.current_player_id()
-            consumed = []
-            while True:
-                slots = self._harvest_slots_sorted_for_simulation(
-                    self._build_harvest_slots(player, consumed, on_turn))
-                if not slots:
-                    break
-                for slot in slots:
-                    self._apply_harvest_activation(player, slot["_obj"], slot["kind"], on_turn)
-                    consumed.append(slot["slot_key"])
+        self._silent_harvest_batch = True
+        try:
+            order = self._harvest_player_id_order_starting_active()
+            for pid in order:
+                player = self._player_by_id(pid)
+                if not player:
+                    continue
+                on_turn = pid == self.current_player_id()
+                consumed = []
+                while True:
+                    slots = self._harvest_slots_sorted_for_simulation(
+                        self._build_harvest_slots(player, consumed, on_turn))
+                    if not slots:
+                        break
+                    for slot in slots:
+                        self._apply_harvest_activation(player, slot["_obj"], slot["kind"], on_turn)
+                        consumed.append(slot["slot_key"])
+        finally:
+            self._silent_harvest_batch = False
         for player in self.player_list:
             print(f"Player {player.name}: {player.gold_score} G, {player.strength_score} S, {player.magic_score} M,"
                   f" {player.victory_score} VP, Monsters: {len(player.owned_monsters)}, "
@@ -1128,12 +1192,37 @@ class Game:
             return
         self._harvest_run_automation_until_blocked()
 
-    def _execute_compound_payout(self, compound_command, player_id, auto_apply_single_choice=True):
+    def _want_harvest_optional_exchange_prompt(self, raw_command):
+        """
+        During interactive harvest only: pure \"exchange pay gain\" specials pause for confirm/skip.
+        Batch harvest_phase() sets _silent_harvest_batch so exchanges auto-resolve when affordable.
+        """
+        if getattr(self, "phase", None) != "harvest":
+            return False
+        if getattr(self, "_silent_harvest_batch", False):
+            return False
+        rc = (raw_command or "").strip()
+        if " + " in rc:
+            return False
+        parts = rc.split()
+        if len(parts) < 5:
+            return False
+        return parts[0].lower() == "exchange"
+
+    def _execute_compound_payout(
+        self,
+        compound_command,
+        player_id,
+        auto_apply_single_choice=True,
+        balance_hint=None,
+        suppress_exchange_optional_prompt=False,
+    ):
         """
         Execute multiple commands separated by +.
         e.g. "s 3 + choose <citizens where role==soldier and gold_cost<=2>"
         Non-choice commands are executed immediately and return [result].
         Choice commands set action_required and return [0,0,0,0].
+        balance_hint: optional dict g,s,m,v carried across segments so exchange affordability sees prior legs.
         """
         parts = [p.strip() for p in (compound_command or "").split(" + ")]
         if not parts:
@@ -1144,6 +1233,9 @@ class Game:
             return [-9999, 0, 0, 0]
         prior_action = (self.action_required or {}).get("action", "")
         prior_concurrent = getattr(self, "concurrent_action", None)
+        bal = dict(balance_hint) if balance_hint is not None else _player_resource_balances(player)
+        if not bal:
+            return [-9999, 0, 0, 0]
         for cmd in parts:
             if not cmd:
                 continue
@@ -1151,6 +1243,8 @@ class Game:
                 cmd,
                 player_id,
                 auto_apply_single_choice=auto_apply_single_choice,
+                balance_hint=bal,
+                suppress_exchange_optional_prompt=suppress_exchange_optional_prompt,
             )
             new_action = (self.action_required or {}).get("action", "")
             new_concurrent = getattr(self, "concurrent_action", None)
@@ -1165,13 +1259,24 @@ class Game:
                     if prior_empty:
                         return payout
                     return total_payout
+                bal["g"] = int(bal["g"]) + int(payout[0])
+                bal["s"] = int(bal["s"]) + int(payout[1])
+                bal["m"] = int(bal["m"]) + int(payout[2])
+                bal["v"] = int(bal["v"]) + int(payout[3])
                 total_payout[0] += payout[0]
                 total_payout[1] += payout[1]
                 total_payout[2] += payout[2]
                 total_payout[3] += payout[3]
         return total_payout
 
-    def execute_special_payout(self, command, player_id, auto_apply_single_choice=True):
+    def execute_special_payout(
+        self,
+        command,
+        player_id,
+        auto_apply_single_choice=True,
+        balance_hint=None,
+        suppress_exchange_optional_prompt=False,
+    ):
         print("executing special payout")
         raw = (command or "").strip()
         low = raw.lower()
@@ -1185,6 +1290,8 @@ class Game:
                 raw,
                 player_id,
                 auto_apply_single_choice=auto_apply_single_choice,
+                balance_hint=balance_hint,
+                suppress_exchange_optional_prompt=suppress_exchange_optional_prompt,
             )
         payout = [0, 0, 0, 0]  # gp, sp, mp, vp, todo: citizen, monster, domain
         split_command = (command or "").split()
@@ -1246,6 +1353,11 @@ class Game:
                     case _:
                         payout[0] = -9999
             case "exchange":
+                player_x = self._player_by_id(player_id)
+                if not player_x:
+                    payout[0] = -9999
+                    print(payout)
+                    return payout
                 match second_word:
                     case 'g':
                         payout[0] = payout[0] - int(third_word)
@@ -1268,6 +1380,27 @@ class Game:
                         payout[3] = payout[3] + int(split_command[4])
                     case _:
                         payout[0] = -9999
+                if payout[0] == -9999:
+                    print(payout)
+                    return payout
+                bal_x = balance_hint if balance_hint is not None else _player_resource_balances(player_x)
+                if not _balances_allow_payout(bal_x, payout):
+                    return [0, 0, 0, 0]
+                if (
+                    not suppress_exchange_optional_prompt
+                    and balance_hint is None
+                    and self._want_harvest_optional_exchange_prompt(raw)
+                ):
+                    self.pending_required_choice = {
+                        "kind": "harvest_optional_exchange",
+                        "player_id": player_id,
+                        "command": raw,
+                    }
+                    self.action_required["id"] = player_id
+                    self.action_required["action"] = "harvest_optional_exchange"
+                    return [0, 0, 0, 0]
+                print(payout)
+                return payout
             case "choose":
                 normalized, options = self._normalize_choose_command(command)
                 options = self._filter_unavailable_choose_options(options)
@@ -2282,6 +2415,47 @@ class Game:
                 self.action_required['id'] = self.game_id
                 return
 
+            if current_required == "harvest_optional_exchange":
+                prc_h = getattr(self, "pending_required_choice", None) or {}
+                if prc_h.get("kind") != "harvest_optional_exchange" or prc_h.get("player_id") != player_id:
+                    return
+                act_h = (action or "").strip().lower()
+                if act_h not in ("confirm_harvest_exchange", "skip_harvest_exchange"):
+                    return
+                cmd_h = (prc_h.get("command") or "").strip()
+                target_h = self._player_by_id(player_id)
+                self.pending_required_choice = None
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                if not target_h or not cmd_h:
+                    self._maybe_resume_harvest_prompt()
+                    return
+                before_h = self._player_scores_line(target_h)
+                if act_h == "skip_harvest_exchange":
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} skipped optional harvest exchange ({cmd_h}); "
+                        f"scores unchanged ({before_h})."
+                    )
+                    self._maybe_resume_harvest_prompt()
+                    return
+                payout_h = self.execute_special_payout(
+                    cmd_h,
+                    player_id,
+                    suppress_exchange_optional_prompt=True,
+                )
+                if isinstance(payout_h, list) and len(payout_h) >= 4 and payout_h[0] != -9999:
+                    target_h.gold_score = int(target_h.gold_score) + int(payout_h[0])
+                    target_h.strength_score = int(target_h.strength_score) + int(payout_h[1])
+                    target_h.magic_score = int(target_h.magic_score) + int(payout_h[2])
+                    target_h.victory_score = int(getattr(target_h, "victory_score", 0)) + int(payout_h[3])
+                    self._bump_harvest_delta(target_h, payout_h[0], payout_h[1], payout_h[2], payout_h[3])
+                    after_h = self._player_scores_line(target_h)
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} took harvest exchange ({cmd_h}); scores {before_h} -> {after_h}"
+                    )
+                self._maybe_resume_harvest_prompt()
+                return
+
             prc0 = getattr(self, "pending_required_choice", None) or {}
             if prc0.get("kind") == "domain_boost_monster" and str(current_required).strip() == "choose_monster_strength":
                 act = (action or "").strip().lower()
@@ -2455,12 +2629,18 @@ class Game:
             self._log_game_event(f"All players finished: {ca.get('kind')}.")
             handler.finalize(self)
             self.concurrent_action = None
-            # If we were stalled in setup, drive the engine forward so the
-            # next state the client polls is something actionable.
+            # Drive the engine forward after the concurrent action resolves.
             if self.phase == "setup":
+                # Setup stall: advance until the first actionable state.
                 while self.advance_tick():
                     if self.phase == "action":
                         break
+            else:
+                # Mid-game concurrent action (e.g. Cursed Cavern flip during action phase):
+                # if the active player spent their last action before the concurrent prompt,
+                # finish_turn_if_no_actions_remaining will advance the turn now that the
+                # block is cleared. If they still have actions, this is a no-op.
+                self.finish_turn_if_no_actions_remaining()
 
     def update_payout_for_role(self, role_name, player_id, payout, split_command):
         role_count = 0
@@ -2560,6 +2740,10 @@ class Game:
 
             if citizen_stack:
                 citizen_stack[-1].toggle_accessibility(True)
+            elif self.exhausted_stack:
+                exhausted = self.exhausted_stack.pop()
+                citizen_stack.append(exhausted)
+                self.exhausted_count = int(self.exhausted_count) + 1
             after = self._player_scores_line(player)
             pay = self._format_resource_payment(gp, sp, mp)
             self._log_game_event(
@@ -2688,6 +2872,10 @@ class Game:
             if domain_stack:
                 domain_stack[-1].toggle_visibility(True)
                 domain_stack[-1].toggle_accessibility(True)
+            elif self.exhausted_stack:
+                exhausted = self.exhausted_stack.pop()
+                domain_stack.append(exhausted)
+                self.exhausted_count = int(self.exhausted_count) + 1
             self._apply_domain_activation_effect(player, bought)
             after = self._player_scores_line(player)
             pay = self._format_resource_payment(gp, sp, mp)
@@ -2735,6 +2923,85 @@ class Game:
         self.roll_phase()
         self.harvest_phase()
         self.action_phase()
+
+    def _check_end_game_condition(self):
+        """Returns a reason string if any end condition is met, else None."""
+        from cards import Exhausted
+        if all(not stack for stack in self.monster_grid):
+            return "all monsters slain"
+        if all(not stack for stack in self.domain_grid):
+            return "all domains built"
+        if int(self.exhausted_count) >= len(self.player_list) * 2:
+            return "exhausted stacks filled"
+        return None
+
+    def _calculate_final_scores(self):
+        """Compute final VP for each player including Duke multipliers. Returns ranked list."""
+        self.unflip_all_citizens_for_final_scoring()
+        scores = []
+        for player in self.player_list:
+            duke_vp = 0
+            if player.owned_dukes:
+                duke = player.owned_dukes[0]
+                roles = player.calc_roles()
+                monster_attrs = self.owned_monster_attributes(player.player_id)
+
+                def _res(score, divisor):
+                    d = int(divisor or 0)
+                    return int(score) // d if d > 0 else 0
+
+                def _cnt(count, multiplier):
+                    return int(count) * int(multiplier or 0)
+
+                duke_vp = (
+                    _res(player.gold_score, duke.gold_multiplier)
+                    + _res(player.strength_score, duke.strength_multiplier)
+                    + _res(player.magic_score, duke.magic_multiplier)
+                    + _cnt(roles["shadow_count"], duke.shadow_multiplier)
+                    + _cnt(roles["holy_count"], duke.holy_multiplier)
+                    + _cnt(roles["soldier_count"], duke.soldier_multiplier)
+                    + _cnt(roles["worker_count"], duke.worker_multiplier)
+                    + _cnt(len(player.owned_monsters), duke.monster_multiplier)
+                    + _cnt(len(player.owned_citizens), duke.citizen_multiplier)
+                    + _cnt(len(player.owned_domains), duke.domain_multiplier)
+                    + _cnt(monster_attrs.get("Boss", 0), duke.boss_multiplier)
+                    + _cnt(monster_attrs.get("Minion", 0), duke.minion_multiplier)
+                    + _cnt(monster_attrs.get("Beast", 0), duke.beast_multiplier)
+                    + _cnt(monster_attrs.get("Titan", 0), duke.titan_multiplier)
+                )
+            total_vp = int(player.victory_score) + duke_vp
+            tableau_size = (
+                len(player.owned_starters)
+                + len(player.owned_citizens)
+                + len(player.owned_domains)
+                + len(player.owned_monsters)
+                + len(player.owned_dukes)
+            )
+            scores.append({
+                "player_id": player.player_id,
+                "name": player.name,
+                "base_vp": int(player.victory_score),
+                "duke_vp": duke_vp,
+                "total_vp": total_vp,
+                "tableau_size": tableau_size,
+            })
+        scores.sort(key=lambda s: (-s["total_vp"], s["tableau_size"]))
+        for rank, s in enumerate(scores):
+            s["rank"] = rank + 1
+        return scores
+
+    def _finalize_game(self):
+        """Compute final scores, set phase to game_over, and log the result."""
+        self.final_scores = self._calculate_final_scores()
+        self.phase = "game_over"
+        if self.final_scores:
+            for s in self.final_scores:
+                place = {1: "1st", 2: "2nd", 3: "3rd"}.get(s["rank"], f"{s['rank']}th")
+                self._log_game_event(
+                    f"{place}: {s['name']} — {s['total_vp']} VP "
+                    f"({s['base_vp']} base + {s['duke_vp']} Duke)."
+                )
+            self._log_game_event(f"Game over! {self.final_scores[0]['name']} wins!")
 
     def end_check(self):
         if self.exhausted_count <= (len(self.player_list) * 2):

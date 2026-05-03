@@ -1,5 +1,7 @@
 let playerId = localStorage.getItem('playerId') || '';
             let currentGameId = localStorage.getItem('gameId') || '';
+            /** Avoid duplicate tabs when toggleReady and lobby poll both notice the new game */
+            let openedVisualGameTabForGameId = '';
             let lastGameState = null;
             let lastRenderedGameLogKey = null;
             let finalizeRollInFlight = false;
@@ -115,6 +117,14 @@ let playerId = localStorage.getItem('playerId') || '';
             wireDiceRigUi();
             wireDebugStartingResourcesUi();
             wireAutoHarvestUi();
+
+            function openVisualGameClientTab(gameId) {
+                if (!gameId || !playerId) return;
+                if (openedVisualGameTabForGameId === gameId) return;
+                openedVisualGameTabForGameId = gameId;
+                const q = new URLSearchParams({ game_id: gameId, player_id: playerId });
+                window.open(`${location.origin}/?${q}`, '_blank', 'noopener,noreferrer');
+            }
             
             async function joinLobby() {
                 const name = document.getElementById('playerName').value;
@@ -156,6 +166,7 @@ let playerId = localStorage.getItem('playerId') || '';
                     if (data.in_game) {
                         html += `<p><strong>You are in game: ${data.game_id}</strong></p>`;
                         if (data.game_id && data.game_id !== currentGameId) {
+                            openVisualGameClientTab(data.game_id);
                             currentGameId = data.game_id;
                             localStorage.setItem('gameId', currentGameId);
                             // Fetch immediately when we first learn the game id
@@ -190,7 +201,7 @@ let playerId = localStorage.getItem('playerId') || '';
                     if (data.game_id) {
                         currentGameId = data.game_id;
                         localStorage.setItem('gameId', currentGameId);
-                        alert('Game started! Game ID: ' + data.game_id);
+                        openVisualGameClientTab(data.game_id);
                         // Immediately fetch state so the Game section fills in
                         getGameState(false);
                     }
@@ -428,7 +439,9 @@ let playerId = localStorage.getItem('playerId') || '';
                 boardBtn.textContent = 'Board';
                 boardBtn.style.left = '50%';
                 boardBtn.style.top = '50%';
-                boardBtn.onclick = () => { openBoardTableau(); };
+                boardBtn.onclick = () => {
+                    window.open(`/?game_id=${currentGameId}&player_id=${playerId}`, '_blank');
+                };
                 wrap.appendChild(boardBtn);
 
                 const cleanPlayers = players.filter(p => p && p.player_id);
@@ -555,7 +568,7 @@ let playerId = localStorage.getItem('playerId') || '';
                 if (reqAction === 'bonus_resource_choice') return true;
                 const trimmed = reqAction.trim();
                 if (trimmed.startsWith('choose ')) return true;
-                if (trimmed === 'choose_player' || trimmed === 'choose_monster_strength' || trimmed === 'domain_self_convert') return true;
+                if (trimmed === 'choose_player' || trimmed === 'choose_monster_strength' || trimmed === 'domain_self_convert' || trimmed === 'harvest_optional_exchange') return true;
                 if (reqAction === 'standard_action' && (gameState.phase || '') === 'action') return true;
                 return false;
             }
@@ -1226,6 +1239,10 @@ let playerId = localStorage.getItem('playerId') || '';
                     return renderDomainSelfConvertPrompt(gameState);
                 }
 
+                if (reqAction === 'harvest_optional_exchange') {
+                    return renderHarvestOptionalExchangePrompt(gameState);
+                }
+
                 if (reqAction === 'choose_player') {
                     return renderDomainChoosePlayer(gameState);
                 }
@@ -1647,6 +1664,79 @@ let playerId = localStorage.getItem('playerId') || '';
                             player_id: playerId,
                             action_type: 'act_on_required_action',
                             action: 'skip'
+                        })
+                    });
+                    getGameState(false);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
+            function harvestExchangeExplain(command) {
+                const parts = (command || '').trim().split(/\s+/);
+                if (parts.length < 5 || parts[0].toLowerCase() !== 'exchange') return (command || '').trim() || 'Optional harvest exchange.';
+                const pay = parts[1].toLowerCase();
+                const payN = parts[2];
+                const gain = parts[3].toLowerCase();
+                const gainN = parts[4];
+                const labels = { g: 'gold', s: 'strength', m: 'magic', v: 'victory points' };
+                return `Pay ${payN} ${labels[pay] || pay}, gain ${gainN} ${labels[gain] || gain}.`;
+            }
+
+            function renderHarvestOptionalExchangePrompt(gameState) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+                const req = gameState?.action_required || {};
+                const reqId = (req?.id || '').toString();
+                const isYou = (playerId && reqId === playerId);
+                const prc = gameState?.pending_required_choice || null;
+                const cmd = (prc?.command || '').toString();
+                const explain = harvestExchangeExplain(cmd);
+                if (!isYou) {
+                    panel.innerHTML = `<div style="padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        Waiting on <code>${escapeHtml(reqId)}</code> — optional citizen harvest exchange.
+                    </div>`;
+                    return;
+                }
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        <div style="font-weight:700;margin-bottom:8px;">Harvest: optional exchange</div>
+                        <div class="mini" style="margin-bottom:8px;color:#333;">${escapeHtml(explain)}</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button type="button" onclick="sendHarvestExchangeConfirm()">Take exchange</button>
+                            <button type="button" onclick="sendHarvestExchangeSkip()">Skip (keep resources)</button>
+                        </div>
+                    </div>`;
+            }
+
+            async function sendHarvestExchangeConfirm() {
+                if (!playerId || !currentGameId) return;
+                try {
+                    await fetch(`/api/game/${currentGameId}/action`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            player_id: playerId,
+                            action_type: 'act_on_required_action',
+                            action: 'confirm_harvest_exchange'
+                        })
+                    });
+                    getGameState(false);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
+            async function sendHarvestExchangeSkip() {
+                if (!playerId || !currentGameId) return;
+                try {
+                    await fetch(`/api/game/${currentGameId}/action`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            player_id: playerId,
+                            action_type: 'act_on_required_action',
+                            action: 'skip_harvest_exchange'
                         })
                     });
                     getGameState(false);

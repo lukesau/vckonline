@@ -1,7 +1,7 @@
 import random
 from typing import List
 
-from cards import Citizen, Domain, Duke, Monster, Starter
+from cards import Citizen, Domain, Duke, Exhausted, Monster, Starter
 from game_models import Player
 
 
@@ -16,6 +16,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
     domain_stack = []
     duke_query = "select_random_dukes"
     duke_stack = []
+    exhausted_stack = [Exhausted(i) for i in range(len(player_list_from_lobby) * 2)]
     starter_query = "SELECT * FROM starters"
     starter_stack = []
     player_list = []
@@ -256,6 +257,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
 
         game_state = {
             "game_id": game_id,
+            "pending_required_choice": None,
             "player_list": player_list,
             "monster_grid": monster_grid,
             "citizen_grid": citizen_grid,
@@ -264,6 +266,9 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
             "die_two": die_two,
             "die_sum": die_sum,
             "exhausted_count": exhausted_count,
+            "exhausted_stack": exhausted_stack,
+            "end_game_triggered": False,
+            "final_scores": None,
             "effects": effects,
             "action_required": action_required,
             "concurrent_action": None,

@@ -378,3 +378,22 @@ class Duke(Card):
         return cls(duke_id, name, gold_mult, strength_mult, magic_mult, shadow_mult, holy_mult, soldier_mult,
                    worker_mult, monster_mult, citizen_mult, domain_mult, boss_mult, minion_mult, beast_mult,
                    titan_mult, expansion)
+
+
+class Exhausted(Card):
+    def __init__(self, exhausted_id):
+        super().__init__()
+        self.exhausted_id = exhausted_id
+        self.name = "Exhausted"
+        self.toggle_visibility(True)
+
+    def to_dict(self):
+        return {
+            **super().to_dict(),
+            "exhausted_id": self.exhausted_id,
+            "name": self.name,
+        }
+
+    @classmethod
+    def from_dict(cls, d):
+        return cls(d["exhausted_id"])

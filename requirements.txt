@@ -19,4 +19,8 @@ shortuuid>=1.0.0
 # Web framework for API server
 fastapi>=0.104.0
 uvicorn>=0.24.0
+websockets>=13.0
+
+# Image processing (used by split_domains.py and similar scripts)
+Pillow>=10.0.0
 

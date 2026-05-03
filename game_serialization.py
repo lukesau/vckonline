@@ -1,6 +1,6 @@
 from json import JSONEncoder
 
-from cards import Citizen, Domain, Duke, Monster, Starter
+from cards import Citizen, Domain, Duke, Exhausted, Monster, Starter
 from game_models import GameMember, LobbyMember, Player
 
 
@@ -72,6 +72,8 @@ class GameObjectEncoder(JSONEncoder):
             return obj.to_dict()
         if isinstance(obj, Domain):
             return obj.to_dict()
+        if isinstance(obj, Exhausted):
+            return obj.to_dict()
         if hasattr(obj, "game_id") and hasattr(obj, "player_list") and hasattr(obj, "monster_grid"):
             ca_raw = getattr(obj, "concurrent_action", None)
             ca_enc = ca_raw
@@ -91,6 +93,9 @@ class GameObjectEncoder(JSONEncoder):
                 "rolled_die_sum": getattr(obj, "rolled_die_sum", obj.die_sum),
                 "pending_roll": getattr(obj, "pending_roll", None),
                 "exhausted_count": obj.exhausted_count,
+                "exhausted_stack_size": len(getattr(obj, "exhausted_stack", None) or []),
+                "end_game_triggered": getattr(obj, "end_game_triggered", False),
+                "final_scores": getattr(obj, "final_scores", None),
                 "effects": obj.effects,
                 "action_required": obj.action_required,
                 "pending_required_choice": getattr(obj, "pending_required_choice", None),

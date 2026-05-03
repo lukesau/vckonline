@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Valeria Card Kingdoms</title>
+  <link rel="stylesheet" href="/static/game/style.css">
+</head>
+<body>
+  <a href="/" class="game-lobby-btn">Lobby</a>
+  <div class="board" id="board">
+    <div class="seat seat-0" id="seat-0"></div>
+    <div class="seat seat-1" id="seat-1"></div>
+    <div class="seat seat-2" id="seat-2"></div>
+    <div class="seat seat-3" id="seat-3"></div>
+    <div class="seat seat-4" id="seat-4"></div>
+    <div class="center-board" id="zone-center"></div>
+  </div>
+  <div id="conn-status" class="conn-status"></div>
+  <div id="lobby-overlay" class="lobby-overlay" aria-hidden="true">
+    <div class="lobby-sheet" role="dialog" aria-modal="true" aria-labelledby="lobby-title">
+      <div class="lobby-brand">
+        <p class="lobby-kicker">Table</p>
+        <h1 id="lobby-title" class="lobby-title">Valeria Card Kingdoms</h1>
+        <p class="lobby-tagline">Join the lobby, ready up when your group is here.</p>
+      </div>
+      <div id="lobby-error" class="lobby-error lobby-hidden" role="alert"></div>
+      <div id="lobby-step-join" class="lobby-step">
+        <label class="lobby-label" for="lobby-display-name">Display name</label>
+        <div class="lobby-join-row">
+          <input id="lobby-display-name" class="lobby-input" type="text" maxlength="40" placeholder="Your name" autocomplete="nickname" />
+          <button type="button" id="lobby-join-btn" class="lobby-btn lobby-btn-primary">Join lobby</button>
+        </div>
+      </div>
+      <div id="lobby-step-wait" class="lobby-step lobby-hidden">
+        <p class="lobby-hint">Need at least two players. Everyone taps ready to start.</p>
+        <ul id="lobby-player-list" class="lobby-player-list"></ul>
+        <div class="lobby-actions">
+          <button type="button" id="lobby-ready-btn" class="lobby-btn lobby-btn-ready">Ready</button>
+          <button type="button" id="lobby-leave-btn" class="lobby-btn lobby-btn-ghost">Leave</button>
+        </div>
+      </div>
+      <div class="lobby-footer">
+        <span id="lobby-live" class="lobby-live lobby-live--warn" aria-live="polite">Connecting…</span>
+        <p id="lobby-meta" class="lobby-meta"></p>
+      </div>
+    </div>
+  </div>
+  <script src="/static/game/game.js"></script>
+</body>
+</html>

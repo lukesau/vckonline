@@ -4,11 +4,12 @@ FastAPI server for VCK Online - Development/testing server
 Simple REST API to replace the socket-based protocol
 """
 
+import re
 import time
 import uuid
 from pathlib import Path
 from typing import Dict, List, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -20,8 +21,131 @@ import json
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _DEV_CLIENT_INDEX = _REPO_ROOT / "static" / "dev-client" / "index.html"
+_GAME_CLIENT_INDEX = _REPO_ROOT / "static" / "game" / "index.html"
+
+# Card image directories — keyed by the singular type name used in filenames
+_CARD_IMAGE_DIRS: Dict[str, Path] = {
+    "monster": _REPO_ROOT / "images" / "monsters",
+    "citizen": _REPO_ROOT / "images" / "citizens",
+    "domain":  _REPO_ROOT / "images" / "domains",
+    "duke":    _REPO_ROOT / "images" / "dukes",
+    "starter": _REPO_ROOT / "images" / "starters",
+}
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
 app = FastAPI(title="VCK Online API", description="Development server for Valeria Card Kingdoms Online")
+
+
+class ConnectionManager:
+    def __init__(self):
+        self._conns: Dict[str, List[tuple]] = {}  # game_id -> [(ws, player_id)]
+
+    async def connect(self, game_id: str, websocket: WebSocket, player_id: Optional[str] = None):
+        await websocket.accept()
+        self._conns.setdefault(game_id, []).append((websocket, player_id))
+
+    def disconnect(self, game_id: str, websocket: WebSocket):
+        self._conns[game_id] = [
+            (ws, pid) for ws, pid in self._conns.get(game_id, []) if ws is not websocket
+        ]
+
+    async def broadcast(self, game_id: str, game):
+        conns = list(self._conns.get(game_id, []))
+        dead = []
+        for ws, pid in conns:
+            try:
+                await ws.send_json({"type": "state", "state": _serialize_game_for_player(game, pid)})
+            except Exception:
+                dead.append(ws)
+        if dead:
+            self._conns[game_id] = [(ws, pid) for ws, pid in conns if ws not in dead]
+
+
+manager = ConnectionManager()
+
+
+class LobbyWsManager:
+    """Push lobby snapshots to subscribed browsers (personalized by optional player_id)."""
+
+    def __init__(self):
+        self._connections = {}  # WebSocket -> Optional[player_id]
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self._connections[websocket] = None
+
+    def disconnect(self, websocket: WebSocket):
+        self._connections.pop(websocket, None)
+
+    def identify(self, websocket: WebSocket, player_id: Optional[str]):
+        if websocket in self._connections:
+            self._connections[websocket] = player_id or None
+
+    async def send_snapshot(self, websocket: WebSocket):
+        pid = self._connections.get(websocket)
+        try:
+            payload = build_lobby_status_dict(pid)
+            await websocket.send_json({"type": "lobby_status", **payload})
+        except Exception:
+            self.disconnect(websocket)
+
+    async def broadcast_lobby(self):
+        dead = []
+        for ws in list(self._connections.keys()):
+            pid = self._connections.get(ws)
+            try:
+                payload = build_lobby_status_dict(pid)
+                await ws.send_json({"type": "lobby_status", **payload})
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
+    async def broadcast_game_started(self, game_id: str, player_ids: List[str]):
+        dead = []
+        msg = {"type": "game_started", "game_id": game_id, "player_ids": list(player_ids)}
+        for ws in list(self._connections.keys()):
+            try:
+                await ws.send_json(msg)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
+
+lobby_ws_manager = LobbyWsManager()
+
+
+def build_lobby_status_dict(player_id: Optional[str] = None):
+    """Lobby list + active game count + optional in_game/game_id for this player."""
+    current_time = time.time()
+    global lobby
+    lobby = [p for p in lobby if current_time - p.last_active_time <= 60]
+
+    lobby_data = []
+    for member in lobby:
+        lobby_data.append({
+            "player_id": member.player_id,
+            "name": member.name,
+            "is_ready": member.is_ready,
+            "debug_starting_resources": bool(getattr(member, "debug_starting_resources", False)),
+        })
+
+    response = {
+        "lobby": lobby_data,
+        "game_count": sum(1 for g in games.values() if getattr(g, "phase", None) != "game_over"),
+    }
+
+    if player_id:
+        for gamer in gamers:
+            if gamer.player_id == player_id:
+                response["in_game"] = True
+                response["game_id"] = gamer.game_id
+                return response
+
+    response["in_game"] = False
+    return response
+
 
 # CORS middleware for web client
 app.add_middleware(
@@ -110,6 +234,7 @@ async def join_lobby(request: JoinLobbyRequest):
     player = LobbyMember(request.name, player_id)
     player.last_active_time = time.time()
     lobby.append(player)
+    await lobby_ws_manager.broadcast_lobby()
     return {"player_id": player_id, "message": "Joined lobby"}
 
 
@@ -120,6 +245,7 @@ async def rename_player(request: RenameRequest):
         if player.player_id == request.player_id:
             player.name = request.name
             player.last_active_time = time.time()
+            await lobby_ws_manager.broadcast_lobby()
             return {"message": "Player renamed"}
     raise HTTPException(status_code=404, detail="Player not found in lobby")
 
@@ -129,6 +255,7 @@ async def leave_lobby(player_id: str):
     """Leave the lobby"""
     global lobby
     lobby = [p for p in lobby if p.player_id != player_id]
+    await lobby_ws_manager.broadcast_lobby()
     return {"message": "Left lobby"}
 
 
@@ -176,6 +303,9 @@ async def set_ready(request: ReadyRequest):
                         if getattr(new_game, "phase", None) == "action":
                             break
                     games[new_game_id] = new_game
+                    pid_list = [g.player_id for g in game_gamers]
+                    await lobby_ws_manager.broadcast_game_started(new_game_id, pid_list)
+                    await lobby_ws_manager.broadcast_lobby()
                     return {
                         "message": "Game started",
                         "game_id": new_game_id,
@@ -184,6 +314,7 @@ async def set_ready(request: ReadyRequest):
                 except Exception as e:
                     raise HTTPException(status_code=500, detail=f"Failed to create game: {str(e)}")
             
+            await lobby_ws_manager.broadcast_lobby()
             return {"message": "Player ready", "all_ready": ready_count == len(lobby)}
     
     raise HTTPException(status_code=404, detail="Player not found in lobby")
@@ -196,6 +327,7 @@ async def set_unready(request: ReadyRequest):
         if player.player_id == request.player_id:
             player.is_ready = False
             player.last_active_time = time.time()
+            await lobby_ws_manager.broadcast_lobby()
             return {"message": "Player unready"}
     raise HTTPException(status_code=404, detail="Player not found in lobby")
 
@@ -203,35 +335,27 @@ async def set_unready(request: ReadyRequest):
 @app.get("/api/lobby/status")
 async def get_lobby_status(player_id: Optional[str] = None):
     """Get lobby status. If player_id provided, also check if player is in a game."""
-    # Clean up inactive players (60 seconds)
-    current_time = time.time()
-    global lobby
-    lobby = [p for p in lobby if current_time - p.last_active_time <= 60]
-    
-    lobby_data = []
-    for member in lobby:
-        lobby_data.append({
-            "player_id": member.player_id,
-            "name": member.name,
-            "is_ready": member.is_ready,
-            "debug_starting_resources": bool(getattr(member, "debug_starting_resources", False)),
-        })
-    
-    response = {
-        "lobby": lobby_data,
-        "game_count": len(games)
-    }
-    
-    # Check if player is in a game
-    if player_id:
-        for gamer in gamers:
-            if gamer.player_id == player_id:
-                response["in_game"] = True
-                response["game_id"] = gamer.game_id
-                return response
-    
-    response["in_game"] = False
-    return response
+    return build_lobby_status_dict(player_id)
+
+
+@app.websocket("/ws/lobby")
+async def ws_lobby(websocket: WebSocket):
+    await lobby_ws_manager.connect(websocket)
+    await lobby_ws_manager.send_snapshot(websocket)
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if data.get("type") == "identify":
+                lobby_ws_manager.identify(websocket, data.get("player_id"))
+                await lobby_ws_manager.send_snapshot(websocket)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        lobby_ws_manager.disconnect(websocket)
 
 
 # Game endpoints
@@ -253,7 +377,7 @@ def _serialize_game_for_player(game, viewer_player_id: Optional[str]):
         if not isinstance(p, dict):
             continue
         pid = p.get("player_id")
-        if not viewer_player_id or pid != viewer_player_id:
+        if viewer_player_id is None or str(pid) != str(viewer_player_id):
             # Hide opponent (and spectator) dukes.
             p["owned_dukes"] = []
 
@@ -414,7 +538,8 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
         else:
             raise HTTPException(status_code=400, detail=f"Unknown action type: {request.action_type}")
         
-        # Return updated game state
+        # Push updated state to all WebSocket subscribers for this game.
+        await manager.broadcast(game_id, game)
         return {"message": "Action performed", "game_state": _serialize_game_for_player(game, request.player_id)}
     
     except HTTPException:
@@ -446,16 +571,52 @@ async def startup_event():
     asyncio.create_task(cleanup())
 
 
+# ── Card image lookup ────────────────────────────────────────────────────────
+@app.get("/card-image/{card_type}/{card_id}")
+async def card_image(card_type: str, card_id: int):
+    """Return the card image matched by type + numeric ID prefix."""
+    dir_path = _CARD_IMAGE_DIRS.get(card_type)
+    if not dir_path or not dir_path.exists():
+        raise HTTPException(status_code=404, detail="Unknown card type")
+    prefix = f"{card_type}_{card_id:02d}_"
+    for f in sorted(dir_path.iterdir()):
+        if f.name.startswith(prefix) and f.suffix.lower() in _IMAGE_EXTS:
+            return FileResponse(str(f), media_type="image/jpeg")
+    raise HTTPException(status_code=404, detail="Image not found")
+
+
 # Serve static files and simple HTML client
 try:
     app.mount("/static", StaticFiles(directory="static"), name="static")
-except:
-    pass  # static directory might not exist
+    app.mount("/images", StaticFiles(directory=str(_REPO_ROOT / "images")), name="images")
+except Exception:
+    pass  # static / images directory might not exist
+
+
+@app.websocket("/ws/game/{game_id}")
+async def ws_game(websocket: WebSocket, game_id: str, player_id: Optional[str] = None):
+    game = games.get(game_id)
+    if not game:
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "code": 4004, "message": "Game not found"})
+        await websocket.close(code=4004)
+        return
+    await manager.connect(game_id, websocket, player_id)
+    try:
+        await websocket.send_json({"type": "state", "state": _serialize_game_for_player(game, player_id)})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(game_id, websocket)
 
 
 @app.get("/")
-async def root():
-    """Simple HTML client for testing"""
+async def game_client():
+    return FileResponse(_GAME_CLIENT_INDEX, media_type="text/html")
+
+
+@app.get("/debug")
+async def debug_client():
     return FileResponse(_DEV_CLIENT_INDEX, media_type="text/html")
 
 
