@@ -13,6 +13,62 @@ let finalizeRollInFlight = false;
 /** Set each render — board card modal reads latest grids / phase */
 let latestGameState = null;
 
+/** Narrow layout: max-width breakpoint matches CSS tabbed / carousel mode */
+function isViewportNarrow() {
+  return typeof window !== 'undefined' && window.matchMedia('(max-width: 800px)').matches;
+}
+
+/** Which player's tableau slide is focused in the narrow carousel (persisted across re-renders) */
+let tableauCarouselActiveId = null;
+
+/** Visual approx. of server 180s inactivity cleanup; refreshed on each state. */
+const INACTIVITY_IDLE_MS = 180000;
+let idleDeadlineMs = 0;
+let idleTickHandle = null;
+
+function isGameNotFoundText(s) {
+  return String(s || '')
+    .toLowerCase()
+    .includes('game not found');
+}
+
+function redirectToLobby() {
+  location.replace('/');
+}
+
+function bumpIdleDeadline() {
+  idleDeadlineMs = Date.now() + INACTIVITY_IDLE_MS;
+}
+
+function formatIdleCountdownLabel(msLeft) {
+  const s = Math.max(0, Math.ceil(msLeft / 1000));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${r.toString().padStart(2, '0')}`;
+}
+
+function tickIdleTimerElements() {
+  const els = document.querySelectorAll('.tableau-inactive-timer');
+  if (!els.length) return;
+  const left = idleDeadlineMs - Date.now();
+  const label = formatIdleCountdownLabel(left);
+  els.forEach(el => {
+    el.textContent = label;
+  });
+}
+
+function ensureIdleTicking() {
+  if (idleTickHandle != null) return;
+  idleTickHandle = setInterval(() => {
+    if (!document.querySelector('.tableau-inactive-timer')) {
+      clearInterval(idleTickHandle);
+      idleTickHandle = null;
+      return;
+    }
+    tickIdleTimerElements();
+  }, 1000);
+}
+
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws/game/${GAME_ID}?player_id=${PLAYER_ID}`);
@@ -26,6 +82,10 @@ function connect() {
     const msg = JSON.parse(evt.data);
     if (msg.type === 'state') render(msg.state);
     if (msg.type === 'error') {
+      if (isGameNotFoundText(msg.message)) {
+        redirectToLobby();
+        return;
+      }
       setConnStatus('error', msg.message);
       ws.close();
     }
@@ -34,7 +94,7 @@ function connect() {
   ws.onclose = evt => {
     // Code 4004 = game not found; don't retry
     if (evt.code === 4004) {
-      setConnStatus('error', 'Game not found');
+      redirectToLobby();
       return;
     }
     setConnStatus('off');
@@ -59,33 +119,57 @@ function setConnStatus(s, detail) {
 }
 
 // ── Seat assignment ───────────────────────────────────────────────────────
-// Returns array of 5 player-or-null entries for seats 0–4.
-// Seat 0 = me (bottom), seats 1–4 = opponents clockwise.
+// Viewer is always at the bottom. Opponents follow clockwise turn order starting
+// from the player to your right (next in `player_list` after you).
 function idsMatch(a, b) {
   return String(a ?? '').trim() === String(b ?? '').trim();
 }
 
-function seatAssignment(state) {
+function playerIndexInList(state, player) {
+  if (!player) return -1;
   const all = state.player_list || [];
-  const myIdx = all.findIndex(p => idsMatch(p.player_id, PLAYER_ID));
-  const base = myIdx === -1 ? 0 : myIdx;
+  return all.findIndex(p => idsMatch(p.player_id, player.player_id));
+}
+
+/**
+ * Opponents in clockwise order around the table from the viewer: first is to your right.
+ */
+function clockwiseOpponentsFromViewer(state) {
+  const all = state.player_list || [];
   const n = all.length;
-  // Spread players evenly around the pentagon.
-  // Seat 0 = me (bottom flat edge); seats 1–4 go clockwise.
-  // Fill opponents symmetrically so they appear "across" the table.
-  const fillOrders = {
-    1: [0],
-    2: [0, 3],        // opponent at upper-left (roughly opposite)
-    3: [0, 2, 4],     // spread at 144° — upper-right and lower-left
-    4: [0, 1, 3, 4],  // skip the apex seats, fill flanks first
-    5: [0, 1, 2, 3, 4],
-  };
-  const order = (fillOrders[n] || [0, 1, 2, 3, 4]).slice(0, n);
-  const seats = [null, null, null, null, null];
-  order.forEach((seatIdx, i) => {
-    seats[seatIdx] = all[(base + i) % n];
-  });
-  return seats;
+  const myIdx = all.findIndex(p => idsMatch(p.player_id, PLAYER_ID));
+  const anchor = myIdx >= 0 ? myIdx : 0;
+  const out = [];
+  for (let i = 1; i < n; i++) {
+    out.push(all[(anchor + i) % n]);
+  }
+  return out;
+}
+
+/**
+ * Maps opponents to layout slots: top row (1–2), left, right.
+ * layoutKey: p1–p5 by player count.
+ */
+function layoutSlotAssignment(state) {
+  const all = state.player_list || [];
+  const n = all.length;
+  const myIdx = all.findIndex(p => idsMatch(p.player_id, PLAYER_ID));
+  const me = myIdx >= 0 ? all[myIdx] : null;
+  const opp = clockwiseOpponentsFromViewer(state);
+
+  if (n <= 1) {
+    return { n, layoutKey: 'p1', me, top: [], left: null, right: null };
+  }
+  if (n === 2) {
+    return { n, layoutKey: 'p2', me, top: [opp[0]], left: null, right: null };
+  }
+  if (n === 3) {
+    return { n, layoutKey: 'p3', me, top: [], left: opp[1], right: opp[0] };
+  }
+  if (n === 4) {
+    return { n, layoutKey: 'p4', me, top: [opp[1]], left: opp[2], right: opp[0] };
+  }
+  return { n, layoutKey: 'p5', me, top: [opp[1], opp[2]], left: opp[3], right: opp[0] };
 }
 
 // ── Tableau sections (domains first … dukes last) ─────────────────────────
@@ -105,14 +189,55 @@ function tableauGroupsForPlayer(player) {
 // ── Main render ───────────────────────────────────────────────────────────
 function render(state) {
   latestGameState = state;
-  const seats = seatAssignment(state);
-  seats.forEach((player, i) => renderSeat(i, player, state));
+  bumpIdleDeadline();
+  const layout = layoutSlotAssignment(state);
+  const narrow = isViewportNarrow();
+  const board = document.getElementById('board');
+  if (board) {
+    board.dataset.layout = layout.layoutKey;
+    board.dataset.playerCount = String(layout.n);
+    board.dataset.narrowLayout = narrow ? '1' : '';
+  }
+  clearEl('gl-top');
+  clearEl('gl-side-l');
+  clearEl('gl-side-r');
+  clearEl('gl-bottom');
+
+  const bottomEl = document.getElementById('gl-bottom');
+  if (narrow) {
+    renderTableauCarousel(state, bottomEl);
+  } else {
+    layout.top.forEach(p => {
+      const wrap = mk('gl-top-slot');
+      wrap.appendChild(renderSeatEl(p, state, layout.n === 5 ? 'top-mini' : 'top'));
+      document.getElementById('gl-top').appendChild(wrap);
+    });
+
+    if (layout.right) {
+      document.getElementById('gl-side-r').appendChild(renderSeatEl(layout.right, state, 'side'));
+    }
+    if (layout.left) {
+      document.getElementById('gl-side-l').appendChild(renderSeatEl(layout.left, state, 'side'));
+    }
+
+    if (bottomEl) {
+      bottomEl.appendChild(renderSeatEl(layout.me, state, 'me'));
+    }
+  }
+
   renderCenter(state);
   renderGameOver(state);
-  scheduleBoardLayout();
+  syncBoardTabsObserver();
   syncConcurrentPolling(state);
   maybeAutoFinalizeRoll(state);
   renderPromptModal(state);
+  tickIdleTimerElements();
+  ensureIdleTicking();
+}
+
+function clearEl(id) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = '';
 }
 
 function isActiveTurnForPlayer(player, state) {
@@ -121,96 +246,205 @@ function isActiveTurnForPlayer(player, state) {
   return idsMatch(ap, player.player_id);
 }
 
-// ── Active-turn tableau animation (rotating highlight around card row) ──
-function wrapTableauWithTurnRing(tableauEl, player, state) {
-  const host = mk('tableau-ring-host');
-  host.appendChild(mk('tableau-ring-sweep'));
-  host.appendChild(tableauEl);
-  if (isActiveTurnForPlayer(player, state)) host.classList.add('is-active-turn');
-  return host;
-}
-
 // ── Seat renderer ─────────────────────────────────────────────────────────
-function renderSeat(idx, player, state) {
-  const el = document.getElementById(`seat-${idx}`);
-  el.innerHTML = '';
-  el.style.display = 'block'; // always visible — empty seats show as ghost
-
+function renderSeatEl(player, state, variant) {
+  const el = mk(`seat seat-${variant}`);
+  if (player && player.player_id) {
+    el.dataset.playerId = String(player.player_id);
+  }
+  if (player && (variant === 'me' || variant === 'carousel') && isActiveTurnForPlayer(player, state)) {
+    el.classList.add('seat-my-active-turn');
+  }
   if (!player) {
     el.classList.add('seat-empty');
     const ghost = mk('seat-ghost-label');
-    ghost.textContent = `Seat ${idx}`;
+    ghost.textContent = 'Empty';
     el.appendChild(ghost);
-    return;
+    return el;
   }
-  el.classList.remove('seat-empty');
 
   const inner = mk('seat-inner');
   inner.appendChild(makeHeader(player, state));
-
-  if (idx === 0) {
-    const tableau = mk('tableau-cards');
-    const groups = tableauGroupsForPlayer(player);
-
-    groups.forEach(g => {
-      const grp = mk('card-group');
-      const lbl = mk('card-group-label');
-      lbl.textContent = g.label;
-      grp.appendChild(lbl);
-      const grouped = groupCardsForTableau(g.cards);
-      if (grouped) {
-        grouped.forEach(({ card, count }) => grp.appendChild(makeTableauStack(card, count, 'full')));
-      } else {
-        g.cards.forEach(c => grp.appendChild(makeTableauStack(c, 1, 'full')));
-      }
-      tableau.appendChild(grp);
-    });
-    inner.appendChild(wrapTableauWithTurnRing(tableau, player, state));
-  } else {
-    const tableau = mk('tableau-cards');
-    const groups = tableauGroupsForPlayer(player);
-
-    groups.forEach(g => {
-      const grp = mk('card-group');
-      const lbl = mk('card-group-label');
-      lbl.textContent = g.label;
-      grp.appendChild(lbl);
-      const grouped = groupCardsForTableau(g.cards);
-      if (grouped) {
-        grouped.forEach(({ card, count }) => grp.appendChild(makeTableauStack(card, count, 'mini')));
-      } else {
-        g.cards.forEach(c => grp.appendChild(makeTableauStack(c, 1, 'mini')));
-      }
-      tableau.appendChild(grp);
-    });
-    inner.appendChild(wrapTableauWithTurnRing(tableau, player, state));
-  }
-
+  const cardMode = variant === 'me' || variant === 'carousel' ? 'full' : 'mini';
+  const tableau = mk('tableau-cards');
+  const groups = tableauGroupsForPlayer(player);
+  groups.forEach(g => {
+    const grp = mk('card-group');
+    const lbl = mk('card-group-label');
+    lbl.textContent = g.label;
+    grp.appendChild(lbl);
+    const grouped = groupCardsForTableau(g.cards);
+    if (grouped) {
+      grouped.forEach(({ card, count }) => grp.appendChild(makeTableauStack(card, count, cardMode)));
+    } else {
+      g.cards.forEach(c => grp.appendChild(makeTableauStack(c, 1, cardMode)));
+    }
+    tableau.appendChild(grp);
+  });
+  inner.appendChild(tableau);
   el.appendChild(inner);
+  wireSeatTableauOpen(el, player);
+  return el;
+}
+
+function wireSeatTableauOpen(seatEl, player) {
+  if (!player || !player.player_id) return;
+  seatEl.classList.add('seat-detail-hit');
+  seatEl.addEventListener('click', e => {
+    if (e.target.closest('.card')) return;
+    openPlayerDetailModal(player.player_id);
+  });
+}
+
+function wireTableauCarouselViewport(viewport) {
+  viewport.addEventListener(
+    'wheel',
+    e => {
+      if (viewport.scrollWidth <= viewport.clientWidth + 1) return;
+      e.preventDefault();
+      viewport.scrollLeft += e.deltaY;
+    },
+    { passive: false },
+  );
+
+  let dragPtr = null;
+  viewport.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    if (e.target.closest && e.target.closest('.card')) return;
+    dragPtr = e.pointerId;
+    try {
+      viewport.setPointerCapture(e.pointerId);
+    } catch (_) {
+      /* ignore */
+    }
+    viewport.classList.add('is-pointer-dragging');
+  });
+  viewport.addEventListener('pointermove', e => {
+    if (e.pointerId !== dragPtr) return;
+    viewport.scrollLeft -= e.movementX;
+  });
+  const endDrag = e => {
+    if (e.pointerId !== dragPtr) return;
+    dragPtr = null;
+    viewport.classList.remove('is-pointer-dragging');
+    try {
+      viewport.releasePointerCapture(e.pointerId);
+    } catch (_) {
+      /* ignore */
+    }
+  };
+  viewport.addEventListener('pointerup', endDrag);
+  viewport.addEventListener('pointercancel', endDrag);
+}
+
+function renderTableauCarousel(state, bottomEl) {
+  if (!bottomEl) return;
+  const players = state.player_list || [];
+  const root = mk('tableau-carousel');
+  root.setAttribute('role', 'region');
+  root.setAttribute('aria-label', 'Player tableaus');
+
+  const viewport = mk('tableau-carousel-viewport');
+  players.forEach(p => {
+    const slide = mk('tableau-carousel-slide');
+    slide.appendChild(renderSeatEl(p, state, 'carousel'));
+    viewport.appendChild(slide);
+  });
+
+  wireTableauCarouselViewport(viewport);
+
+  root.appendChild(viewport);
+  bottomEl.appendChild(root);
+
+  let targetIdx = players.findIndex(p => idsMatch(p.player_id, tableauCarouselActiveId));
+  if (targetIdx < 0) {
+    targetIdx = players.findIndex(p => idsMatch(p.player_id, PLAYER_ID));
+  }
+  if (targetIdx < 0) targetIdx = 0;
+
+  const syncActiveFromScroll = () => {
+    const slides = viewport.children;
+    if (!slides.length) return;
+    const vr = viewport.getBoundingClientRect();
+    const mid = vr.left + vr.width / 2;
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < slides.length; i++) {
+      const r = slides[i].getBoundingClientRect();
+      const c = r.left + r.width / 2;
+      const d = Math.abs(c - mid);
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    }
+    const pl = players[best];
+    if (pl && pl.player_id != null) tableauCarouselActiveId = pl.player_id;
+  };
+
+  let scrollEndTimer = null;
+  viewport.addEventListener('scroll', () => {
+    clearTimeout(scrollEndTimer);
+    scrollEndTimer = setTimeout(syncActiveFromScroll, 120);
+  }, { passive: true });
+
+  requestAnimationFrame(() => {
+    const slide = viewport.children[targetIdx];
+    if (!slide) return;
+    viewport.scrollTo({ left: slide.offsetLeft, behavior: 'auto' });
+    const pl = players[targetIdx];
+    if (pl && pl.player_id != null) tableauCarouselActiveId = pl.player_id;
+  });
 }
 
 // ── Center board ──────────────────────────────────────────────────────────
 function renderCenter(state) {
   const el = document.getElementById('zone-center');
+  if (!el) return;
+  const narrow = isViewportNarrow();
+  const n = (state.player_list || []).length;
+  const logBesideGrid = n === 2 && !narrow;
   el.innerHTML = '';
+  el.classList.toggle('center-board--log-side', logBesideGrid);
+
+  const scrollArea = mk('center-board-scroll');
+  const tabsBar = mk('board-tabs-bar');
+  tabsBar.setAttribute('role', 'tablist');
+  scrollArea.appendChild(tabsBar);
+
+  const secMon = makeGridSection('Monsters', state.monster_grid || [], 'monster', 5, 'board-monsters');
+  secMon.dataset.boardSection = 'monsters';
+  const secCit = makeCitizenSection(state.citizen_grid || []);
+  secCit.dataset.boardSection = 'citizens';
+  const secDom = makeGridSection('Domains', state.domain_grid || [], 'domain', 5, 'board-domains');
+  secDom.dataset.boardSection = 'domains';
+
+  scrollArea.appendChild(secMon);
+  scrollArea.appendChild(secCit);
+  scrollArea.appendChild(secDom);
 
   const body = mk('center-board-body');
   body.appendChild(makeInfoBar(state));
-
-  const scrollArea = mk('center-board-scroll');
-  scrollArea.appendChild(makeGridSection('Monsters', state.monster_grid || [], 'monster', 5, 'board-monsters'));
-  scrollArea.appendChild(makeCitizenSection(state.citizen_grid || []));
-  scrollArea.appendChild(makeGridSection('Domains', state.domain_grid || [], 'domain', 5, 'board-domains'));
   body.appendChild(scrollArea);
 
-  el.appendChild(body);
-  el.appendChild(makeGameLog(state));
+  if (logBesideGrid) {
+    const log = makeGameLog(state);
+    log.classList.add('game-log--side');
+    const split = mk('center-board-split');
+    split.appendChild(body);
+    split.appendChild(log);
+    el.appendChild(split);
+  } else {
+    el.appendChild(body);
+    if (!narrow) {
+      el.appendChild(makeGameLog(state));
+    }
+  }
+
+  setupBoardTabs(el, tabsBar);
 }
 
-const BOARD_TOP_MARGIN_PX = 8;
-const BOARD_GAP_ABOVE_TABLEAU_PX = 10;
-
-/** Vertical wheel scrolls opponent tableau rows horizontally (they overflow-x). */
+/** Vertical wheel turns into horizontal scroll on top-strip opponent tableaus only. */
 function initOpponentTableauWheelScroll() {
   const board = document.getElementById('board');
   if (!board || board.dataset.tableauWheelBound) return;
@@ -221,7 +455,8 @@ function initOpponentTableauWheelScroll() {
       const row = e.target.closest('.tableau-cards');
       if (!row) return;
       const seat = row.closest('.seat');
-      if (!seat || seat.classList.contains('seat-0') || seat.classList.contains('seat-empty')) return;
+      if (!seat || seat.classList.contains('seat-empty')) return;
+      if (!seat.classList.contains('seat-top') && !seat.classList.contains('seat-top-mini')) return;
       if (row.scrollWidth <= row.clientWidth + 1) return;
       e.preventDefault();
       row.scrollLeft += e.deltaY;
@@ -229,176 +464,66 @@ function initOpponentTableauWheelScroll() {
     { passive: false },
   );
 }
-const REPULSE_GAP_PX = 12;
-const REPULSE_MAX_ITER = 16;
 
-function rectsOverlap(a, b) {
-  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-}
-
-function inflateRect(r, pad) {
-  return {
-    left: r.left - pad,
-    top: r.top - pad,
-    right: r.right + pad,
-    bottom: r.bottom + pad,
-  };
-}
-
-/** Shift opponent seats toward screen edges from pentagon anchors (scales with viewport width). */
-function layoutSeatEdgeSpread() {
-  const boardEl = document.getElementById('board');
-  if (!boardEl) return;
-  const vw = window.innerWidth;
-  const spread = Math.min(220, Math.max(0, (vw - 520) * 0.078));
-  boardEl.style.setProperty('--seat-edge-spread', `${spread}px`);
-}
-
-function layoutCenterBoard() {
+function syncBoardTabsObserver() {
   const zone = document.getElementById('zone-center');
-  const seat0 = document.getElementById('seat-0');
-  if (!zone || !seat0) return;
-
-  const seatRect = seat0.getBoundingClientRect();
-  const vh = window.innerHeight;
-
-  const bottomPx = vh - seatRect.top + BOARD_GAP_ABOVE_TABLEAU_PX;
-  zone.style.bottom = `${Math.max(0, bottomPx)}px`;
-  zone.style.top = 'auto';
-
-  zone.style.left = '50%';
-  zone.style.right = 'auto';
-  zone.style.transform = 'translateX(-50%)';
-
-  const spaceAbove = seatRect.top - BOARD_GAP_ABOVE_TABLEAU_PX - BOARD_TOP_MARGIN_PX;
-  const boardViewportCap = vh * 0.75;
-  const maxH = Math.min(boardViewportCap, Math.max(spaceAbove, 80));
-  zone.style.maxHeight = `${Math.floor(maxH)}px`;
+  if (zone) syncBoardTabState(zone);
 }
 
-/** Push opponent seats horizontally away from the centered board (priority) and apart from each other. */
-function layoutSeatRepulsion() {
-  const board = document.getElementById('zone-center');
-  if (!board) return;
-
-  const vw = window.innerWidth;
-  const clamp = x => Math.max(-vw * 0.38, Math.min(vw * 0.38, x));
-
-  function occupiedSeat(idx) {
-    const el = document.getElementById(`seat-${idx}`);
-    return el && !el.classList.contains('seat-empty') ? el : null;
-  }
-
-  for (let i = 1; i <= 4; i++) {
-    const el = document.getElementById(`seat-${i}`);
-    if (!el) continue;
-    if (el.classList.contains('seat-empty')) {
-      el.style.setProperty('--seat-nudge-x', '0px');
-      el.style.setProperty('--seat-nudge-y', '0px');
-    }
-  }
-
-  const nudge = { 1: { x: 0, y: 0 }, 2: { x: 0, y: 0 }, 3: { x: 0, y: 0 }, 4: { x: 0, y: 0 } };
-
-  function applyNudges() {
-    for (let idx = 1; idx <= 4; idx++) {
-      const el = document.getElementById(`seat-${idx}`);
-      if (!el || el.classList.contains('seat-empty')) continue;
-      nudge[idx].x = clamp(nudge[idx].x);
-      nudge[idx].y = Math.max(-100, Math.min(100, nudge[idx].y));
-      el.style.setProperty('--seat-nudge-x', `${nudge[idx].x}px`);
-      el.style.setProperty('--seat-nudge-y', `${nudge[idx].y}px`);
-    }
-  }
-
-  function separatePair(idxA, idxB) {
-    const elA = occupiedSeat(idxA);
-    const elB = occupiedSeat(idxB);
-    if (!elA || !elB) return false;
-    const ra = elA.getBoundingClientRect();
-    const rb = elB.getBoundingClientRect();
-    if (!rectsOverlap(ra, rb)) return false;
-
-    const ovx = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left);
-    const ovy = Math.min(ra.bottom, rb.bottom) - Math.max(ra.top, rb.top);
-    if (ovx <= 0 || ovy <= 0) return false;
-
-    const acx = (ra.left + ra.right) / 2;
-    const bcx = (rb.left + rb.right) / 2;
-    const push = (ovx + REPULSE_GAP_PX) * 0.48;
-    if (acx < bcx) {
-      nudge[idxA].x -= push;
-      nudge[idxB].x += push;
-    } else {
-      nudge[idxA].x += push;
-      nudge[idxB].x -= push;
-    }
-
-    const acy = (ra.top + ra.bottom) / 2;
-    const bcy = (rb.top + rb.bottom) / 2;
-    const ovyPush = (ovy + REPULSE_GAP_PX) * 0.22;
-    if (Math.abs(ovy) > 8 && ovx < ovy * 1.4) {
-      if (acy < bcy) {
-        nudge[idxA].y -= ovyPush;
-        nudge[idxB].y += ovyPush;
-      } else {
-        nudge[idxA].y += ovyPush;
-        nudge[idxB].y -= ovyPush;
-      }
-    }
-    return true;
-  }
-
-  for (let iter = 0; iter < REPULSE_MAX_ITER; iter++) {
-    applyNudges();
-
-    const boardRect = board.getBoundingClientRect();
-    const paddedBoard = inflateRect(boardRect, REPULSE_GAP_PX);
-
-    let adjusted = false;
-
-    [1, 2, 3, 4].forEach(idx => {
-      const el = occupiedSeat(idx);
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      if (!rectsOverlap(r, paddedBoard)) return;
-
-      const bcx = boardRect.left + boardRect.width / 2;
-      const scx = r.left + r.width / 2;
-      const ovx = Math.min(r.right, paddedBoard.right) - Math.max(r.left, paddedBoard.left);
-      const ovy = Math.min(r.bottom, paddedBoard.bottom) - Math.max(r.top, paddedBoard.top);
-      if (ovx <= 0 || ovy <= 0) return;
-
-      const mag = Math.min(ovx + REPULSE_GAP_PX * 0.5, 140);
-      const dir = scx < bcx ? -1 : 1;
-      nudge[idx].x += dir * mag * 0.62;
-
-      const scy = r.top + r.height / 2;
-      const bcy = boardRect.top + boardRect.height / 2;
-      const vyMag = Math.min(ovy + REPULSE_GAP_PX * 0.35, 90);
-      const vyDir = scy < bcy ? -1 : 1;
-      nudge[idx].y += vyDir * vyMag * 0.28;
-
-      adjusted = true;
+function setupBoardTabs(zoneCenter, tabsBar) {
+  const sections = () => Array.from(zoneCenter.querySelectorAll('.center-board-scroll > .center-section'));
+  const labels = { monsters: 'Monsters', citizens: 'Citizens', domains: 'Domains' };
+  const keys = ['monsters', 'citizens', 'domains'];
+  tabsBar.innerHTML = '';
+  keys.forEach((key, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'board-tab' + (i === 0 ? ' is-active' : '');
+    btn.textContent = labels[key];
+    btn.dataset.boardTab = key;
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+    btn.addEventListener('click', () => {
+      keys.forEach(k => {
+        sections().forEach(sec => {
+          if (sec.dataset.boardSection === k) {
+            sec.classList.toggle('board-tab-visible', k === key);
+          }
+        });
+      });
+      tabsBar.querySelectorAll('.board-tab').forEach(b => {
+        const on = b.dataset.boardTab === key;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
     });
+    tabsBar.appendChild(btn);
+  });
 
-    if (separatePair(2, 3)) adjusted = true;
-    if (separatePair(1, 2)) adjusted = true;
-    if (separatePair(3, 4)) adjusted = true;
-    if (separatePair(1, 4)) adjusted = true;
-
-    if (!adjusted) break;
-  }
-
-  applyNudges();
+  keys.forEach((key, i) => {
+    sections().forEach(sec => {
+      if (sec.dataset.boardSection === key) {
+        sec.classList.toggle('board-tab-visible', i === 0);
+      }
+    });
+  });
+  syncBoardTabState(zoneCenter);
 }
 
-function scheduleBoardLayout() {
-  layoutSeatEdgeSpread();
-  layoutCenterBoard();
-  requestAnimationFrame(() => {
-    layoutSeatRepulsion();
-  });
+function syncBoardTabState(zoneCenter) {
+  const scroll = zoneCenter.querySelector('.center-board-scroll');
+  if (!scroll) return;
+  const useTabs = isViewportNarrow();
+  zoneCenter.classList.toggle('board-use-tabs', useTabs);
+  if (!useTabs) {
+    zoneCenter.querySelectorAll('.center-section').forEach(sec => sec.classList.add('board-tab-visible'));
+  } else {
+    const active = zoneCenter.querySelector('.board-tab.is-active');
+    const key = active ? active.dataset.boardTab : 'monsters';
+    zoneCenter.querySelectorAll('.center-section').forEach(sec => {
+      sec.classList.toggle('board-tab-visible', sec.dataset.boardSection === key);
+    });
+  }
 }
 
 function canOfferTakeResourceAction(state) {
@@ -414,28 +539,34 @@ function canOfferTakeResourceAction(state) {
 
 function makeInfoBar(state) {
   const bar = mk('info-bar');
+  const narrow = isViewportNarrow();
+  if (narrow) bar.classList.add('info-bar--stacked');
+
+  const meta = mk('info-bar-meta');
 
   const phase = mk('phase-label');
   phase.textContent = fmtPhase(state.phase);
-  bar.appendChild(phase);
+  meta.appendChild(phase);
 
   const tn = mk('turn-label');
   tn.textContent = `Turn ${state.turn_number || 1}`;
-  bar.appendChild(tn);
+  meta.appendChild(tn);
 
   const active = (state.player_list || []).find(p => p.player_id === state.active_player_id);
   if (active && active.player_id !== PLAYER_ID) {
     const who = mk('turn-label');
     who.textContent = `— ${active.name}'s turn`;
-    bar.appendChild(who);
+    meta.appendChild(who);
   }
 
   if (state.end_game_triggered) {
     const eg = mk('turn-label');
     eg.textContent = '⚑ Final round';
     eg.style.color = 'var(--gold)';
-    bar.appendChild(eg);
+    meta.appendChild(eg);
   }
+
+  bar.appendChild(meta);
 
   if (canOfferTakeResourceAction(state)) {
     const takeWrap = mk('info-bar-take-resource');
@@ -456,6 +587,7 @@ function makeInfoBar(state) {
     bar.appendChild(takeWrap);
   }
 
+  const diceRow = mk('info-bar-dice-row');
   const dice = mk('dice-display');
   if (state.die_one != null) {
     dice.appendChild(makeDie(state.die_one));
@@ -464,7 +596,17 @@ function makeInfoBar(state) {
     sum.textContent = `= ${state.die_sum}`;
     dice.appendChild(sum);
   }
-  bar.appendChild(dice);
+  diceRow.appendChild(dice);
+
+  if (!narrow) {
+    const lobby = document.createElement('a');
+    lobby.href = '/';
+    lobby.className = 'info-bar-lobby-btn';
+    lobby.textContent = 'Lobby';
+    diceRow.appendChild(lobby);
+  }
+
+  bar.appendChild(diceRow);
 
   return bar;
 }
@@ -567,6 +709,7 @@ const TABLEAU_RESOURCE_ICONS = {
   gold: '/images/gold_icon.jpg',
   magic: '/images/magic_icon.png',
   strength: '/images/strength_icon.png',
+  victory: '/images/vp_icon.png',
 };
 
 function makeResourceScorePill(cls, val, fullName, iconSrc) {
@@ -589,9 +732,15 @@ function makeVpScorePill(val) {
   const pill = mk('score-pill victory');
   const n = Number(val ?? 0);
   const tip = `${n} times Victory Points`;
-  pill.textContent = `${n} VP`;
   pill.title = tip;
   pill.setAttribute('aria-label', tip);
+  pill.appendChild(document.createTextNode(String(n)));
+  pill.appendChild(document.createTextNode(' \u00D7 '));
+  const img = document.createElement('img');
+  img.className = 'score-pill-resource-icon';
+  img.alt = '';
+  img.src = TABLEAU_RESOURCE_ICONS.victory;
+  pill.appendChild(img);
   return pill;
 }
 
@@ -616,12 +765,23 @@ function makeModalResourceInline(kind, num, cls, leadingPlus) {
 }
 
 function makeModalVpValue(num, cls, leadingPlus) {
-  const span = document.createElement('span');
-  span.className = cls ? `modal-stat-value ${cls}` : 'modal-stat-value';
+  const wrap = document.createElement('span');
+  wrap.className = cls
+    ? `modal-stat-value ${cls} modal-resource-inline`
+    : 'modal-stat-value modal-resource-inline';
+  if (leadingPlus) wrap.appendChild(document.createTextNode('+'));
   const n = Number(num);
-  span.textContent = `${leadingPlus ? '+' : ''}${n} VP`;
-  span.title = `${n} times Victory Points`;
-  return span;
+  wrap.appendChild(document.createTextNode(String(n)));
+  wrap.appendChild(document.createTextNode(' \u00D7 '));
+  const img = document.createElement('img');
+  img.className = 'modal-resource-icon';
+  img.alt = '';
+  img.src = TABLEAU_RESOURCE_ICONS.victory;
+  const tip = `${n} times Victory Points`;
+  wrap.title = tip;
+  wrap.setAttribute('aria-label', tip);
+  wrap.appendChild(img);
+  return wrap;
 }
 
 function createModalStatValueEl(row) {
@@ -652,8 +812,16 @@ function appendCardModalStatRows(infoEl, card) {
 function makeHeader(player, state) {
   const h = mk('player-header');
 
+  const ord = playerIndexInList(state, player);
+  const listLen = (state.player_list || []).length;
+  if (ord >= 0 && listLen > 0) {
+    const seatLbl = mk('player-seat-order');
+    seatLbl.textContent = `Seat ${ord + 1}/${listLen}`;
+    seatLbl.title = 'Player order in this game (clockwise from Seat 1)';
+    h.appendChild(seatLbl);
+  }
+
   const name = mk('player-name');
-  if (isActiveTurnForPlayer(player, state)) name.classList.add('is-active');
   if (player.is_first) {
     name.classList.add('is-first');
     const star = mk('player-first-star');
@@ -670,7 +838,284 @@ function makeHeader(player, state) {
   h.appendChild(makeResourceScorePill('magic', player.magic_score, 'Magic', TABLEAU_RESOURCE_ICONS.magic));
   h.appendChild(makeVpScorePill(player.victory_score));
 
+  if (isActiveTurnForPlayer(player, state)) {
+    const tim = mk('tableau-inactive-timer');
+    tim.title =
+      'Approximate idle time before this table may close if nobody acts (resets on activity).';
+    tim.setAttribute(
+      'aria-label',
+      'Approximate idle time before this table may close if nobody acts',
+    );
+    h.appendChild(tim);
+  }
+
   return h;
+}
+
+// ── Player detail modal (tableau drill-down) ────────────────────────────
+function escapeHtml(s) {
+  return (s ?? '')
+    .toString()
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function detailPill(label, value) {
+  return `<span class="player-detail-pill"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</span>`;
+}
+
+function citizenRoleCounts(card) {
+  const r = card && card.roles;
+  if (r && typeof r === 'object') {
+    return {
+      sn: Number(r.shadow) || 0,
+      hn: Number(r.holy) || 0,
+      son: Number(r.soldier) || 0,
+      wn: Number(r.worker) || 0,
+    };
+  }
+  return {
+    sn: Number(card.shadow_count) || 0,
+    hn: Number(card.holy_count) || 0,
+    son: Number(card.soldier_count) || 0,
+    wn: Number(card.worker_count) || 0,
+  };
+}
+
+function formatHarvestGSM(card, onTurn) {
+  const g = onTurn ? 'gold_payout_on_turn' : 'gold_payout_off_turn';
+  const s = onTurn ? 'strength_payout_on_turn' : 'strength_payout_off_turn';
+  const m = onTurn ? 'magic_payout_on_turn' : 'magic_payout_off_turn';
+  const gv = Number(card[g]) || 0;
+  const sv = Number(card[s]) || 0;
+  const mv = Number(card[m]) || 0;
+  return `G ${gv}, S ${sv}, M ${mv}`;
+}
+
+function pushHarvestHints(hints, card) {
+  const hasOn =
+    card.gold_payout_on_turn !== undefined ||
+    card.strength_payout_on_turn !== undefined ||
+    card.magic_payout_on_turn !== undefined;
+  const hasOff =
+    card.gold_payout_off_turn !== undefined ||
+    card.strength_payout_off_turn !== undefined ||
+    card.magic_payout_off_turn !== undefined;
+  if (!hasOn && !hasOff) return;
+  const onStr = formatHarvestGSM(card, true);
+  const offStr = formatHarvestGSM(card, false);
+  if (onStr === offStr) {
+    hints.push(`Harvest: ${onStr} (on & off turn)`);
+  } else {
+    hints.push(`Harvest (on turn): ${onStr}`);
+    hints.push(`Harvest (off turn): ${offStr}`);
+  }
+}
+
+function tableauCardFullText(card) {
+  if (!card || typeof card !== 'object') return '';
+  const rawText = (card.text ?? '').toString().trim();
+  if (rawText) return rawText;
+
+  const parts = [];
+  pushHarvestHints(parts, card);
+  if (card.monster_id !== undefined && card.monster_id !== null) {
+    const vp = Number(card.vp_reward || 0);
+    const gr = Number(card.gold_reward || 0);
+    const sr = Number(card.strength_reward || 0);
+    const mr = Number(card.magic_reward || 0);
+    parts.push(`Reward: VP ${vp} · G ${gr} · S ${sr} · M ${mr}`);
+  }
+  const passive = (card.passive_effect ?? '').toString().trim();
+  const activation = (card.activation_effect ?? '').toString().trim();
+  if (passive) parts.push(`Passive: ${passive}`);
+  if (activation) parts.push(`Activation: ${activation}`);
+  const spOn = (card.special_payout_on_turn ?? '').toString().trim();
+  const spOff = (card.special_payout_off_turn ?? '').toString().trim();
+  if (spOn) parts.push(`Special (on turn): ${spOn}`);
+  if (spOff) parts.push(`Special (off turn): ${spOff}`);
+  const specialReward = (card.special_reward ?? '').toString().trim();
+  const specialCost = (card.special_cost ?? '').toString().trim();
+  if (specialReward) parts.push(`Special reward: ${specialReward}`);
+  if (specialCost) parts.push(`Special cost: ${specialCost}`);
+
+  if (card.duke_id !== undefined) {
+    const mults = [];
+    const add = (label, val) => {
+      if (val === undefined || val === null) return;
+      const n = Number(val);
+      if (!Number.isFinite(n) || n === 0) return;
+      mults.push(`${label}×${n}`);
+    };
+    const addResource = (label, val) => {
+      if (val === undefined || val === null) return;
+      const n = Number(val);
+      if (!Number.isFinite(n) || n === 0) return;
+      mults.push(`${label}×1/${n}`);
+    };
+    addResource('Gold', card.gold_multiplier);
+    addResource('Strength', card.strength_multiplier);
+    addResource('Magic', card.magic_multiplier);
+    add('Shadow', card.shadow_multiplier);
+    add('Holy', card.holy_multiplier);
+    add('Soldier', card.soldier_multiplier);
+    add('Worker', card.worker_multiplier);
+    add('Monster', card.monster_multiplier);
+    add('Citizen', card.citizen_multiplier);
+    add('Domain', card.domain_multiplier);
+    add('Boss', card.boss_multiplier);
+    add('Minion', card.minion_multiplier);
+    add('Beast', card.beast_multiplier);
+    add('Titan', card.titan_multiplier);
+    if (mults.length) parts.unshift(mults.join(' · '));
+  }
+  return parts.join('\n').trim();
+}
+
+function renderDetailCardItem(card, count = 1) {
+  if (!card || typeof card !== 'object') {
+    return `<div class="player-detail-item"><div class="player-detail-item-title">${escapeHtml(String(card))}</div></div>`;
+  }
+  const name = card.name || card.title || '(unnamed)';
+  const id = card.starter_id || card.citizen_id || card.monster_id || card.domain_id || card.duke_id || card.id || '';
+  const isCitizen = card.citizen_id !== undefined && card.citizen_id !== null;
+
+  const hints = [];
+  if (card.roll_match1 !== undefined || card.roll_match2 !== undefined) {
+    const rm1 = card.roll_match1 ?? '';
+    const rm2 = card.roll_match2 ?? '';
+    hints.push(`Roll: ${rm1}${rm2 !== '' ? '/' + rm2 : ''}`);
+  }
+  if (card.gold_cost !== undefined) hints.push(`Gold cost: ${card.gold_cost}`);
+  if (card.strength_cost !== undefined) hints.push(`Strength cost: ${card.strength_cost}`);
+  if (card.magic_cost !== undefined) hints.push(`Magic cost: ${card.magic_cost}`);
+  pushHarvestHints(hints, card);
+  if (isCitizen && card.is_flipped) hints.push('Flipped — no harvest payout / roll spend counts');
+
+  const { sn, hn, son, wn } = citizenRoleCounts(card);
+  const roleParts = [];
+  if (sn > 0) roleParts.push(`Shadow +${sn}`);
+  if (hn > 0) roleParts.push(`Holy +${hn}`);
+  if (son > 0) roleParts.push(`Soldier +${son}`);
+  if (wn > 0) roleParts.push(`Worker +${wn}`);
+  const isDomain = card.domain_id !== undefined && card.domain_id !== null;
+  const showRoleRow = (isCitizen || isDomain) && roleParts.length;
+  const roleBlock = showRoleRow
+    ? `<div class="player-detail-item-sub"><strong>Roles:</strong> ${escapeHtml(roleParts.join(' · '))}</div>`
+    : '';
+
+  const subtitle = hints.length ? `<div class="player-detail-item-sub">${escapeHtml(hints.join(' · '))}</div>` : '';
+  const fullText = tableauCardFullText(card);
+  const rulesText = fullText
+    ? `<div class="player-detail-item-sub" style="margin-top:6px;">${escapeHtml(fullText)}</div>`
+    : '';
+  const idText = id !== '' ? ` <span class="player-detail-mini">(#${escapeHtml(id)})</span>` : '';
+  const qty = Number(count) || 1;
+  const qtyText = qty > 1 ? ` <span class="player-detail-mini">×${qty}</span>` : '';
+  return `<div class="player-detail-item"><div class="player-detail-item-title">${escapeHtml(name)}${qtyText}${idText}</div>${subtitle}${roleBlock}${rulesText}</div>`;
+}
+
+function renderDetailCardList(title, cards) {
+  const arr = Array.isArray(cards) ? cards : [];
+  if (!arr.length) {
+    return `<div class="player-detail-card-block"><h3>${escapeHtml(title)}</h3><div class="player-detail-mini">none</div></div>`;
+  }
+  const grouped = groupCardsForTableau(arr);
+  if (!grouped) {
+    return `<div class="player-detail-card-block"><h3>${escapeHtml(title)} <span class="player-detail-mini">(${arr.length})</span></h3>${arr.map(c => renderDetailCardItem(c)).join('')}</div>`;
+  }
+  return `<div class="player-detail-card-block"><h3>${escapeHtml(title)} <span class="player-detail-mini">(${arr.length} cards, ${grouped.length} types)</span></h3>${grouped.map(x => renderDetailCardItem(x.card, x.count)).join('')}</div>`;
+}
+
+function renderPlayerDetailInner(state, playerId) {
+  const players = state.player_list || [];
+  const subject = players.find(p => idsMatch(p.player_id, playerId));
+  if (!subject) {
+    return `<p class="player-detail-mini">Player not found in this game.</p>`;
+  }
+  const ord = playerIndexInList(state, subject);
+
+  const dukes = Array.isArray(subject.owned_dukes) ? subject.owned_dukes : [];
+  const duke = dukes.length ? dukes[0] : null;
+  const dukeName = duke ? duke.name || 'Duke' : 'Hidden';
+  const dukeText = duke ? tableauCardFullText(duke) : '';
+  const dukeLine = `<div class="player-detail-mini" style="margin-bottom:12px;"><strong>Duke:</strong> ${escapeHtml(duke ? dukeName : '(hidden from opponents)')}${dukeText ? `<div style="margin-top:6px;white-space:pre-wrap;">${escapeHtml(dukeText)}</div>` : ''}</div>`;
+
+  const kv = `
+    <div class="player-detail-kv">
+      ${detailPill('Seat', ord >= 0 ? `${ord + 1} / ${players.length}` : '?')}
+      ${detailPill('Gold', subject.gold_score ?? 0)}
+      ${detailPill('Strength', subject.strength_score ?? 0)}
+      ${detailPill('Magic', subject.magic_score ?? 0)}
+      ${detailPill('Victory', subject.victory_score ?? 0)}
+      ${detailPill('Shadow', subject.shadow_count ?? 0)}
+      ${detailPill('Holy', subject.holy_count ?? 0)}
+      ${detailPill('Soldier', subject.soldier_count ?? 0)}
+      ${detailPill('Worker', subject.worker_count ?? 0)}
+    </div>
+  `;
+
+  return `
+    ${kv}
+    ${dukeLine}
+    <div class="player-detail-grid">
+      ${renderDetailCardList('Starters', subject.owned_starters)}
+      ${renderDetailCardList('Citizens', subject.owned_citizens)}
+      ${renderDetailCardList('Monsters', subject.owned_monsters)}
+      ${renderDetailCardList('Domains', subject.owned_domains)}
+    </div>
+  `;
+}
+
+function openPlayerDetailModal(playerId) {
+  const state = latestGameState;
+  const body = document.getElementById('player-detail-body');
+  const panel = document.getElementById('player-detail-modal');
+  const titleEl = document.getElementById('player-detail-title');
+  if (!body || !panel) return;
+  if (!state) return;
+  const players = state.player_list || [];
+  const subject = players.find(p => idsMatch(p.player_id, playerId));
+  if (titleEl) {
+    if (!subject) {
+      titleEl.textContent = 'Player';
+    } else {
+      const displayName = (subject.name || '').toString().trim() || subject.player_id || 'Player';
+      const poss = n => {
+        const s = (n ?? '').toString().trim();
+        if (!s) return 'Player';
+        return s.toLowerCase().endsWith('s') ? `${s}'` : `${s}'s`;
+      };
+      titleEl.textContent = idsMatch(playerId, PLAYER_ID) ? 'Your tableau (detail)' : `${poss(displayName)} tableau`;
+    }
+  }
+  body.innerHTML = renderPlayerDetailInner(state, playerId);
+  panel.classList.add('is-open');
+  panel.setAttribute('aria-hidden', 'false');
+}
+
+function closePlayerDetailModal() {
+  const panel = document.getElementById('player-detail-modal');
+  if (!panel) return;
+  panel.classList.remove('is-open');
+  panel.setAttribute('aria-hidden', 'true');
+}
+
+function initPlayerDetailModal() {
+  const panel = document.getElementById('player-detail-modal');
+  const closeBtn = document.getElementById('player-detail-close');
+  if (panel) {
+    panel.addEventListener('click', e => {
+      if (e.target === panel) closePlayerDetailModal();
+    });
+  }
+  if (closeBtn) closeBtn.addEventListener('click', () => closePlayerDetailModal());
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closePlayerDetailModal();
+  });
 }
 
 // ── Card factory ──────────────────────────────────────────────────────────
@@ -680,6 +1125,7 @@ function cardImageUrl(card) {
   if (card.domain_id  !== undefined) return `/card-image/domain/${card.domain_id}`;
   if (card.duke_id    !== undefined) return `/card-image/duke/${card.duke_id}`;
   if (card.starter_id !== undefined) return `/card-image/starter/${card.starter_id}`;
+  if (card.exhausted_id !== undefined) return `/card-image/exhausted/${card.exhausted_id}`;
   return null;
 }
 
@@ -1619,7 +2065,16 @@ async function fetchGameStateFromApi() {
   if (!GAME_ID || !PLAYER_ID) return;
   try {
     const res = await fetch(`/api/game/${encodeURIComponent(GAME_ID)}/state?player_id=${encodeURIComponent(PLAYER_ID)}`);
-    if (!res.ok) return;
+    if (!res.ok) {
+      if (res.status === 404) {
+        const payload = await res.json().catch(() => ({}));
+        if (isGameNotFoundText(payload?.detail)) {
+          redirectToLobby();
+          return;
+        }
+      }
+      return;
+    }
     const data = await res.json();
     render(data);
   } catch (e) {
@@ -1636,6 +2091,10 @@ async function postGameAction(body) {
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) {
     const detail = payload?.detail || res.statusText || 'Request failed';
+    if (res.status === 404 && isGameNotFoundText(detail)) {
+      redirectToLobby();
+      return false;
+    }
     window.alert(detail);
     return false;
   }
@@ -1654,8 +2113,21 @@ function removePromptOverlay() {
 }
 
 function openPromptOverlayShell(opts) {
+  const prevOverlay = document.getElementById('game-prompt-overlay');
+  const oldTitle = prevOverlay?.querySelector('.prompt-modal-title')?.textContent?.trim() || '';
+  let preservedModalScroll = 0;
+  let preservedChoiceListScroll = 0;
+  if (prevOverlay) {
+    const prevModal = prevOverlay.querySelector('.card-modal');
+    if (prevModal) preservedModalScroll = prevModal.scrollTop;
+    const prevList = prevOverlay.querySelector('.prompt-choice-list');
+    if (prevList) preservedChoiceListScroll = prevList.scrollTop;
+  }
+
   removePromptOverlay();
   const { title, subtitle, dismissible, bodyEl, footerEl } = opts;
+  const newTitle = (title || '').toString().trim();
+  const restorePromptScroll = oldTitle && newTitle && oldTitle === newTitle;
 
   const overlay = document.createElement('div');
   overlay.id = 'game-prompt-overlay';
@@ -1701,6 +2173,38 @@ function openPromptOverlayShell(opts) {
   }
 
   document.body.appendChild(overlay);
+
+  if (restorePromptScroll) {
+    const applyPreservedScroll = () => {
+      const m = overlay.querySelector('.card-modal');
+      if (m) m.scrollTop = preservedModalScroll;
+      const pl = overlay.querySelector('.prompt-choice-list');
+      if (pl) pl.scrollTop = preservedChoiceListScroll;
+    };
+    applyPreservedScroll();
+    requestAnimationFrame(() => {
+      applyPreservedScroll();
+      requestAnimationFrame(applyPreservedScroll);
+    });
+    // Re-apply after lazy images / layout expand scrollHeight (otherwise scrollTop was clamped to 0).
+    const m = overlay.querySelector('.card-modal');
+    const pl = overlay.querySelector('.prompt-choice-list');
+    const targets = [m, pl].filter(Boolean);
+    if (targets.length && typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => {
+        applyPreservedScroll();
+      });
+      targets.forEach(t => ro.observe(t));
+      setTimeout(() => {
+        try {
+          ro.disconnect();
+        } catch (_) {
+          /* ignore */
+        }
+        applyPreservedScroll();
+      }, 4000);
+    }
+  }
 }
 
 function promptButton(label, onClick, secondary) {
@@ -2049,7 +2553,7 @@ function renderConcurrentChooseDuke(state, concurrent) {
       const img = document.createElement('img');
       img.className = 'prompt-choice-card-img';
       img.alt = '';
-      img.loading = 'lazy';
+      img.loading = 'eager';
       img.src = url;
       img.onerror = () => wrap.remove();
       wrap.appendChild(img);
@@ -3085,11 +3589,19 @@ if (!GAME_ID || !PLAYER_ID) {
 } else {
   connect();
   initOpponentTableauWheelScroll();
-  window.addEventListener('resize', () => scheduleBoardLayout());
-  const seat0 = document.getElementById('seat-0');
-  const zoneCenter = document.getElementById('zone-center');
-  if (typeof ResizeObserver !== 'undefined') {
-    if (seat0) new ResizeObserver(() => scheduleBoardLayout()).observe(seat0);
-    if (zoneCenter) new ResizeObserver(() => scheduleBoardLayout()).observe(zoneCenter);
-  }
+  initPlayerDetailModal();
+  let prevNarrowForLayout = isViewportNarrow();
+  const onViewportLayoutChange = () => {
+    const narrow = isViewportNarrow();
+    if (narrow !== prevNarrowForLayout && latestGameState) {
+      render(latestGameState);
+    }
+    prevNarrowForLayout = narrow;
+    const zone = document.getElementById('zone-center');
+    if (zone) syncBoardTabState(zone);
+  };
+  window.addEventListener('resize', onViewportLayoutChange);
+  const mmNarrow = window.matchMedia('(max-width: 800px)');
+  if (mmNarrow.addEventListener) mmNarrow.addEventListener('change', onViewportLayoutChange);
+  else if (mmNarrow.addListener) mmNarrow.addListener(onViewportLayoutChange);
 }

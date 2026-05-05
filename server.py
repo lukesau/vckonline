@@ -22,6 +22,7 @@ import json
 _REPO_ROOT = Path(__file__).resolve().parent
 _DEV_CLIENT_INDEX = _REPO_ROOT / "static" / "dev-client" / "index.html"
 _GAME_CLIENT_INDEX = _REPO_ROOT / "static" / "game" / "index.html"
+_COUNTER_INDEX = _REPO_ROOT / "static" / "counter" / "index.html"
 
 # Card image directories — keyed by the singular type name used in filenames
 _CARD_IMAGE_DIRS: Dict[str, Path] = {
@@ -31,6 +32,8 @@ _CARD_IMAGE_DIRS: Dict[str, Path] = {
     "duke":    _REPO_ROOT / "images" / "dukes",
     "starter": _REPO_ROOT / "images" / "starters",
 }
+# Single 400x570 back for all Exhausted tokens; generate with card_image_utils from images/exhausted_back.jpg
+_EXHAUSTED_CARD_JPEG = _REPO_ROOT / "images" / "exhausted" / "exhausted_card.jpg"
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
 app = FastAPI(title="VCK Online API", description="Development server for Valeria Card Kingdoms Online")
@@ -575,6 +578,10 @@ async def startup_event():
 @app.get("/card-image/{card_type}/{card_id}")
 async def card_image(card_type: str, card_id: int):
     """Return the card image matched by type + numeric ID prefix."""
+    if card_type == "exhausted":
+        if _EXHAUSTED_CARD_JPEG.is_file():
+            return FileResponse(str(_EXHAUSTED_CARD_JPEG), media_type="image/jpeg")
+        raise HTTPException(status_code=404, detail="Exhausted card image not found")
     dir_path = _CARD_IMAGE_DIRS.get(card_type)
     if not dir_path or not dir_path.exists():
         raise HTTPException(status_code=404, detail="Unknown card type")
@@ -618,6 +625,11 @@ async def game_client():
 @app.get("/debug")
 async def debug_client():
     return FileResponse(_DEV_CLIENT_INDEX, media_type="text/html")
+
+
+@app.get("/counter")
+async def counter_client():
+    return FileResponse(_COUNTER_INDEX, media_type="text/html")
 
 
 if __name__ == "__main__":

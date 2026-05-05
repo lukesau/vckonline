@@ -1,0 +1,240 @@
+/* Matches static/game/style.css resource colors and pill look; standalone mobile layout. */
+
+:root {
+  --felt-dark:  #152e1d;
+  --felt:       #1e4a2e;
+  --felt-light: #255a37;
+  --gold:  #dfb152;
+  --str:   #c45433;
+  --mag:   #8bb8e6;
+  --vp:    #a060f0;
+  --text:  #ddd;
+  --muted: #888;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+.counter-body {
+  min-height: 100dvh;
+  padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+    max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 17px;
+  color: var(--text);
+  background: radial-gradient(ellipse at 50% 35%, var(--felt-light) 0%, var(--felt) 45%, var(--felt-dark) 100%);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.counter-shell {
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.counter-header {
+  margin-bottom: 20px;
+}
+
+.counter-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.counter-sub {
+  margin-top: 8px;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.counter-sub-mono {
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+}
+
+.counter-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.counter-hint {
+  margin-top: 16px;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.45;
+  text-align: center;
+  user-select: none;
+}
+
+.counter-row {
+  display: grid;
+  grid-template-columns: minmax(48px, 1fr) minmax(0, 3fr) minmax(48px, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.counter-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  border: none;
+  border-radius: 12px;
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.38);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.counter-step:active {
+  background: rgba(0, 0, 0, 0.52);
+}
+
+.counter-step:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.counter-cell {
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+
+.counter-display {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-height: 52px;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  touch-action: manipulation;
+  font-weight: 600;
+  font-size: 1.15rem;
+  width: 100%;
+  max-width: 100%;
+}
+
+.counter-display:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.counter-display.is-hidden {
+  display: none;
+}
+
+.counter-value-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.counter-x {
+  opacity: 0.92;
+}
+
+.score-pill-resource-icon {
+  display: block;
+  height: 1.2em;
+  max-height: min(1.25em, 22px);
+  width: auto;
+  object-fit: contain;
+}
+
+.counter-row--gold .counter-display { color: var(--gold); }
+.counter-row--strength .counter-display { color: var(--str); }
+.counter-row--magic .counter-display { color: var(--mag); }
+.counter-row--victory .counter-display { color: var(--vp); }
+
+.counter-input {
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.counter-input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+.counter-input.is-hidden {
+  display: none;
+}
+
+.counter-row--gold .counter-input { color: var(--gold); }
+.counter-row--strength .counter-input { color: var(--str); }
+.counter-row--magic .counter-input { color: var(--mag); }
+.counter-row--victory .counter-input { color: var(--vp); }
+
+/* Mobile keypad for entering math ops without full keyboard */
+.counter-keypad {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 10px max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom))
+    max(10px, env(safe-area-inset-left));
+  background: rgba(10, 18, 12, 0.92);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 50;
+}
+
+.counter-keypad.is-hidden {
+  display: none;
+}
+
+.counter-keypad-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.counter-keypad-row:first-child {
+  margin-top: 0;
+}
+
+.counter-keypad-key {
+  min-height: 46px;
+  border: none;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.42);
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  touch-action: manipulation;
+}
+
+.counter-keypad-key:active {
+  background: rgba(0, 0, 0, 0.56);
+}
+
+.counter-keypad-key:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* Make space so the keypad doesn't cover the hint on touch devices */
+@media (pointer: coarse) {
+  .counter-shell {
+    padding-bottom: 230px;
+  }
+}

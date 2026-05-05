@@ -2799,6 +2799,10 @@ class Game:
 
             if monster_stack:
                 monster_stack[-1].toggle_accessibility(True)
+            elif self.exhausted_stack:
+                exhausted = self.exhausted_stack.pop()
+                monster_stack.append(exhausted)
+                self.exhausted_count = int(self.exhausted_count) + 1
             after = self._player_scores_line(player)
             pay = self._format_resource_payment(gp, sp, mp)
             self._log_game_event(

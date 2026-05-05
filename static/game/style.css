@@ -31,40 +31,207 @@ html, body {
   font-size: 16px;
 }
 
-/* ── Board ──────────────────────────────────────────────────────────── */
+/* ── Board shell (grid / flex by player count) ───────────────────────── */
 .board {
   position: relative;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
   background: radial-gradient(ellipse at 50% 55%, var(--felt-light) 0%, var(--felt) 40%, var(--felt-dark) 100%);
-  --seat-edge-spread: 0px;
+}
+
+.game-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.gl-top {
+  flex: 0 0 auto;
+  min-height: 0;
+  display: none;
+  gap: 8px;
+  padding: 8px 8px 0;
+}
+
+.board[data-layout="p2"] .gl-top,
+.board[data-layout="p4"] .gl-top,
+.board[data-layout="p5"] .gl-top {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.board[data-layout="p5"] .gl-top {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.gl-top > .gl-top-slot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  min-height: 0;
+}
+
+.gl-top > .gl-top-slot > .seat {
+  flex: 1;
+  min-width: 0;
+}
+
+.gl-mid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  padding: 0 8px;
+  gap: 8px;
+}
+
+.gl-side-l,
+.gl-side-r {
+  flex: 0 0 auto;
+  width: min(28vw, 220px);
+  min-width: min(28vw, 220px);
+  max-width: min(28vw, 220px);
+  display: none;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.board[data-layout="p3"] .gl-side-l,
+.board[data-layout="p3"] .gl-side-r,
+.board[data-layout="p4"] .gl-side-l,
+.board[data-layout="p4"] .gl-side-r,
+.board[data-layout="p5"] .gl-side-l,
+.board[data-layout="p5"] .gl-side-r {
+  display: flex;
+}
+
+.gl-center {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.gl-bottom {
+  flex: 0 0 auto;
+  padding: 6px 8px 8px;
+}
+
+/* Narrow viewport: hide seats around the board; swipe tableaus in bottom carousel */
+.board[data-narrow-layout="1"] .gl-top,
+.board[data-narrow-layout="1"] .gl-side-l,
+.board[data-narrow-layout="1"] .gl-side-r {
+  display: none !important;
+}
+
+.board[data-narrow-layout="1"] .gl-bottom {
+  flex: 0 0 auto;
+  height: min(38vh, 320px);
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  padding-left: max(8px, env(safe-area-inset-left, 0px));
+  padding-right: max(8px, env(safe-area-inset-right, 0px));
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+}
+
+.tableau-carousel {
+  min-width: 0;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tableau-carousel-viewport {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  /* Inset so .seat-my-active-turn box-shadow (5px) isn’t clipped by overflow-y */
+  padding: 8px 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-y: none;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  cursor: grab;
+  touch-action: pan-x;
+}
+
+.tableau-carousel-viewport.is-pointer-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.tableau-carousel-viewport::-webkit-scrollbar {
+  height: 5px;
+}
+
+.tableau-carousel-viewport::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.18);
+  border-radius: 3px;
+}
+
+.tableau-carousel-slide {
+  flex: 0 0 100%;
+  width: 100%;
+  min-width: 0;
+  max-height: 100%;
+  box-sizing: border-box;
+  padding: 0 10px;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  touch-action: pan-x;
+  overscroll-behavior-y: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tableau-carousel-slide .seat {
+  width: 100%;
+  min-width: 0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tableau-carousel-slide .seat-inner {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.tableau-carousel-slide .tableau-cards {
+  min-height: 0;
 }
 
 /* ── Seats ──────────────────────────────────────────────────────────── */
-/*
-  Pentagon: flat bottom edge = my seat; single apex at TOP of screen.
-
-  Circumradius R = 47vh  →  top vertex at (50%, 47vh − 47vh) = (50%, 0) ✓
-  Apothem      r = R·cos36° = 47·0.809 = 38vh
-  Center: (50%, 47vh)
-
-  Side midpoints (clockwise from bottom) — same pentagon layout, all seats upright:
-    seat-0  bottom       →  anchored to screen bottom, centered
-    seat-1  lower-right  →  (cx+36.1vh, cy+11.7vh)
-    seat-2  upper-right  →  (cx+22.3vh, cy−30.7vh)
-    seat-3  upper-left   →  (cx−22.3vh, cy−30.7vh)
-    seat-4  lower-left   →  (cx−36.1vh, cy+11.7vh)
-
-  r·sin(108°)=36.1  r·cos(108°)=11.7   r·sin(36°)=22.3  r·cos(36°)=30.7
-*/
 .seat {
-  position: absolute;
+  position: relative;
   background: var(--zone-bg);
   border: 1px solid var(--zone-border);
   border-radius: 8px;
   overflow: hidden;
   z-index: 5;
+}
+
+.seat.seat-detail-hit {
+  cursor: pointer;
 }
 
 .seat.seat-empty {
@@ -84,59 +251,6 @@ html, body {
   text-transform: uppercase;
 }
 
-/* Me — full viewport width; pentagon anchor stays visually centered at bottom */
-.seat-0 {
-  bottom: 6px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: calc(100vw - 16px);
-  max-width: calc(100vw - 16px);
-}
-
-/* Opponents — pentagon anchors + viewport edge spread + JS repulsion nudge */
-.seat-1 {
-  left: calc(50% + 36.1vh);
-  top: 58.7vh;
-  width: max-content;
-  max-width: min(440px, calc(100vw - 24px));
-  transform: translate(calc(-50% + var(--seat-nudge-x, 0px) + var(--seat-edge-spread, 0px)), calc(-50% + var(--seat-nudge-y, 0px)));
-}
-.seat-2 {
-  left: calc(50% + 22.3vh);
-  top: 16.3vh;
-  width: max-content;
-  max-width: min(440px, calc(100vw - 24px));
-  transform: translate(calc(-50% + var(--seat-nudge-x, 0px) + var(--seat-edge-spread, 0px)), calc(-50% + var(--seat-nudge-y, 0px)));
-}
-.seat-3 {
-  left: calc(50% - 22.3vh);
-  top: 16.3vh;
-  width: max-content;
-  max-width: min(440px, calc(100vw - 24px));
-  transform: translate(calc(-50% + var(--seat-nudge-x, 0px) - var(--seat-edge-spread, 0px)), calc(-50% + var(--seat-nudge-y, 0px)));
-}
-.seat-4 {
-  left: calc(50% - 36.1vh);
-  top: 58.7vh;
-  width: max-content;
-  max-width: min(440px, calc(100vw - 24px));
-  transform: translate(calc(-50% + var(--seat-nudge-x, 0px) - var(--seat-edge-spread, 0px)), calc(-50% + var(--seat-nudge-y, 0px)));
-}
-
-.seat-1.seat-empty,
-.seat-2.seat-empty {
-  width: auto;
-  max-width: 260px;
-  transform: translate(calc(-50% + var(--seat-edge-spread, 0px)), -50%);
-}
-
-.seat-3.seat-empty,
-.seat-4.seat-empty {
-  width: auto;
-  max-width: 260px;
-  transform: translate(calc(-50% - var(--seat-edge-spread, 0px)), -50%);
-}
-
 /* ── Seat inner layout ──────────────────────────────────────────────── */
 .seat-inner {
   display: flex;
@@ -146,15 +260,24 @@ html, body {
   min-width: 0;
 }
 
-.seat-0 .seat-inner {
+.seat-me .seat-inner,
+.seat-carousel .seat-inner {
   width: 100%;
+}
+
+.player-seat-order {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-right: 6px;
+  letter-spacing: 0.04em;
 }
 
 /* ── Player header bar ──────────────────────────────────────────────── */
 .player-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
   padding: 4px 6px;
   background: rgba(0,0,0,0.3);
@@ -209,100 +332,27 @@ html, body {
 .score-pill.magic    { color: var(--mag); }
 .score-pill.victory  { color: var(--vp); }
 
-/* ── Active player: animated ring around tableau (cards row only) ─────── */
-.tableau-ring-host {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+/* ── Your turn: static ring around your whole zone (header + cards) ───── */
+.seat.seat-me.seat-my-active-turn,
+.seat.seat-carousel.seat-my-active-turn {
+  box-shadow: 0 0 0 5px #53d337;
 }
 
-.tableau-ring-sweep {
-  display: none;
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 220%;
-  height: 220%;
-  margin-left: -110%;
-  margin-top: -110%;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg 278deg,
-    rgba(240, 192, 64, 0.15) 296deg,
-    rgba(240, 192, 64, 0.85) 318deg,
-    rgba(255, 232, 160, 1) 332deg,
-    rgba(240, 192, 64, 0.85) 348deg,
-    rgba(240, 192, 64, 0.15) 358deg,
-    transparent 360deg
-  );
-  animation: tableau-turn-ring-spin 2.75s linear infinite;
-  pointer-events: none;
-  z-index: 0;
-  will-change: transform;
+/* Idle countdown on whoever’s turn it is (all seats); ring above is viewer-only */
+.tableau-inactive-timer {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: rgba(200, 230, 210, 0.95);
+  background: rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
 }
 
-.tableau-ring-host.is-active-turn {
-  overflow: hidden;
-  border-radius: 10px;
-}
-
-.tableau-ring-host.is-active-turn .tableau-ring-sweep {
-  display: block;
-}
-
-.tableau-ring-host .tableau-cards {
-  position: relative;
-  z-index: 1;
-}
-
-/* Bottom tableau: fill seat width so the shimmer reads across the bar */
-.seat-0 .tableau-ring-host {
-  width: 100%;
-}
-
-/* Wide bottom strip: opaque cards hide the sweep in the middle — use a thicker “gutter” + brighter wedge
-   (avoid a solid zone-bg on .tableau-cards; that read as a flat dark panel vs the real shimmer on small tableaus). */
-.seat-0 .tableau-ring-host.is-active-turn {
-  box-sizing: border-box;
-  padding: 8px;
-  box-shadow: inset 0 0 0 1px rgba(240, 192, 64, 0.28);
-}
-
-.seat-0 .tableau-ring-host.is-active-turn .tableau-ring-sweep {
-  width: 300%;
-  height: 300%;
-  margin-left: -150%;
-  margin-top: -150%;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg 258deg,
-    rgba(240, 192, 64, 0.25) 272deg,
-    rgba(255, 244, 200, 1) 298deg,
-    rgba(240, 192, 64, 0.95) 316deg,
-    rgba(255, 214, 90, 0.75) 328deg,
-    rgba(240, 192, 64, 0.3) 342deg,
-    transparent 356deg,
-    transparent 360deg
-  );
-  filter: saturate(1.25) brightness(1.08);
-}
-
-@keyframes tableau-turn-ring-spin {
-  to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tableau-ring-host.is-active-turn .tableau-ring-sweep {
-    display: none;
-  }
-  .tableau-ring-host.is-active-turn {
-    box-shadow: inset 0 0 0 2px rgba(240, 192, 64, 0.55);
-  }
-}
-
-/* ── My tableau (seat-0) ────────────────────────────────────────────── */
+/* ── My tableau ─────────────────────────────────────────────────────── */
 .tableau-cards {
   display: flex;
   flex-direction: row;
@@ -313,12 +363,14 @@ html, body {
   align-items: flex-start;
 }
 
-.seat-0 .tableau-cards {
+.seat-me .tableau-cards,
+.seat-carousel .tableau-cards {
   justify-content: safe center;
 }
 
 @supports not (justify-content: safe center) {
-  .seat-0 .tableau-cards {
+  .seat-me .tableau-cards,
+  .seat-carousel .tableau-cards {
     justify-content: center;
   }
 }
@@ -348,8 +400,9 @@ html, body {
   flex-shrink: 0;
 }
 
-/* ── Opponent tableaus — same grouped row + horizontal scroll as seat 0, smaller cards */
-.seat:not(.seat-0):not(.seat-empty) .tableau-cards {
+/* ── Opponent tableaus — top strip: horizontal scroll, smaller cards ─── */
+.seat-top:not(.seat-empty) .tableau-cards,
+.seat-top-mini:not(.seat-empty) .tableau-cards {
   display: flex;
   flex-direction: row;
   gap: 4px;
@@ -360,12 +413,53 @@ html, body {
   min-width: 0;
 }
 
-.seat:not(.seat-0) .tableau-cards::-webkit-scrollbar { height: 4px; }
-.seat:not(.seat-0) .tableau-cards::-webkit-scrollbar-track { background: transparent; }
-.seat:not(.seat-0) .tableau-cards::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+.seat-top .tableau-cards::-webkit-scrollbar,
+.seat-top-mini .tableau-cards::-webkit-scrollbar { height: 4px; }
+.seat-top .tableau-cards::-webkit-scrollbar-track,
+.seat-top-mini .tableau-cards::-webkit-scrollbar-track { background: transparent; }
+.seat-top .tableau-cards::-webkit-scrollbar-thumb,
+.seat-top-mini .tableau-cards::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
 
-.seat:not(.seat-0) .card-group-label {
+.seat-top .card-group-label,
+.seat-top-mini .card-group-label {
   font-size: 16px;
+}
+
+/* Side columns: fixed width, wrap cards vertically */
+.gl-side .seat-side:not(.seat-empty) .seat-inner {
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+}
+
+.seat-side:not(.seat-empty) .tableau-cards {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px;
+  overflow-x: hidden;
+  overflow-y: visible;
+  align-content: flex-start;
+  align-items: flex-start;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.seat-side:not(.seat-empty) .card-group {
+  flex-wrap: wrap;
+  max-width: 100%;
+  border-right: none;
+  padding-right: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+}
+
+.seat-side:not(.seat-empty) .card-group-label {
+  writing-mode: horizontal-tb;
+  font-size: 14px;
+  width: 100%;
+  margin-right: 0;
+  margin-bottom: 4px;
 }
 
 /* ── Individual card ────────────────────────────────────────────────── */
@@ -430,12 +524,66 @@ html, body {
   margin-top: 1px;
 }
 
-/* My zone: full-size cards */
-.seat-0 .card { width: 108px; min-height: 118px; height: 158px; }
-.seat-0 .card:not(.card-has-image) { height: auto; min-height: 118px; }
+/* My zone: full-size cards (desktop bottom strip) */
+.seat-me .card { width: 108px; min-height: 118px; height: 158px; }
+.seat-me .card:not(.card-has-image) { height: auto; min-height: 118px; }
 
-/* Opponent zones: text fallback — compact chips in the horizontal row */
-.seat:not(.seat-0) .card:not(.card-has-image) {
+/*
+ * Narrow carousel: tableau height is fixed by layout — cards fill that height so nothing
+ * spills vertically (no inner scroll). Image cards keep ~108:158 proportion from height.
+ */
+.seat-carousel .tableau-cards {
+  align-items: stretch;
+}
+
+.seat-carousel .card-group {
+  align-items: stretch;
+  min-height: 0;
+}
+
+/* Stack wrapper is the flex item in each row — stretch it so inner cards get a real height */
+.seat-carousel .grid-stack {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex-shrink: 0;
+}
+
+.seat-carousel .grid-stack > .card {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.seat-carousel .card {
+  width: auto;
+  min-height: 0;
+  height: auto;
+  align-self: stretch;
+  aspect-ratio: 108 / 158;
+}
+
+.seat-carousel .card:not(.card-has-image) {
+  aspect-ratio: auto;
+  width: clamp(64px, 18vw, 96px);
+  max-height: 100%;
+  justify-content: center;
+}
+
+.seat-carousel .card.card-has-image .card-overlay {
+  padding: 10px 4px 4px;
+}
+
+.seat-carousel .card.card-has-image .card-name,
+.seat-carousel .card.card-has-image .card-sub,
+.seat-carousel .card.card-has-image .card-extra {
+  font-size: clamp(10px, 3.2vw, 14px);
+}
+
+/* Opponent compact text chips */
+.seat-top .card:not(.card-has-image),
+.seat-top-mini .card:not(.card-has-image),
+.seat-side .card:not(.card-has-image) {
   flex-direction: row;
   align-items: center;
   min-height: 34px;
@@ -444,12 +592,13 @@ html, body {
   min-width: 68px;
   max-width: 140px;
 }
-.seat:not(.seat-0) .card:not(.card-has-image) .card-name {
+.seat-top .card:not(.card-has-image) .card-name,
+.seat-top-mini .card:not(.card-has-image) .card-name,
+.seat-side .card:not(.card-has-image) .card-name {
   font-size: 16px;
 }
 
-/* Opponent image cards — narrower than seat 0 to fit the pentagon seats */
-.seat:not(.seat-0) .card.card-has-image {
+.seat-top .card.card-has-image {
   flex-direction: column;
   width: 84px;
   height: 124px;
@@ -458,7 +607,27 @@ html, body {
   flex-shrink: 0;
 }
 
-.seat:not(.seat-0) .grid-stack .stack-depth {
+.seat-top-mini .card.card-has-image {
+  flex-direction: column;
+  width: 72px;
+  height: 102px;
+  min-height: 102px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.seat-side .card.card-has-image {
+  flex-direction: column;
+  width: 84px;
+  height: 124px;
+  min-height: 124px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.seat-top .grid-stack .stack-depth,
+.seat-top-mini .grid-stack .stack-depth,
+.seat-side .grid-stack .stack-depth {
   font-size: 16px;
   padding: 2px 5px;
   bottom: -1px;
@@ -477,17 +646,12 @@ html, body {
 .card.flipped { opacity: 0.45; }
 
 /* ── Center board ───────────────────────────────────────────────────── */
-/* Centered horizontally above user tableau; layoutCenterBoard() sets bottom/max-height */
 .center-board {
-  position: absolute;
-  left: 50%;
-  right: auto;
-  top: auto;
-  bottom: 120px;
-  transform: translateX(-50%);
+  position: relative;
+  flex: 1 1 auto;
   z-index: 10;
-  width: max-content;
-  max-width: calc(100vw - 16px);
+  width: 100%;
+  max-width: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -497,23 +661,33 @@ html, body {
   border-radius: 8px;
 }
 
+.center-board-split {
+  display: flex;
+  flex-direction: row;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+}
+
 .center-board-body {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  width: max-content;
+  width: 100%;
   max-width: 100%;
 }
 
-/* Card grid scrolls when it does not fit under the 50vh / max-height cap */
 .center-board-scroll {
   flex: 1 1 auto;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  width: max-content;
+  width: 100%;
   max-width: 100%;
 }
 
@@ -530,9 +704,12 @@ html, body {
 .center-board .grid-stack .card { width: 128px; min-height: 150px; height: 188px; }
 .center-board .grid-stack .card:not(.card-has-image) { height: auto; min-height: 150px; }
 
-/* Opponent tableau stacks (smaller cards) */
-.seat:not(.seat-0) .grid-stack .card { width: 84px; min-height: 98px; height: 124px; }
-.seat:not(.seat-0) .grid-stack .card:not(.card-has-image) { height: auto; min-height: 98px; }
+.seat-top .grid-stack .card { width: 84px; min-height: 98px; height: 124px; }
+.seat-top .grid-stack .card:not(.card-has-image) { height: auto; min-height: 98px; }
+.seat-top-mini .grid-stack .card { width: 72px; min-height: 88px; height: 102px; }
+.seat-top-mini .grid-stack .card:not(.card-has-image) { height: auto; min-height: 88px; }
+.seat-side .grid-stack .card { width: 84px; min-height: 98px; height: 124px; }
+.seat-side .grid-stack .card:not(.card-has-image) { height: auto; min-height: 98px; }
 
 .stack-depth {
   position: absolute;
@@ -551,6 +728,64 @@ html, body {
   border: 1px dashed rgba(255,255,255,0.12);
   border-radius: 5px;
   flex-shrink: 0;
+}
+
+/* Tabbed layout: board grids fit viewport width; cards scale down instead of clipping */
+.center-board.board-use-tabs .grid-row {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.center-board.board-use-tabs .grid-row > .grid-stack,
+.center-board.board-use-tabs .grid-row > .card-slot-empty {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+}
+
+.center-board.board-use-tabs .grid-stack {
+  flex-shrink: 1;
+}
+
+.center-board.board-use-tabs .grid-stack .card {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.center-board.board-use-tabs .grid-stack .card.card-has-image {
+  height: auto;
+  min-height: 0;
+  aspect-ratio: 128 / 188;
+  padding: 0;
+}
+
+.center-board.board-use-tabs .grid-stack .card:not(.card-has-image) {
+  height: auto;
+  min-height: clamp(52px, 22vw, 150px);
+}
+
+.center-board.board-use-tabs .grid-row > .card-slot-empty {
+  width: auto;
+  min-height: 0;
+  height: auto;
+  aspect-ratio: 128 / 188;
+  align-self: stretch;
+}
+
+.center-board.board-use-tabs .card-name {
+  font-size: clamp(11px, 3.1vw, 16px);
+}
+
+.center-board.board-use-tabs .card-sub,
+.center-board.board-use-tabs .card-extra {
+  font-size: clamp(10px, 2.6vw, 16px);
+}
+
+.center-board.board-use-tabs .grid-stack .stack-depth {
+  font-size: clamp(11px, 2.8vw, 16px);
+  padding: 2px 4px;
 }
 
 /* ── Center board sections ──────────────────────────────────────────── */
@@ -579,6 +814,7 @@ html, body {
 
 .center-board .grid-row {
   gap: 6px;
+  justify-content: center;
 }
 
 .center-board .stack-depth {
@@ -599,6 +835,58 @@ html, body {
   box-sizing: border-box;
 }
 
+.info-bar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.info-bar-dice-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+/* Tabbed (narrow) layout: one block per row, no wrap overflow */
+.info-bar--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.info-bar--stacked .info-bar-meta {
+  width: 100%;
+}
+
+.info-bar--stacked .info-bar-take-resource {
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 0;
+}
+
+.info-bar--stacked .info-bar-take-label {
+  width: 100%;
+}
+
+.info-bar--stacked .info-bar-take-buttons {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.info-bar--stacked .info-bar-dice-row {
+  margin-left: 0;
+  width: 100%;
+  justify-content: flex-start;
+}
+
 .phase-label {
   font-weight: 700;
   font-size: 16px;
@@ -614,7 +902,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 5px;
-  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .die {
@@ -682,8 +970,210 @@ html, body {
   gap: 2px;
 }
 
+.game-log--side {
+  margin: 0 0 8px;
+  align-self: stretch;
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 120px;
+  width: min(280px, 34vw);
+  flex-shrink: 0;
+}
+
+.board[data-layout="p2"] .game-log--side {
+  max-height: none;
+}
+
 .game-log::-webkit-scrollbar { width: 4px; }
 .game-log::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+/* ── Board section tabs (viewport width ≤ 800px) ────────────────────── */
+.board-tabs-bar {
+  display: none;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: rgba(0,0,0,0.25);
+  flex-shrink: 0;
+}
+
+.center-board.board-use-tabs .board-tabs-bar {
+  display: flex;
+}
+
+.board-tab {
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(0,0,0,0.35);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+
+.board-tab:hover {
+  color: var(--text);
+  border-color: rgba(255,255,255,0.22);
+}
+
+.board-tab.is-active {
+  color: var(--gold);
+  border-color: rgba(240, 192, 64, 0.45);
+  background: rgba(240, 192, 64, 0.08);
+}
+
+.center-board.board-use-tabs .center-board-scroll > .center-section {
+  display: none;
+}
+
+.center-board.board-use-tabs .center-board-scroll > .center-section.board-tab-visible {
+  display: flex;
+}
+
+/* ── Player detail modal (tableau drill-down) ───────────────────────── */
+.player-detail-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 320;
+  background: rgba(0,0,0,0.78);
+  align-items: center;
+  justify-content: center;
+  padding: 20px 16px;
+}
+
+.player-detail-backdrop.is-open {
+  display: flex;
+}
+
+.player-detail-panel {
+  width: min(720px, 100%);
+  max-height: min(90vh, 900px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #151d18;
+  border: 1px solid rgba(240, 192, 64, 0.28);
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.75);
+}
+
+.player-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+}
+
+.player-detail-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+  margin: 0;
+}
+
+.player-detail-close {
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(0,0,0,0.35);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  padding: 6px 14px;
+}
+
+.player-detail-close:hover {
+  border-color: rgba(255,255,255,0.28);
+}
+
+.player-detail-body {
+  padding: 14px 16px 18px;
+  overflow-y: auto;
+  font-size: 15px;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.player-detail-kv {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.player-detail-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.08);
+  font-size: 14px;
+}
+
+.player-detail-pill strong {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.player-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.player-detail-card-block {
+  background: rgba(0,0,0,0.28);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.player-detail-card-block h3 {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+.player-detail-item {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 14px;
+}
+
+.player-detail-item:last-child {
+  border-bottom: none;
+}
+
+.player-detail-item-title {
+  font-weight: 700;
+  color: #fff;
+}
+
+.player-detail-item-sub {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 4px;
+  white-space: pre-wrap;
+}
+
+.player-detail-mini {
+  font-size: 13px;
+  color: var(--muted);
+}
 
 .log-entry {
   font-size: 16px;
@@ -734,13 +1224,8 @@ html, body {
 .score-row .total { color: var(--vp); font-weight: 900; font-size: 16px; }
 .score-row .breakdown { color: var(--muted); font-size: 16px; }
 
-/* ── Root navigation ─────────────────────────────────────────────────── */
-.game-lobby-btn {
-  position: fixed;
-  top: 8px;
-  left: 10px;
-  /* Above game-over / lobby overlays (400) so home stays reachable */
-  z-index: 410;
+/* ── Lobby link (in info bar next to dice; hidden in tabbed / narrow layout) ── */
+.info-bar-lobby-btn {
   padding: 3px 8px;
   font-size: 16px;
   font-weight: 600;
@@ -751,8 +1236,10 @@ html, body {
   background: rgba(0, 0, 0, 0.28);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
-.game-lobby-btn:hover {
+.info-bar-lobby-btn:hover {
   color: var(--text);
   border-color: rgba(255, 255, 255, 0.22);
 }
@@ -807,14 +1294,6 @@ html, body {
   text-align: center;
 }
 
-.lobby-kicker {
-  font-size: 16px;
-  letter-spacing: 0.28em;
-  text-transform: uppercase;
-  color: var(--gold);
-  opacity: 0.9;
-  margin-bottom: 8px;
-}
 
 .lobby-title {
   font-size: 16px;
