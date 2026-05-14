@@ -379,6 +379,7 @@ class Game:
                 if reason:
                     self.end_game_triggered = True
                     self._log_game_event(f"End-game condition met ({reason}); finishing this round.")
+            self._reveal_hidden_domain_stack_tops()
             self.turn_index = (self.turn_index + 1) % max(1, len(self.player_list))
             self.turn_number = int(self.turn_number) + 1
             if self.end_game_triggered and self.player_list[self.turn_index].is_first:
@@ -452,6 +453,7 @@ class Game:
                 if reason:
                     self.end_game_triggered = True
                     self._log_game_event(f"End-game condition met ({reason}); finishing this round.")
+            self._reveal_hidden_domain_stack_tops()
             self.turn_index = (self.turn_index + 1) % max(1, len(self.player_list))
             self.turn_number = int(self.turn_number) + 1
             if self.end_game_triggered and self.player_list[self.turn_index].is_first:
@@ -2812,6 +2814,19 @@ class Game:
 
         raise ValueError("Monster not available to slay.")
 
+    def _reveal_hidden_domain_stack_tops(self):
+        """Face up domain stack tops that were left hidden after a purchase (until turn end)."""
+        for domain_stack in getattr(self, "domain_grid", None) or []:
+            if not domain_stack:
+                continue
+            top = domain_stack[-1]
+            if getattr(top, "domain_id", None) is None:
+                continue
+            if getattr(top, "is_visible", True):
+                continue
+            top.toggle_visibility(True)
+            top.toggle_accessibility(True)
+
     def build_domain(self, player_id, domain_id, gp=0, mp=0, sp=0):
         gp, sp, mp = _n(gp), _n(sp), _n(mp)
 
@@ -2873,10 +2888,7 @@ class Game:
                 player.victory_score = int(getattr(player, "victory_score", 0) or 0) + vp_gain
                 self._bump_harvest_delta(player, 0, 0, 0, vp_gain)
 
-            if domain_stack:
-                domain_stack[-1].toggle_visibility(True)
-                domain_stack[-1].toggle_accessibility(True)
-            elif self.exhausted_stack:
+            if not domain_stack and self.exhausted_stack:
                 exhausted = self.exhausted_stack.pop()
                 domain_stack.append(exhausted)
                 self.exhausted_count = int(self.exhausted_count) + 1

@@ -703,6 +703,10 @@ let playerId = localStorage.getItem('playerId') || '';
                 if (son > 0) roleParts.push(`Soldier +${son}`);
                 if (wn > 0) roleParts.push(`Worker +${wn}`);
                 const isDomain = card.domain_id !== undefined && card.domain_id !== null;
+                if (isDomain && card.is_visible === false) {
+                    return '<div class="item"><div class="item-title">Face-down domain</div>'
+                        + '<div class="item-sub">Hidden until end of the building player\'s turn</div></div>';
+                }
                 const showRoleRow = (isCitizen || isDomain) && roleParts.length;
                 const roleBlock = showRoleRow
                     ? `<div class="item-sub" style="margin-top:4px;"><strong>Roles:</strong> ${escapeHtml(roleParts.join(' · '))}</div>`

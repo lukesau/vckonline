@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="/images/valeria_logo.png" type="image/png">
-  <title>Valeria Card Kingdoms Online — Free in your browser</title>
-  <meta name="description" content="Play Valeria Card Kingdoms online in your browser for free. Multiplayer lobby—no account or payment required.">
+  <title>Valeria Card Kingdoms Online</title>
+  <meta name="description" content="Play Valeria Card Kingdoms online in your browser for free. Multiplayer lobby. No account or payment required.">
   <meta property="og:type" content="website">
   <meta property="og:title" content="Valeria Card Kingdoms Online — Free in your browser">
   <meta property="og:description" content="Play Valeria Card Kingdoms online in your browser for free. Multiplayer lobby—no account or payment required.">
@@ -40,10 +40,15 @@
     </div>
   </div>
   <div id="lobby-overlay" class="lobby-overlay" aria-hidden="true">
+    <canvas id="lobby-bg-canvas" class="lobby-bg-canvas" aria-hidden="true"></canvas>
     <div class="lobby-sheet" role="dialog" aria-modal="true" aria-labelledby="lobby-title">
       <div class="lobby-brand">
         <h1 id="lobby-title" class="lobby-title">Valeria Card Kingdoms Online</h1>
-        <p class="lobby-tagline">Free in your browser and no account needed. Join the lobby and ready up when your group is here.</p>
+        <p class="lobby-tagline">Free Valeria Card Kingdoms multiplayer in your browser. No account needed. Join the lobby and ready up when your group is here.</p>
+        <p class="lobby-attribution">Based on the board game <a href="https://www.dailymagicgames.com/collections/valeria-card-kingdoms-expansions-and-accessories" target="_blank" rel="noopener noreferrer">Valeria Card Kingdoms by Daily Magic Games</a>.</p>
+        <div class="lobby-rulebook-row">
+          <a href="/static/game/b0-valeria-card-kingdoms-rulebook.pdf" class="lobby-btn lobby-btn-ghost lobby-rulebook-link" target="_blank" rel="noopener noreferrer">Open rulebook (PDF)</a>
+        </div>
       </div>
       <div id="lobby-error" class="lobby-error lobby-hidden" role="alert"></div>
       <div id="lobby-step-join" class="lobby-step">

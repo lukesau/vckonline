@@ -1361,8 +1361,9 @@ html, body {
   font-weight: 600;
 }
 
-/* ── Lobby link (in info bar next to dice; hidden in tabbed / narrow layout) ── */
-.info-bar-lobby-btn {
+/* ── Lobby / rulebook links (in info bar next to dice; lobby hidden in tabbed / narrow layout) ── */
+.info-bar-lobby-btn,
+.info-bar-rulebook-btn {
   padding: 3px 8px;
   font-size: 16px;
   font-weight: 600;
@@ -1376,7 +1377,8 @@ html, body {
   flex-shrink: 0;
   white-space: nowrap;
 }
-.info-bar-lobby-btn:hover {
+.info-bar-lobby-btn:hover,
+.info-bar-rulebook-btn:hover {
   color: var(--text);
   border-color: rgba(255, 255, 255, 0.22);
 }
@@ -1398,6 +1400,7 @@ html, body {
   position: fixed;
   inset: 0;
   z-index: 400;
+  overflow: hidden;
   align-items: center;
   justify-content: center;
   padding: 24px 16px;
@@ -1411,7 +1414,19 @@ html, body {
   display: flex;
 }
 
+.lobby-bg-canvas {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 0;
+  pointer-events: none;
+  /* width/height set in JS to match bitmap; overlay overflow clips on resize */
+}
+
 .lobby-sheet {
+  position: relative;
+  z-index: 1;
   width: min(440px, 100%);
   padding: 30px 28px 24px;
   border-radius: 20px;
@@ -1445,6 +1460,34 @@ html, body {
   font-size: 16px;
   line-height: 1.45;
   color: var(--muted);
+}
+
+.lobby-attribution {
+  margin-top: 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.lobby-attribution a {
+  color: rgba(240, 192, 96, 0.95);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.lobby-attribution a:hover {
+  color: #ffd88a;
+}
+
+.lobby-rulebook-row {
+  margin-top: 14px;
+  display: flex;
+  justify-content: center;
+}
+
+.lobby-rulebook-link {
+  text-decoration: none;
+  display: inline-block;
 }
 
 .lobby-error {

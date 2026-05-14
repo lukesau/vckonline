@@ -615,6 +615,18 @@ function syncBoardTabState(zoneCenter) {
   }
 }
 
+const RULEBOOK_PDF_URL = '/static/game/b0-valeria-card-kingdoms-rulebook.pdf';
+
+function appendRulebookLinkToDiceRow(diceRow) {
+  const rulebook = document.createElement('a');
+  rulebook.href = RULEBOOK_PDF_URL;
+  rulebook.className = 'info-bar-rulebook-btn';
+  rulebook.textContent = 'Rulebook';
+  rulebook.target = '_blank';
+  rulebook.rel = 'noopener noreferrer';
+  diceRow.appendChild(rulebook);
+}
+
 function canOfferTakeResourceAction(state) {
   if (!PLAYER_ID || !state) return false;
   if ((state.phase || '').toString() !== 'action') return false;
@@ -706,6 +718,8 @@ function makeInfoBar(state) {
     });
     diceRow.appendChild(lobby);
   }
+
+  appendRulebookLinkToDiceRow(diceRow);
 
   bar.appendChild(diceRow);
 
@@ -1220,7 +1234,12 @@ function initPlayerDetailModal() {
 }
 
 // ── Card factory ──────────────────────────────────────────────────────────
+function isDomainStackFaceDown(card) {
+  return card.domain_id != null && card.is_visible === false;
+}
+
 function cardImageUrl(card) {
+  if (isDomainStackFaceDown(card)) return '/images/domains/domain_back.jpg';
   if (card.monster_id !== undefined) return `/card-image/monster/${card.monster_id}`;
   if (card.citizen_id !== undefined) return `/card-image/citizen/${card.citizen_id}`;
   if (card.domain_id  !== undefined) return `/card-image/domain/${card.domain_id}`;
@@ -1252,7 +1271,8 @@ function makeCard(card, mode) {
   if (imgUrl) {
     el.classList.add('card-has-image');
     el.setAttribute('role', 'img');
-    el.setAttribute('aria-label', card.name || 'Card');
+    const aria = isDomainStackFaceDown(card) ? 'Face-down domain' : (card.name || 'Card');
+    el.setAttribute('aria-label', aria);
 
     const img = document.createElement('img');
     img.className = 'card-img';
@@ -2140,9 +2160,6 @@ function openMarketCardModal(card) {
   if (document.getElementById('game-prompt-overlay')) return;
   if (document.getElementById('card-modal-overlay')) return;
 
-  const state = latestGameState;
-  const ctx = evaluateMarketCardContext(card, state);
-
   const overlay = document.createElement('div');
   overlay.id = 'card-modal-overlay';
   overlay.className = 'card-modal-overlay';
@@ -2162,46 +2179,58 @@ function openMarketCardModal(card) {
 
   const heading = document.createElement('h2');
   heading.className = 'modal-card-name';
-  heading.textContent = card.name || '?';
+  if (isDomainStackFaceDown(card)) {
+    heading.textContent = 'Face-down domain';
+  } else {
+    heading.textContent = card.name || '?';
+  }
   info.appendChild(heading);
 
-  appendCardModalStatRows(info, card);
+  if (isDomainStackFaceDown(card)) {
+    const note = document.createElement('p');
+    note.className = 'modal-card-text';
+    note.textContent =
+      'The next domain in this pile stays face-down until the end of the turn of the player who built from here.';
+    info.appendChild(note);
+  } else {
+    appendCardModalStatRows(info, card);
 
-  const rc = citizenRoleCounts(card);
-  const rp = [];
-  if (rc.sn > 0) rp.push(`Shadow +${rc.sn}`);
-  if (rc.hn > 0) rp.push(`Holy +${rc.hn}`);
-  if (rc.son > 0) rp.push(`Soldier +${rc.son}`);
-  if (rc.wn > 0) rp.push(`Worker +${rc.wn}`);
-  if (rp.length && (card.citizen_id != null || card.domain_id != null)) {
-    const row = mk('modal-stat-row');
-    const l = document.createElement('span');
-    l.className = 'modal-stat-label';
-    l.textContent = 'Roles';
-    const v = document.createElement('span');
-    v.className = 'modal-stat-value';
-    v.textContent = rp.join(' · ');
-    row.appendChild(l);
-    row.appendChild(v);
-    info.appendChild(row);
+    const rc = citizenRoleCounts(card);
+    const rp = [];
+    if (rc.sn > 0) rp.push(`Shadow +${rc.sn}`);
+    if (rc.hn > 0) rp.push(`Holy +${rc.hn}`);
+    if (rc.son > 0) rp.push(`Soldier +${rc.son}`);
+    if (rc.wn > 0) rp.push(`Worker +${rc.wn}`);
+    if (rp.length && (card.citizen_id != null || card.domain_id != null)) {
+      const row = mk('modal-stat-row');
+      const l = document.createElement('span');
+      l.className = 'modal-stat-label';
+      l.textContent = 'Roles';
+      const v = document.createElement('span');
+      v.className = 'modal-stat-value';
+      v.textContent = rp.join(' · ');
+      row.appendChild(l);
+      row.appendChild(v);
+      info.appendChild(row);
+    }
+
+    if (card.text) {
+      const t = document.createElement('p');
+      t.className = 'modal-card-text';
+      t.textContent = card.text;
+      info.appendChild(t);
+    }
+
+    const rules = cardDetailedRules(card);
+    if (rules && rules !== (card.text || '').toString().trim()) {
+      const t2 = document.createElement('p');
+      t2.className = 'modal-card-text market-rules-extra';
+      t2.textContent = rules;
+      info.appendChild(t2);
+    }
+
+    appendMarketActionUI(info, card, evaluateMarketCardContext(card, latestGameState));
   }
-
-  if (card.text) {
-    const t = document.createElement('p');
-    t.className = 'modal-card-text';
-    t.textContent = card.text;
-    info.appendChild(t);
-  }
-
-  const rules = cardDetailedRules(card);
-  if (rules && rules !== (card.text || '').toString().trim()) {
-    const t2 = document.createElement('p');
-    t2.className = 'modal-card-text market-rules-extra';
-    t2.textContent = rules;
-    info.appendChild(t2);
-  }
-
-  appendMarketActionUI(info, card, ctx);
 
   modal.appendChild(info);
   overlay.appendChild(modal);
@@ -3573,6 +3602,127 @@ function renderPromptModal(state) {
   renderBonusResourcePrompt(state);
 }
 
+// ── Lobby background (random card art on canvas) ─────────────────────────
+async function paintLobbyBackgroundCanvas(canvas) {
+  const t0 = performance.now();
+  const overlay = canvas.closest('.lobby-overlay');
+  if (!overlay) return;
+  const vw = Math.max(window.innerWidth || 0, 1024);
+  const vh = Math.max(window.innerHeight || 0, 640);
+  // One large bitmap, centered; window resizes clip it (no stretch).
+  const bw = Math.min(4096, Math.max(2880, Math.ceil(vw * 1.42)));
+  const bh = Math.min(2560, Math.max(1800, Math.ceil(vh * 1.42)));
+
+  let urls = [];
+  try {
+    const res = await fetch('/api/lobby/background-card-urls');
+    if (!res.ok) return;
+    const data = await res.json();
+    urls = Array.isArray(data.urls) ? data.urls : [];
+  } catch (_) {
+    return;
+  }
+  if (!urls.length) return;
+
+  const tAfterList = performance.now();
+
+  // Tight staggered grid + oversized tiles so cards overlap heavily (little base fill shows through).
+  const cellW = 138;
+  const cellH = 192;
+  const overlap = 1.56;
+  const tileCols = Math.ceil(bw / cellW) + 2;
+  const tileRows = Math.ceil(bh / cellH) + 2;
+  const positions = [];
+  for (let row = 0; row < tileRows; row++) {
+    const brick = (row % 2) * (cellW * 0.5);
+    for (let col = 0; col < tileCols; col++) {
+      const cx =
+        brick +
+        (col + 0.5) * cellW +
+        (Math.random() - 0.5) * cellW * 0.2;
+      const cy = (row + 0.5) * cellH + (Math.random() - 0.5) * cellH * 0.18;
+      const scale = 0.96 + Math.random() * 0.12;
+      positions.push({
+        cx,
+        cy,
+        pw: cellW * scale * overlap,
+        ph: cellH * scale * overlap,
+        rot: (Math.random() - 0.5) * 0.42,
+        src: urls[(Math.random() * urls.length) | 0],
+      });
+    }
+  }
+
+  const imgPromiseBySrc = new Map();
+  function loadOneCached(src) {
+    let p = imgPromiseBySrc.get(src);
+    if (!p) {
+      p = new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => resolve({ ok: true, img });
+        img.onerror = () => resolve({ ok: false });
+        img.src = src;
+      });
+      imgPromiseBySrc.set(src, p);
+    }
+    return p;
+  }
+
+  const loads = positions.map(p => loadOneCached(p.src).then(r => ({ ...p, ...r })));
+  const results = await Promise.all(loads);
+  const tAfterLoad = performance.now();
+
+  for (let i = results.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    const t = results[i];
+    results[i] = results[j];
+    results[j] = t;
+  }
+
+  canvas.width = bw;
+  canvas.height = bh;
+  canvas.style.width = `${bw}px`;
+  canvas.style.height = `${bh}px`;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.fillStyle = '#0a1610';
+  ctx.fillRect(0, 0, bw, bh);
+
+  let drawn = 0;
+  for (const r of results) {
+    if (!r.ok || !r.img) continue;
+    drawn += 1;
+    const img = r.img;
+    const ar = img.naturalWidth / img.naturalHeight;
+    let dw = r.pw;
+    let dh = dw / ar;
+    if (dh > r.ph) {
+      dh = r.ph;
+      dw = dh * ar;
+    }
+    ctx.save();
+    ctx.translate(r.cx, r.cy);
+    ctx.rotate(r.rot);
+    ctx.drawImage(img, -dw * 0.5, -dh * 0.5, dw, dh);
+    ctx.restore();
+  }
+
+  ctx.fillStyle = 'rgba(4, 10, 7, 0.4)';
+  ctx.fillRect(0, 0, bw, bh);
+
+  const tDone = performance.now();
+  console.info(
+    '[lobby-bg] list %sms  load+decode %sms  draw %sms  total %sms (%d tiles, %d drawn)',
+    (tAfterList - t0).toFixed(0),
+    (tAfterLoad - tAfterList).toFixed(0),
+    (tDone - tAfterLoad).toFixed(0),
+    (tDone - t0).toFixed(0),
+    positions.length,
+    drawn
+  );
+}
+
 // ── Lobby modal when visiting without game_id / player_id ────────────────
 function initLobbyModal() {
   const overlay = document.getElementById('lobby-overlay');
@@ -3901,6 +4051,8 @@ function initLobbyModal() {
   });
 
   openOverlay();
+  const bgCanvas = document.getElementById('lobby-bg-canvas');
+  if (bgCanvas) paintLobbyBackgroundCanvas(bgCanvas).catch(() => {});
   connectLobbyWs();
   tryResumeStoredPlayer();
 }

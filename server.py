@@ -37,6 +37,27 @@ _CARD_IMAGE_DIRS: Dict[str, Path] = {
 _EXHAUSTED_CARD_JPEG = _REPO_ROOT / "images" / "exhausted" / "exhausted_card.jpg"
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
+# Lobby background: citizens / domains / monsters only (no backs)
+_LOBBY_BG_IMAGE_SUBDIRS = ("citizens", "domains", "monsters")
+_lobby_bg_urls_cache = None
+_lobby_bg_urls_cache_time = 0.0
+
+
+def _collect_lobby_background_card_urls():
+    urls = []
+    for sub in _LOBBY_BG_IMAGE_SUBDIRS:
+        dir_path = _REPO_ROOT / "images" / sub
+        if not dir_path.is_dir():
+            continue
+        for f in sorted(dir_path.iterdir()):
+            if f.suffix.lower() not in _IMAGE_EXTS:
+                continue
+            if "_back" in f.name.lower():
+                continue
+            urls.append(f"/images/{sub}/{f.name}")
+    return urls
+
+
 app = FastAPI(title="VCK Online API", description="Development server for Valeria Card Kingdoms Online")
 
 
@@ -346,6 +367,19 @@ async def set_unready(request: ReadyRequest):
 async def get_lobby_status(player_id: Optional[str] = None):
     """Get lobby status. If player_id provided, also check if player is in a game."""
     return build_lobby_status_dict(player_id)
+
+
+@app.get("/api/lobby/background-card-urls")
+async def lobby_background_card_urls():
+    """Public URLs for card faces used by the lobby background canvas (cached briefly)."""
+    global _lobby_bg_urls_cache, _lobby_bg_urls_cache_time
+    ttl = 120.0
+    now = time.time()
+    if _lobby_bg_urls_cache is not None and (now - _lobby_bg_urls_cache_time) < ttl:
+        return JSONResponse({"urls": _lobby_bg_urls_cache})
+    _lobby_bg_urls_cache = _collect_lobby_background_card_urls()
+    _lobby_bg_urls_cache_time = now
+    return JSONResponse({"urls": _lobby_bg_urls_cache})
 
 
 @app.websocket("/ws/lobby")
