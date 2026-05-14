@@ -70,6 +70,9 @@ class Player:
             "holy_count": holy_count,
             "soldier_count": soldier_count,
             "worker_count": worker_count,
+            "owned_domains": len(self.owned_domains),
+            "owned_citizens": len(self.owned_citizens),
+            "owned_monsters": len(self.owned_monsters),
         }
         return roles_dict
 

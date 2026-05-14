@@ -33,19 +33,13 @@ def _validate_hire_or_domain_gold_payment(player, scaled_gold_cost, gp, sp, mp):
         raise ValueError("Insufficient resources.")
 
 
-def _citizen_is_thief(citizen):
+def _citizen_has_steal(citizen, on_turn):
+    """Return True if this citizen's relevant payout (on- or off-turn) is a steal effect."""
     if not citizen:
         return False
-    name = (getattr(citizen, "name", None) or "").strip().lower()
-    if name == "thief":
-        return True
-    sc = getattr(citizen, "special_citizen", None)
-    try:
-        if int(sc) == 1:
-            return True
-    except (TypeError, ValueError):
-        pass
-    return False
+    field = "special_payout_on_turn" if on_turn else "special_payout_off_turn"
+    val = (getattr(citizen, field, None) or "").strip().lower()
+    return val.startswith("steal")
 
 
 def _parse_domain_effect_kv(effect):
@@ -259,6 +253,7 @@ class Game:
         self.harvest_player_order = game_state.get('harvest_player_order')
         self.harvest_player_idx = game_state.get('harvest_player_idx', 0)
         self.harvest_consumed = game_state.get('harvest_consumed') or {}
+        self._harvest_steal_phase_done = game_state.get('_harvest_steal_phase_done', False)
         self.last_active_time = 0
         self.game_log = list(game_state.get('game_log') or [])
         self.pending_action_end_queue = list(game_state.get("pending_action_end_queue") or [])
@@ -408,6 +403,7 @@ class Game:
                     self.harvest_consumed = {}
                     self.harvest_player_idx = 0
                     self.harvest_player_order = self._harvest_player_id_order_starting_active()
+                    self._harvest_steal_phase_done = False
                     # Harvest-phase domain passives (e.g. Jousting Field) must run after deltas are
                     # cleared for the new harvest round, not during finalize_roll (which ran before
                     # this reset and would lose passive contributions from harvest_delta tracking).
@@ -599,6 +595,7 @@ class Game:
         self.harvest_player_order = None
         self.harvest_player_idx = 0
         self.harvest_consumed = {}
+        self._harvest_steal_phase_done = False
 
         # Clear the finalize prompt; harvest/action will set prompts as needed.
         self.action_required["id"] = self.game_id
@@ -985,7 +982,7 @@ class Game:
             if not ok:
                 continue
             cid = int(getattr(cit, "citizen_id", -1))
-            is_thief = _citizen_is_thief(cit)
+            is_thief = _citizen_has_steal(cit, on_turn)
             for i in range(n):
                 key = f"citizen:{cid}:{idx}:{i}"
                 if key not in consumed:
@@ -1008,12 +1005,12 @@ class Game:
         rest_c = [s for s in citizens if not s["is_thief"]]
         return starters + thieves + rest_c
 
-    def _player_has_unharvested_thief_citizen(self, player, consumed_keys):
+    def _player_has_unharvested_steal_citizen(self, player, consumed_keys, on_turn):
         consumed = set(consumed_keys or [])
         for idx, cit in enumerate(getattr(player, "owned_citizens", []) or []):
             if getattr(cit, "is_flipped", False):
                 continue
-            if not _citizen_is_thief(cit):
+            if not _citizen_has_steal(cit, on_turn):
                 continue
             ok, n = self._roll_match_count(cit)
             if not ok:
@@ -1032,7 +1029,7 @@ class Game:
         if not aid or aid == self.game_id:
             return False
         aa = self.action_required.get("action") or ""
-        if aa in ("bonus_resource_choice", "manual_harvest", "harvest_optional_exchange"):
+        if aa in ("bonus_resource_choice", "manual_harvest", "harvest_optional_exchange", "harvest_steal"):
             return True
         if str(aa).startswith("choose ") or str(aa).startswith("choose_player") or str(aa).startswith("choose_monster"):
             return True
@@ -1045,6 +1042,7 @@ class Game:
         self.harvest_player_order = None
         self.harvest_player_idx = 0
         self.harvest_consumed = {}
+        self._harvest_steal_phase_done = False
         self.pending_harvest_choices = []
         for p in self.player_list:
             d = getattr(p, "harvest_delta", {}) or {}
@@ -1058,6 +1056,38 @@ class Game:
             self.action_required["action"] = ""
 
     def _harvest_run_automation_until_blocked(self):
+        # Steal pre-phase: all steal effects across all players fire first, in harvest
+        # turn order (active player first, then around the board). This ensures steals
+        # resolve before any normal payouts regardless of whose card it is.
+        if not getattr(self, "_harvest_steal_phase_done", False):
+            while True:
+                if self._harvest_action_blocked():
+                    return
+                order = getattr(self, "harvest_player_order", None) or []
+                found_steal = False
+                for pid in order:
+                    player = self._player_by_id(pid)
+                    if not player:
+                        continue
+                    consumed_list = self.harvest_consumed.setdefault(pid, [])
+                    on_turn = pid == self.current_player_id()
+                    steal_slots = [
+                        s for s in self._build_harvest_slots(player, consumed_list, on_turn)
+                        if s["is_thief"]
+                    ]
+                    if steal_slots:
+                        slot = steal_slots[0]
+                        self._apply_harvest_activation(player, slot["_obj"], slot["kind"], on_turn)
+                        consumed_list.append(slot["slot_key"])
+                        found_steal = True
+                        break  # restart scan from top of turn order
+                if self._harvest_action_blocked():
+                    return
+                if not found_steal:
+                    break  # no more steals across any player
+            self._harvest_steal_phase_done = True
+
+        # Normal harvest: process each player's remaining cards in turn order.
         while not getattr(self, "harvest_processed", False):
             if self._harvest_action_blocked():
                 return
@@ -1079,8 +1109,6 @@ class Game:
             if not slots:
                 self.harvest_player_idx += 1
                 continue
-            # Auto-resolve harvest order using the deterministic simulation order.
-            # Only true blocking choices/special prompts should pause harvest.
             slot = self._harvest_slots_sorted_for_simulation(slots)[0]
             self._apply_harvest_activation(player, slot["_obj"], slot["kind"], on_turn)
             consumed_list.append(slot["slot_key"])
@@ -1137,8 +1165,8 @@ class Game:
         if not chosen:
             raise ValueError("Invalid harvest slot.")
         if chosen["kind"] == "citizen" and not chosen["is_thief"]:
-            if self._player_has_unharvested_thief_citizen(player, consumed_list):
-                raise ValueError("Harvest the Thief first.")
+            if self._player_has_unharvested_steal_citizen(player, consumed_list, on_turn):
+                raise ValueError("Resolve steal effects before other harvest cards.")
         self._apply_harvest_activation(player, chosen["_obj"], chosen["kind"], on_turn)
         consumed_list.append(sk)
         # If the activation triggered a blocking prompt (e.g. special payout "choose ..."),
@@ -1210,6 +1238,53 @@ class Game:
         if len(parts) < 5:
             return False
         return parts[0].lower() == "exchange"
+
+    def _execute_steal_payout(self, command, player_id):
+        """
+        Parse "steal R1 N1 [R2 N2 ...]" and build a flat prompt of (resource, amount, victim) combos.
+        Format: steal g 3        — steal 3g from a chosen opponent
+                steal g 3 m 3    — steal 3g or 3m from a chosen opponent (one combined choice)
+        The flat options list is resource-options × opponents, presented as a single prompt.
+        """
+        parts = (command or "").split()
+        # Parse resource options: pairs after "steal" keyword
+        RESOURCES = {"g", "s", "m", "v"}
+        resource_opts = []
+        i = 1
+        while i + 1 < len(parts):
+            res = parts[i].lower()
+            if res not in RESOURCES:
+                break
+            try:
+                amt = int(parts[i + 1])
+            except (TypeError, ValueError):
+                break
+            resource_opts.append((res, amt))
+            i += 2
+        if not resource_opts:
+            return [-9999, 0, 0, 0]
+        opponents = [p for p in self.player_list if p.player_id != player_id]
+        if not opponents:
+            return [0, 0, 0, 0]
+        options = []
+        for res, amt in resource_opts:
+            for opp in opponents:
+                opp_name = getattr(opp, "name", None) or f"Player {opp.player_id}"
+                options.append({
+                    "kind": "steal",
+                    "victim_id": opp.player_id,
+                    "victim_name": opp_name,
+                    "resource": res,
+                    "amount": amt,
+                })
+        self.pending_required_choice = {
+            "kind": "harvest_steal",
+            "player_id": player_id,
+            "options": options,
+        }
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "harvest_steal"
+        return [0, 0, 0, 0]
 
     def _execute_compound_payout(
         self,
@@ -1284,6 +1359,8 @@ class Game:
         low = raw.lower()
         if low.startswith("manipulate_resources"):
             return self._execute_manipulate_resources_self_convert_payout(raw, player_id)
+        if low.startswith("steal"):
+            return self._execute_steal_payout(raw, player_id)
         if low == "concurrent_flip_one_citizen":
             self._begin_concurrent_flip_one_citizen(player_id)
             return [0, 0, 0, 0]
@@ -1339,6 +1416,36 @@ class Game:
                         self.update_payout_for_role('owned_citizens', player_id, payout, split_command)
                     case "owned_domains":
                         self.update_payout_for_role('owned_domains', player_id, payout, split_command)
+                    case "owned_citizen_name":
+                        # count owned_citizen_name NAME R N
+                        # third_word = citizen name, fourth_word = resource, split_command[4] = multiplier
+                        want = third_word.strip().lower()
+                        player_cn = self._player_by_id(player_id)
+                        if not player_cn or not want:
+                            payout[0] = -9999
+                        else:
+                            n = sum(
+                                1 for c in list(getattr(player_cn, "owned_citizens", []) or [])
+                                if not getattr(c, "is_flipped", False)
+                                and (getattr(c, "name", "") or "").strip().lower() == want
+                            )
+                            try:
+                                mult = int(split_command[4])
+                            except (TypeError, ValueError):
+                                payout[0] = -9999
+                                mult = None
+                            if mult is not None:
+                                match fourth_word:
+                                    case 'g':
+                                        payout[0] = n * mult
+                                    case 's':
+                                        payout[1] = n * mult
+                                    case 'm':
+                                        payout[2] = n * mult
+                                    case 'v':
+                                        payout[3] = n * mult
+                                    case _:
+                                        payout[0] = -9999
                     case "area":
                         area_count = self.owned_monster_attributes(player_id)[third_word]
                         match fourth_word:
@@ -2458,6 +2565,54 @@ class Game:
                 self._maybe_resume_harvest_prompt()
                 return
 
+            if current_required == "harvest_steal":
+                prc_s = getattr(self, "pending_required_choice", None) or {}
+                if prc_s.get("kind") != "harvest_steal" or prc_s.get("player_id") != player_id:
+                    return
+                opts_s = list(prc_s.get("options") or [])
+                act_s = (action or "").strip().lower()
+                if not act_s.startswith("steal "):
+                    return
+                try:
+                    idx_s = int(act_s.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if idx_s < 0 or idx_s >= len(opts_s):
+                    return
+                opt_s = opts_s[idx_s]
+                thief = self._player_by_id(player_id)
+                victim = self._player_by_id(opt_s.get("victim_id"))
+                self.pending_required_choice = None
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                if thief and victim:
+                    res_s = opt_s.get("resource", "g")
+                    want_s = int(opt_s.get("amount", 0))
+                    score_map = {"g": "gold_score", "s": "strength_score", "m": "magic_score", "v": "victory_score"}
+                    attr_s = score_map.get(res_s)
+                    if attr_s:
+                        have_s = int(getattr(victim, attr_s, 0) or 0)
+                        actual_s = min(want_s, have_s)
+                        before_thief = self._player_scores_line(thief)
+                        before_victim = self._player_scores_line(victim)
+                        setattr(victim, attr_s, have_s - actual_s)
+                        setattr(thief, attr_s, int(getattr(thief, attr_s, 0) or 0) + actual_s)
+                        dg = actual_s if res_s == "g" else 0
+                        ds = actual_s if res_s == "s" else 0
+                        dm = actual_s if res_s == "m" else 0
+                        dv = actual_s if res_s == "v" else 0
+                        self._bump_harvest_delta(thief, dg, ds, dm, dv)
+                        after_thief = self._player_scores_line(thief)
+                        after_victim = self._player_scores_line(victim)
+                        self._log_game_event(
+                            f"{self._player_label(player_id)} stole {actual_s}{res_s} from "
+                            f"{self._player_label(opt_s.get('victim_id'))}; "
+                            f"thief {before_thief} -> {after_thief}, "
+                            f"victim {before_victim} -> {after_victim}"
+                        )
+                self._maybe_resume_harvest_prompt()
+                return
+
             prc0 = getattr(self, "pending_required_choice", None) or {}
             if prc0.get("kind") == "domain_boost_monster" and str(current_required).strip() == "choose_monster_strength":
                 act = (action or "").strip().lower()
@@ -2650,20 +2805,17 @@ class Game:
             if player.player_id == player_id:
                 role_count = player.calc_roles()[role_name]
                 break
-        if role_count > 0:
-            match split_command[2]:
-                case 'g':
-                    payout[0] = int(split_command[3]) * role_count
-                case 's':
-                    payout[1] = int(split_command[3]) * role_count
-                case 'm':
-                    payout[2] = int(split_command[3]) * role_count
-                case 'v':
-                    payout[3] = int(split_command[3]) * role_count
-                case _:
-                    payout[0] = -9999
-        else:
-            payout[0] = -9999
+        match split_command[2]:
+            case 'g':
+                payout[0] = int(split_command[3]) * role_count
+            case 's':
+                payout[1] = int(split_command[3]) * role_count
+            case 'm':
+                payout[2] = int(split_command[3]) * role_count
+            case 'v':
+                payout[3] = int(split_command[3]) * role_count
+            case _:
+                payout[0] = -9999
 
     def _player_citizen_role_totals(self, player):
         totals = {"shadow": 0, "holy": 0, "soldier": 0, "worker": 0}
