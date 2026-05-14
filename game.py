@@ -1446,6 +1446,35 @@ class Game:
                                         payout[3] = n * mult
                                     case _:
                                         payout[0] = -9999
+                    case "owned_starter_name":
+                        # count owned_starter_name NAME R N
+                        want = third_word.strip().lower()
+                        player_sn = self._player_by_id(player_id)
+                        if not player_sn or not want:
+                            payout[0] = -9999
+                        else:
+                            n = sum(
+                                1 for s in list(getattr(player_sn, "owned_starters", []) or [])
+                                if not getattr(s, "is_flipped", False)
+                                and (getattr(s, "name", "") or "").strip().lower() == want
+                            )
+                            try:
+                                mult = int(split_command[4])
+                            except (TypeError, ValueError):
+                                payout[0] = -9999
+                                mult = None
+                            if mult is not None:
+                                match fourth_word:
+                                    case 'g':
+                                        payout[0] = n * mult
+                                    case 's':
+                                        payout[1] = n * mult
+                                    case 'm':
+                                        payout[2] = n * mult
+                                    case 'v':
+                                        payout[3] = n * mult
+                                    case _:
+                                        payout[0] = -9999
                     case "area":
                         area_count = self.owned_monster_attributes(player_id)[third_word]
                         match fourth_word:
