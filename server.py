@@ -37,8 +37,8 @@ _CARD_IMAGE_DIRS: Dict[str, Path] = {
 _EXHAUSTED_CARD_JPEG = _REPO_ROOT / "images" / "exhausted" / "exhausted_card.jpg"
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
-# Lobby background: citizens / domains / monsters only (no backs)
-_LOBBY_BG_IMAGE_SUBDIRS = ("citizens", "domains", "monsters")
+# Lobby background: citizens / domains / monsters / dukes (no backs)
+_LOBBY_BG_IMAGE_SUBDIRS = ("citizens", "domains", "monsters", "dukes")
 _lobby_bg_urls_cache = None
 _lobby_bg_urls_cache_time = 0.0
 
