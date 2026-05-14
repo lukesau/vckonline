@@ -26,6 +26,7 @@
         </div>
         <aside class="gl-side gl-side-r" id="gl-side-r"></aside>
       </div>
+      <div class="gl-resource-bar" id="gl-resource-bar"></div>
       <div class="gl-bottom" id="gl-bottom"></div>
     </div>
   </div>
@@ -37,6 +38,16 @@
         <button type="button" class="player-detail-close" id="player-detail-close" aria-label="Close">Close</button>
       </div>
       <div class="player-detail-body" id="player-detail-body"></div>
+    </div>
+  </div>
+  <div id="action-confirm-modal" class="action-confirm-backdrop" aria-hidden="true">
+    <div class="action-confirm-panel" role="dialog" aria-modal="true" aria-labelledby="action-confirm-title">
+      <h2 class="action-confirm-title" id="action-confirm-title">Confirm</h2>
+      <p class="action-confirm-message" id="action-confirm-message"></p>
+      <div class="action-confirm-actions">
+        <button type="button" class="prompt-btn prompt-btn-secondary" id="action-confirm-cancel">Cancel</button>
+        <button type="button" class="prompt-btn" id="action-confirm-ok">Confirm</button>
+      </div>
     </div>
   </div>
   <div id="lobby-overlay" class="lobby-overlay" aria-hidden="true">

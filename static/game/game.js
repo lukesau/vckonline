@@ -52,11 +52,17 @@ let latestGameState = null;
 
 /** Narrow layout: max-width breakpoint matches CSS tabbed / carousel mode */
 function isViewportNarrow() {
-  return typeof window !== 'undefined' && window.matchMedia('(max-width: 800px)').matches;
+  return true;
 }
 
 /** Which player's tableau slide is focused in the narrow carousel (persisted across re-renders) */
 let tableauCarouselActiveId = null;
+
+/** Center board tab carousel: last focused section key (BOARD_SECTIONS[].key) across re-renders */
+let centerBoardActiveTabKey = null;
+
+/** Narrow carousel: horizontal scrollLeft of each player's `.tableau-cards` strip */
+const tableauStripScrollByPlayerId = {};
 
 /** Visual approx. of server 180s inactivity cleanup; refreshed on each state. */
 const INACTIVITY_IDLE_MS = 180000;
@@ -273,39 +279,43 @@ function render(state) {
   }
 
   const layout = layoutSlotAssignment(state);
-  const narrow = isViewportNarrow();
   const board = document.getElementById('board');
+  const me = (state.player_list || []).find(p => idsMatch(p && p.player_id, PLAYER_ID));
+  const isMyTurn = !!(me && isActiveTurnForPlayer(me, state));
   if (board) {
     board.dataset.layout = layout.layoutKey;
     board.dataset.playerCount = String(layout.n);
-    board.dataset.narrowLayout = narrow ? '1' : '';
+    board.dataset.narrowLayout = '1';
+    board.classList.toggle('is-my-active-turn', isMyTurn);
   }
-  clearEl('gl-top');
-  clearEl('gl-side-l');
-  clearEl('gl-side-r');
   clearEl('gl-bottom');
+  clearEl('gl-resource-bar');
+
+  const resourceBarEl = document.getElementById('gl-resource-bar');
+  if (resourceBarEl) {
+    const canTake = canOfferTakeResourceAction(state);
+    const resourceBar = document.createElement('div');
+    resourceBar.className = 'resource-action-bar' + (canTake ? '' : ' resource-action-bar--inactive');
+    ['gold', 'strength', 'magic'].forEach(r => {
+      const lab = r.charAt(0).toUpperCase() + r.slice(1);
+      const btn = promptButton(`+1 ${lab}`, () => {
+        if (!canOfferTakeResourceAction(latestGameState)) return;
+        confirmAndPostGameAction(
+          { player_id: PLAYER_ID, action_type: 'take_resource', resource: r },
+          {
+            title: 'Take resource?',
+            message: `Take +1 ${lab} from the bank as your standard action.`,
+          },
+        );
+      });
+      if (!canTake) btn.disabled = true;
+      resourceBar.appendChild(btn);
+    });
+    resourceBarEl.appendChild(resourceBar);
+  }
 
   const bottomEl = document.getElementById('gl-bottom');
-  if (narrow) {
-    renderTableauCarousel(state, bottomEl);
-  } else {
-    layout.top.forEach(p => {
-      const wrap = mk('gl-top-slot');
-      wrap.appendChild(renderSeatEl(p, state, layout.n === 5 ? 'top-mini' : 'top'));
-      document.getElementById('gl-top').appendChild(wrap);
-    });
-
-    if (layout.right) {
-      document.getElementById('gl-side-r').appendChild(renderSeatEl(layout.right, state, 'side'));
-    }
-    if (layout.left) {
-      document.getElementById('gl-side-l').appendChild(renderSeatEl(layout.left, state, 'side'));
-    }
-
-    if (bottomEl) {
-      bottomEl.appendChild(renderSeatEl(layout.me, state, 'me'));
-    }
-  }
+  renderTableauCarousel(state, bottomEl);
 
   renderCenter(state);
   renderGameOver(state);
@@ -356,12 +366,23 @@ function renderSeatEl(player, state, variant) {
     const lbl = mk('card-group-label');
     lbl.textContent = g.label;
     grp.appendChild(lbl);
-    const grouped = groupCardsForTableau(g.cards);
-    if (grouped) {
-      grouped.forEach(({ card, count }) => grp.appendChild(makeTableauStack(card, count, cardMode)));
+    const stacksWrap = mk('card-group-stacks');
+    if (g.label === 'Citizens') {
+      const grouped = groupCardsForTableau(g.cards);
+      (grouped || g.cards.map(c => ({ card: c, count: 1 }))).forEach(
+        ({ card, count }) => stacksWrap.appendChild(makeTableauStack(card, count, cardMode))
+      );
+    } else if (g.label === 'Monsters') {
+      const monsters = Array.isArray(g.cards) ? g.cards : [];
+      if (monsters.length > 1) {
+        stacksWrap.appendChild(makeTableauOrderedStack(monsters, cardMode));
+      } else {
+        monsters.forEach(c => stacksWrap.appendChild(makeTableauStack(c, 1, cardMode)));
+      }
     } else {
-      g.cards.forEach(c => grp.appendChild(makeTableauStack(c, 1, cardMode)));
+      g.cards.forEach(c => stacksWrap.appendChild(makeTableauStack(c, 1, cardMode)));
     }
+    grp.appendChild(stacksWrap);
     tableau.appendChild(grp);
   });
   inner.appendChild(tableau);
@@ -379,45 +400,160 @@ function wireSeatTableauOpen(seatEl, player) {
   });
 }
 
+/**
+ * Scroll a padded horizontal carousel so a slide lines up with the viewport's inner (padding) edge.
+ * Using slide.offsetLeft alone is wrong here: offsetLeft can include padding while scrollLeft does not,
+ * which shifts every slide slightly right and peeks the next slide past the right edge.
+ */
+function scrollTableauCarouselToSlide(viewport, slide, behavior) {
+  if (!viewport || !slide) return;
+  const st = getComputedStyle(viewport);
+  const insetL = (parseFloat(st.borderLeftWidth) || 0) + (parseFloat(st.paddingLeft) || 0);
+  const vRect = viewport.getBoundingClientRect();
+  const sRect = slide.getBoundingClientRect();
+  const contentEdge = vRect.left + insetL;
+  const delta = sRect.left - contentEdge;
+  let left = viewport.scrollLeft + delta;
+  const max = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+  if (left < 0) left = 0;
+  else if (left > max) left = max;
+  viewport.scrollTo({ left, behavior });
+}
+
 function wireTableauCarouselViewport(viewport) {
+  // Wheel: vertical scroll maps to horizontal carousel scroll, except over tableau (handled there).
+  viewport.addEventListener('wheel', e => {
+    if (e.target.closest('.tableau-cards')) return;
+    if (viewport.scrollWidth <= viewport.clientWidth + 1) return;
+    e.preventDefault();
+    viewport.scrollLeft += e.deltaY;
+  }, { passive: false });
+
+  // Touch: tableau that cannot scroll horizontally must not pass swipes through to this viewport.
   viewport.addEventListener(
-    'wheel',
+    'touchmove',
     e => {
-      if (viewport.scrollWidth <= viewport.clientWidth + 1) return;
+      const inner = e.target.closest && e.target.closest('.card-group-stacks');
+      if (inner && viewport.contains(inner)) {
+        const canY = inner.scrollHeight > inner.clientHeight + 1;
+        const canX = inner.scrollWidth > inner.clientWidth + 1;
+        if (canY || canX) return;
+      }
+      const tc = e.target.closest && e.target.closest('.tableau-cards');
+      if (!tc || !viewport.contains(tc)) return;
+      if (tc.scrollWidth > tc.clientWidth + 1) return;
       e.preventDefault();
-      viewport.scrollLeft += e.deltaY;
     },
-    { passive: false },
+    { passive: false, capture: true },
   );
 
+  // Pointer drag on the header → scroll the carousel
   let dragPtr = null;
+  let dragLastX = 0;
   viewport.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
-    if (e.target.closest && e.target.closest('.card')) return;
+    if (!e.target.closest('.player-header')) return;
     dragPtr = e.pointerId;
-    try {
-      viewport.setPointerCapture(e.pointerId);
-    } catch (_) {
-      /* ignore */
-    }
+    dragLastX = e.clientX;
+    try { viewport.setPointerCapture(e.pointerId); } catch (_) {}
     viewport.classList.add('is-pointer-dragging');
   });
   viewport.addEventListener('pointermove', e => {
     if (e.pointerId !== dragPtr) return;
-    viewport.scrollLeft -= e.movementX;
+    const dx = e.clientX - dragLastX;
+    dragLastX = e.clientX;
+    viewport.scrollLeft -= dx;
   });
   const endDrag = e => {
     if (e.pointerId !== dragPtr) return;
     dragPtr = null;
     viewport.classList.remove('is-pointer-dragging');
-    try {
-      viewport.releasePointerCapture(e.pointerId);
-    } catch (_) {
-      /* ignore */
-    }
+    try { viewport.releasePointerCapture(e.pointerId); } catch (_) {}
   };
   viewport.addEventListener('pointerup', endDrag);
   viewport.addEventListener('pointercancel', endDrag);
+}
+
+function wireCarouselTableauInteractions(tableauCards) {
+  const syncTouchAction = () => {
+    const can = tableauCards.scrollWidth > tableauCards.clientWidth + 1;
+    tableauCards.style.touchAction = can ? 'pan-x' : 'none';
+  };
+  syncTouchAction();
+  let ro = null;
+  try {
+    ro = new ResizeObserver(syncTouchAction);
+    ro.observe(tableauCards);
+  } catch (_) {
+    /* older engines */
+  }
+  tableauCards.addEventListener('scroll', syncTouchAction, { passive: true });
+
+  try {
+    const mo = new MutationObserver(() => {
+      requestAnimationFrame(syncTouchAction);
+    });
+    mo.observe(tableauCards, { childList: true, subtree: true, attributes: true });
+  } catch (_) {
+    /* older engines */
+  }
+
+  tableauCards.addEventListener(
+    'wheel',
+    e => {
+      const inner = e.target.closest && e.target.closest('.card-group-stacks');
+      if (inner && tableauCards.contains(inner)) {
+        const canY = inner.scrollHeight > inner.clientHeight + 1;
+        const canX = inner.scrollWidth > inner.clientWidth + 1;
+        if (canY && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+          e.preventDefault();
+          e.stopPropagation();
+          inner.scrollTop += e.deltaY;
+          return;
+        }
+        if (canX) {
+          e.preventDefault();
+          e.stopPropagation();
+          inner.scrollLeft += e.deltaY + e.deltaX;
+          return;
+        }
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      if (tableauCards.scrollWidth > tableauCards.clientWidth + 1) {
+        tableauCards.scrollLeft += e.deltaY + e.deltaX;
+      }
+    },
+    { passive: false },
+  );
+}
+
+function trackTableauStripScrollForPlayer(tableauCards, playerId) {
+  if (!tableauCards || playerId == null) return;
+  const sid = String(playerId);
+  tableauCards.addEventListener(
+    'scroll',
+    () => {
+      tableauStripScrollByPlayerId[sid] = tableauCards.scrollLeft;
+    },
+    { passive: true },
+  );
+}
+
+function restoreTableauStripScroll(tableauCards, playerId) {
+  if (!tableauCards || playerId == null) return;
+  const sid = String(playerId);
+  const saved = tableauStripScrollByPlayerId[sid];
+  if (saved == null || !Number.isFinite(Number(saved))) return;
+  const want = Number(saved);
+  const apply = () => {
+    const max = Math.max(0, tableauCards.scrollWidth - tableauCards.clientWidth);
+    tableauCards.scrollLeft = Math.min(Math.max(0, want), max);
+  };
+  requestAnimationFrame(() => {
+    apply();
+    requestAnimationFrame(apply);
+  });
 }
 
 function renderTableauCarousel(state, bottomEl) {
@@ -427,23 +563,44 @@ function renderTableauCarousel(state, bottomEl) {
   root.setAttribute('role', 'region');
   root.setAttribute('aria-label', 'Player tableaus');
 
-  // In narrow mode, ring the whole carousel on your turn (avoids clipped outer box-shadows).
-  const me = players.find(p => idsMatch(p && p.player_id, PLAYER_ID));
-  if (me && isActiveTurnForPlayer(me, state)) {
-    root.classList.add('is-my-active-turn');
-  }
-
   const viewport = mk('tableau-carousel-viewport');
   players.forEach(p => {
     const slide = mk('tableau-carousel-slide');
     slide.appendChild(renderSeatEl(p, state, 'carousel'));
+    const tc = slide.querySelector('.tableau-cards');
+    if (tc) {
+      wireCarouselTableauInteractions(tc);
+      trackTableauStripScrollForPlayer(tc, p.player_id);
+      restoreTableauStripScroll(tc, p.player_id);
+    }
     viewport.appendChild(slide);
   });
 
   wireTableauCarouselViewport(viewport);
 
+  const navDotsEl = document.createElement('div');
+  navDotsEl.className = 'carousel-nav-dots';
+  const dots = players.map((p, i) => {
+    const dot = document.createElement('button');
+    dot.className = 'carousel-nav-dot';
+    dot.textContent = p.name || `Player ${i + 1}`;
+    dot.addEventListener('click', () => {
+      const slide = viewport.children[i];
+      const pl = players[i];
+      if (pl && pl.player_id != null) tableauCarouselActiveId = pl.player_id;
+      if (slide) scrollTableauCarouselToSlide(viewport, slide, 'smooth');
+    });
+    navDotsEl.appendChild(dot);
+    return dot;
+  });
+
+  const syncDots = activeIdx => {
+    dots.forEach((d, i) => d.classList.toggle('is-active', i === activeIdx));
+  };
+
   root.appendChild(viewport);
   bottomEl.appendChild(root);
+  bottomEl.appendChild(navDotsEl);
 
   let targetIdx = players.findIndex(p => idsMatch(p.player_id, tableauCarouselActiveId));
   if (targetIdx < 0) {
@@ -469,71 +626,83 @@ function renderTableauCarousel(state, bottomEl) {
     }
     const pl = players[best];
     if (pl && pl.player_id != null) tableauCarouselActiveId = pl.player_id;
+    syncDots(best);
+  };
+
+  let carouselScrollRaf = null;
+  const scheduleSyncActiveFromScroll = () => {
+    if (carouselScrollRaf != null) return;
+    carouselScrollRaf = requestAnimationFrame(() => {
+      carouselScrollRaf = null;
+      syncActiveFromScroll();
+    });
   };
 
   let scrollEndTimer = null;
   viewport.addEventListener('scroll', () => {
+    scheduleSyncActiveFromScroll();
     clearTimeout(scrollEndTimer);
-    scrollEndTimer = setTimeout(syncActiveFromScroll, 120);
+    scrollEndTimer = setTimeout(scheduleSyncActiveFromScroll, 120);
   }, { passive: true });
 
-  requestAnimationFrame(() => {
+  const runCarouselLayoutMeasure = () => {
     const slide = viewport.children[targetIdx];
     if (!slide) return;
-    viewport.scrollTo({ left: slide.offsetLeft, behavior: 'auto' });
+    scrollTableauCarouselToSlide(viewport, slide, 'auto');
     const pl = players[targetIdx];
     if (pl && pl.player_id != null) tableauCarouselActiveId = pl.player_id;
+    syncDots(targetIdx);
+  };
+
+  requestAnimationFrame(() => {
+    runCarouselLayoutMeasure();
+    requestAnimationFrame(runCarouselLayoutMeasure);
   });
 }
 
 // ── Center board ──────────────────────────────────────────────────────────
+const BOARD_SECTIONS = [
+  { key: 'monsters',   label: 'Monsters' },
+  { key: 'citizens-1', label: 'Citizens 1–5' },
+  { key: 'citizens-2', label: 'Citizens 6–12' },
+  { key: 'domains',    label: 'Domains' },
+];
+
 function renderCenter(state) {
   const el = document.getElementById('zone-center');
   if (!el) return;
-  const narrow = isViewportNarrow();
-  const n = (state.player_list || []).length;
-  const logBesideGrid = n === 2 && !narrow;
   el.innerHTML = '';
-  el.classList.toggle('center-board--log-side', logBesideGrid);
+  el.classList.add('board-use-tabs');
 
-  const scrollArea = mk('center-board-scroll');
   const tabsBar = mk('board-tabs-bar');
   tabsBar.setAttribute('role', 'tablist');
-  scrollArea.appendChild(tabsBar);
 
-  const secMon = makeGridSection('Monsters', state.monster_grid || [], 'monster', 5, 'board-monsters');
-  secMon.dataset.boardSection = 'monsters';
-  const secCit = makeCitizenSection(state.citizen_grid || []);
-  secCit.dataset.boardSection = 'citizens';
-  const secDom = makeGridSection('Domains', state.domain_grid || [], 'domain', 5, 'board-domains');
-  secDom.dataset.boardSection = 'domains';
+  const viewport = mk('center-board-viewport');
 
-  scrollArea.appendChild(secMon);
-  scrollArea.appendChild(secCit);
-  scrollArea.appendChild(secDom);
+  const citizenGrid = state.citizen_grid || [];
+  const sections = [
+    makeGridSection('Monsters',      state.monster_grid || [], 'monster', 5, 'board-monsters'),
+    makeGridSection('Citizens 1–5',  citizenGrid.slice(0, 5),  'citizen', 5, 'board-citizens-1'),
+    makeGridSection('Citizens 6–12', citizenGrid.slice(5),     'citizen', 5, 'board-citizens-2'),
+    makeGridSection('Domains',       state.domain_grid  || [], 'domain',  5, 'board-domains'),
+  ];
+  BOARD_SECTIONS.forEach(({ key }, i) => {
+    sections[i].dataset.boardSection = key;
+    const slide = mk('center-board-slide');
+    slide.appendChild(sections[i]);
+    viewport.appendChild(slide);
+  });
 
   const body = mk('center-board-body');
   body.appendChild(makeInfoBar(state));
-  body.appendChild(scrollArea);
+  body.appendChild(tabsBar);
+  body.appendChild(viewport);
+  el.appendChild(body);
 
-  if (logBesideGrid) {
-    const log = makeGameLog(state);
-    log.classList.add('game-log--side');
-    const split = mk('center-board-split');
-    split.appendChild(body);
-    split.appendChild(log);
-    el.appendChild(split);
-  } else {
-    el.appendChild(body);
-    if (!narrow) {
-      el.appendChild(makeGameLog(state));
-    }
-  }
-
-  setupBoardTabs(el, tabsBar);
+  setupBoardTabs(el, tabsBar, viewport);
 }
 
-/** Vertical wheel turns into horizontal scroll on top-strip opponent tableaus only. */
+/** Vertical wheel → horizontal scroll on opponent top strips and narrow-layout carousel tableaus. */
 function initOpponentTableauWheelScroll() {
   const board = document.getElementById('board');
   if (!board || board.dataset.tableauWheelBound) return;
@@ -541,11 +710,35 @@ function initOpponentTableauWheelScroll() {
   board.addEventListener(
     'wheel',
     e => {
+      const inner = e.target.closest && e.target.closest('.card-group-stacks');
+      if (inner) {
+        const seat = inner.closest('.seat');
+        if (!seat || seat.classList.contains('seat-empty')) return;
+        if (!seat.classList.contains('seat-carousel')) return;
+        const canY = inner.scrollHeight > inner.clientHeight + 1;
+        const canX = inner.scrollWidth > inner.clientWidth + 1;
+        if (canY && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+          e.preventDefault();
+          inner.scrollTop += e.deltaY;
+          return;
+        }
+        if (canX) {
+          e.preventDefault();
+          inner.scrollLeft += e.deltaY;
+          return;
+        }
+        return;
+      }
       const row = e.target.closest('.tableau-cards');
       if (!row) return;
       const seat = row.closest('.seat');
       if (!seat || seat.classList.contains('seat-empty')) return;
-      if (!seat.classList.contains('seat-top') && !seat.classList.contains('seat-top-mini')) return;
+      if (
+        !seat.classList.contains('seat-top') &&
+        !seat.classList.contains('seat-top-mini') &&
+        !seat.classList.contains('seat-carousel')
+      )
+        return;
       if (row.scrollWidth <= row.clientWidth + 1) return;
       e.preventDefault();
       row.scrollLeft += e.deltaY;
@@ -559,73 +752,74 @@ function syncBoardTabsObserver() {
   if (zone) syncBoardTabState(zone);
 }
 
-function setupBoardTabs(zoneCenter, tabsBar) {
-  const sections = () => Array.from(zoneCenter.querySelectorAll('.center-board-scroll > .center-section'));
-  const labels = { monsters: 'Monsters', citizens: 'Citizens', domains: 'Domains' };
-  const keys = ['monsters', 'citizens', 'domains'];
+function setupBoardTabs(zoneCenter, tabsBar, viewport) {
+  const slides = Array.from(viewport.children);
   tabsBar.innerHTML = '';
-  keys.forEach((key, i) => {
+  let initialIdx = 0;
+  if (centerBoardActiveTabKey != null) {
+    const j = BOARD_SECTIONS.findIndex(s => s.key === centerBoardActiveTabKey);
+    if (j >= 0) initialIdx = j;
+  }
+  const tabs = BOARD_SECTIONS.map(({ key, label }, i) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'board-tab' + (i === 0 ? ' is-active' : '');
-    btn.textContent = labels[key];
+    btn.className = 'board-tab' + (i === initialIdx ? ' is-active' : '');
+    btn.textContent = label;
     btn.dataset.boardTab = key;
     btn.setAttribute('role', 'tab');
-    btn.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+    btn.setAttribute('aria-selected', i === initialIdx ? 'true' : 'false');
     btn.addEventListener('click', () => {
-      keys.forEach(k => {
-        sections().forEach(sec => {
-          if (sec.dataset.boardSection === k) {
-            sec.classList.toggle('board-tab-visible', k === key);
-          }
-        });
-      });
-      tabsBar.querySelectorAll('.board-tab').forEach(b => {
-        const on = b.dataset.boardTab === key;
-        b.classList.toggle('is-active', on);
-        b.setAttribute('aria-selected', on ? 'true' : 'false');
-      });
+      const slide = slides[i];
+      centerBoardActiveTabKey = key;
+      if (slide) viewport.scrollTo({ left: slide.offsetLeft, behavior: 'smooth' });
+      syncTabActive(i);
     });
     tabsBar.appendChild(btn);
+    return btn;
   });
 
-  keys.forEach((key, i) => {
-    sections().forEach(sec => {
-      if (sec.dataset.boardSection === key) {
-        sec.classList.toggle('board-tab-visible', i === 0);
-      }
+  const syncTabActive = idx => {
+    tabs.forEach((b, i) => {
+      const on = i === idx;
+      b.classList.toggle('is-active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
+  };
+
+  let scrollEndTimer = null;
+  viewport.addEventListener('scroll', () => {
+    clearTimeout(scrollEndTimer);
+    scrollEndTimer = setTimeout(() => {
+      const vr = viewport.getBoundingClientRect();
+      const mid = vr.left + vr.width / 2;
+      let best = 0, bestDist = Infinity;
+      slides.forEach((s, i) => {
+        const r = s.getBoundingClientRect();
+        const d = Math.abs(r.left + r.width / 2 - mid);
+        if (d < bestDist) { bestDist = d; best = i; }
+      });
+      const sec = BOARD_SECTIONS[best];
+      if (sec) centerBoardActiveTabKey = sec.key;
+      syncTabActive(best);
+    }, 80);
+  }, { passive: true });
+
+  const applyInitialBoardScroll = () => {
+    const slide = slides[initialIdx];
+    if (slide) viewport.scrollTo({ left: slide.offsetLeft, behavior: 'auto' });
+  };
+  requestAnimationFrame(() => {
+    applyInitialBoardScroll();
+    requestAnimationFrame(applyInitialBoardScroll);
   });
-  syncBoardTabState(zoneCenter);
 }
 
 function syncBoardTabState(zoneCenter) {
-  const scroll = zoneCenter.querySelector('.center-board-scroll');
-  if (!scroll) return;
-  const useTabs = isViewportNarrow();
-  zoneCenter.classList.toggle('board-use-tabs', useTabs);
-  if (!useTabs) {
-    zoneCenter.querySelectorAll('.center-section').forEach(sec => sec.classList.add('board-tab-visible'));
-  } else {
-    const active = zoneCenter.querySelector('.board-tab.is-active');
-    const key = active ? active.dataset.boardTab : 'monsters';
-    zoneCenter.querySelectorAll('.center-section').forEach(sec => {
-      sec.classList.toggle('board-tab-visible', sec.dataset.boardSection === key);
-    });
-  }
+  // No-op — carousel handles its own state via scroll sync
 }
 
 const RULEBOOK_PDF_URL = '/static/game/b0-valeria-card-kingdoms-rulebook.pdf';
 
-function appendRulebookLinkToDiceRow(diceRow) {
-  const rulebook = document.createElement('a');
-  rulebook.href = RULEBOOK_PDF_URL;
-  rulebook.className = 'info-bar-rulebook-btn';
-  rulebook.textContent = 'Rulebook';
-  rulebook.target = '_blank';
-  rulebook.rel = 'noopener noreferrer';
-  diceRow.appendChild(rulebook);
-}
 
 function canOfferTakeResourceAction(state) {
   if (!PLAYER_ID || !state) return false;
@@ -638,57 +832,97 @@ function canOfferTakeResourceAction(state) {
   return Number(state.actions_remaining || 0) > 0;
 }
 
-function makeInfoBar(state) {
-  const bar = mk('info-bar');
-  const narrow = isViewportNarrow();
-  if (narrow) bar.classList.add('info-bar--stacked');
+function activeTurnNamePart(state) {
+  const active = (state.player_list || []).find(p => p.player_id === state.active_player_id);
+  if (!active) return { hasActive: false, isMe: false, displayName: '' };
+  const raw = (active.name || '').toString().trim();
+  const displayName = raw || 'Player';
+  const isMe = idsMatch(active.player_id, PLAYER_ID);
+  return { hasActive: true, isMe, displayName };
+}
 
-  const meta = mk('info-bar-meta');
+/** Short line for the main board (no turn number): "Your turn" / "Name's turn". */
+function boardActiveTurnLine(state) {
+  const t = activeTurnNamePart(state);
+  if (!t.hasActive) return '';
+  if (t.isMe) return 'Your turn';
+  return `${t.displayName}'s turn`;
+}
+
+function openDiceInfoModal(state) {
+  const existing = document.getElementById('dice-info-modal-overlay');
+  if (existing) { existing.remove(); return; }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'dice-info-modal-overlay';
+  overlay.className = 'dice-info-modal-overlay';
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  const panel = document.createElement('div');
+  panel.className = 'dice-info-modal';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'card-modal-close';
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', () => overlay.remove());
+  panel.appendChild(closeBtn);
 
   const phase = mk('phase-label');
   phase.textContent = fmtPhase(state.phase);
-  meta.appendChild(phase);
+  panel.appendChild(phase);
 
   const tn = mk('turn-label');
-  tn.textContent = `Turn ${state.turn_number || 1}`;
-  meta.appendChild(tn);
-
-  const active = (state.player_list || []).find(p => p.player_id === state.active_player_id);
-  if (active && active.player_id !== PLAYER_ID) {
-    const who = mk('turn-label');
-    who.textContent = `— ${active.name}'s turn`;
-    meta.appendChild(who);
-  }
+  const t = activeTurnNamePart(state);
+  const turnWho = t.hasActive ? ` — ${t.isMe ? 'your' : `${t.displayName}'s`} turn` : '';
+  tn.textContent = `Turn ${state.turn_number || 1}${turnWho}`;
+  tn.title = tn.textContent;
+  panel.appendChild(tn);
 
   if (state.end_game_triggered) {
     const eg = mk('turn-label');
     eg.textContent = '⚑ Final round';
     eg.style.color = 'var(--gold)';
-    meta.appendChild(eg);
+    panel.appendChild(eg);
   }
 
-  bar.appendChild(meta);
+  const lobby = document.createElement('a');
+  lobby.href = '/';
+  lobby.className = 'info-bar-lobby-btn';
+  lobby.textContent = 'Lobby';
+  lobby.addEventListener('click', ev => {
+    ev.preventDefault();
+    overlay.remove();
+    if (latestGameState?.shutdown) {
+      goToLobbyNow();
+      return;
+    }
+    const ok = window.confirm(
+      'Leave to the lobby and abandon this game for everyone?\n\nThe game will end for all players and redirect to the lobby after 30 seconds.'
+    );
+    if (!ok) return;
+    abandonGame();
+  });
+  panel.appendChild(lobby);
 
-  if (canOfferTakeResourceAction(state)) {
-    const takeWrap = mk('info-bar-take-resource');
-    const takeLbl = mk('info-bar-take-label');
-    const nAct = Number(state.actions_remaining || 0);
-    takeLbl.textContent = `Spend action (${nAct} left)`;
-    takeWrap.appendChild(takeLbl);
-    const takeBtns = mk('info-bar-take-buttons');
-    ['gold', 'strength', 'magic'].forEach(r => {
-      const lab = r === 'gold' ? 'G' : r === 'strength' ? 'S' : 'M';
-      takeBtns.appendChild(promptButton(`+1 ${lab}`, () => postGameAction({
-        player_id: PLAYER_ID,
-        action_type: 'take_resource',
-        resource: r,
-      })));
-    });
-    takeWrap.appendChild(takeBtns);
-    bar.appendChild(takeWrap);
-  }
+  const rulebook = document.createElement('a');
+  rulebook.href = RULEBOOK_PDF_URL;
+  rulebook.className = 'info-bar-rulebook-btn';
+  rulebook.textContent = 'Rulebook';
+  rulebook.target = '_blank';
+  rulebook.rel = 'noopener noreferrer';
+  panel.appendChild(rulebook);
+  panel.appendChild(makeGameLog(state));
 
-  const diceRow = mk('info-bar-dice-row');
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
+
+function makeInfoBar(state) {
+  const bar = mk('info-bar');
+
+  const row = mk('info-bar-dice-row');
+  const diceBtn = document.createElement('button');
+  diceBtn.className = 'info-bar-dice-btn';
   const dice = mk('dice-display');
   if (state.die_one != null) {
     dice.appendChild(makeDie(state.die_one));
@@ -697,31 +931,17 @@ function makeInfoBar(state) {
     sum.textContent = `= ${state.die_sum}`;
     dice.appendChild(sum);
   }
-  diceRow.appendChild(dice);
+  diceBtn.appendChild(dice);
+  diceBtn.addEventListener('click', () => openDiceInfoModal(state));
+  row.appendChild(diceBtn);
 
-  if (!narrow) {
-    const lobby = document.createElement('a');
-    lobby.href = '/';
-    lobby.className = 'info-bar-lobby-btn';
-    lobby.textContent = 'Lobby';
-    lobby.addEventListener('click', ev => {
-      ev.preventDefault();
-      if (latestGameState?.shutdown) {
-        goToLobbyNow();
-        return;
-      }
-      const ok = window.confirm(
-        'Leave to the lobby and abandon this game for everyone?\n\nThe game will end for all players and redirect to the lobby after 30 seconds.'
-      );
-      if (!ok) return;
-      abandonGame();
-    });
-    diceRow.appendChild(lobby);
-  }
+  const turnLine = mk('info-bar-turn-label');
+  const turnText = boardActiveTurnLine(state);
+  turnLine.textContent = turnText;
+  if (turnText) turnLine.title = turnText;
+  row.appendChild(turnLine);
 
-  appendRulebookLinkToDiceRow(diceRow);
-
-  bar.appendChild(diceRow);
+  bar.appendChild(row);
 
   return bar;
 }
@@ -798,6 +1018,38 @@ function makeTableauStack(card, count, mode) {
   if (count > 1) {
     const badge = mk('stack-depth');
     badge.textContent = `×${count}`;
+    wrap.appendChild(badge);
+  }
+  return wrap;
+}
+
+/**
+ * Ordered tableau stack: index 0 is oldest, last index is newest (top).
+ * Reusable for any ordered pile where the viewer taps the stack and pages through in a modal.
+ */
+function makeTableauOrderedStack(cards, mode) {
+  const arr = Array.isArray(cards) ? cards.filter(Boolean) : [];
+  if (arr.length === 0) return mk('grid-stack');
+  if (arr.length === 1) return makeTableauStack(arr[0], 1, mode);
+
+  const wrap = mk('grid-stack tableau-card-stack');
+  wrap.dataset.stack = JSON.stringify(arr);
+
+  const foundation = mk('tableau-stack-foundation');
+  const maxSlivers = 8;
+  const under = Math.min(arr.length - 1, maxSlivers);
+  for (let i = 0; i < under; i++) {
+    foundation.appendChild(mk('tableau-stack-sliver'));
+  }
+  wrap.appendChild(foundation);
+
+  const topWrap = mk('tableau-stack-top');
+  topWrap.appendChild(makeCard(arr[arr.length - 1], mode));
+  wrap.appendChild(topWrap);
+
+  if (arr.length > maxSlivers + 1) {
+    const badge = mk('stack-depth');
+    badge.textContent = `×${arr.length}`;
     wrap.appendChild(badge);
   }
   return wrap;
@@ -927,13 +1179,15 @@ function appendCardModalStatRows(infoEl, card) {
 function makeHeader(player, state) {
   const h = mk('player-header');
 
+  const nameRow = mk('player-header-name-row');
+
   const ord = playerIndexInList(state, player);
   const listLen = (state.player_list || []).length;
   if (ord >= 0 && listLen > 0) {
     const seatLbl = mk('player-seat-order');
     seatLbl.textContent = `Seat ${ord + 1}/${listLen}`;
     seatLbl.title = 'Player order in this game (clockwise from Seat 1)';
-    h.appendChild(seatLbl);
+    nameRow.appendChild(seatLbl);
   }
 
   const name = mk('player-name');
@@ -946,12 +1200,7 @@ function makeHeader(player, state) {
     name.appendChild(star);
   }
   name.appendChild(document.createTextNode(player.name));
-  h.appendChild(name);
-
-  h.appendChild(makeResourceScorePill('gold', player.gold_score, 'Gold', TABLEAU_RESOURCE_ICONS.gold));
-  h.appendChild(makeResourceScorePill('strength', player.strength_score, 'Strength', TABLEAU_RESOURCE_ICONS.strength));
-  h.appendChild(makeResourceScorePill('magic', player.magic_score, 'Magic', TABLEAU_RESOURCE_ICONS.magic));
-  h.appendChild(makeVpScorePill(player.victory_score));
+  nameRow.appendChild(name);
 
   if (isActiveTurnForPlayer(player, state)) {
     const tim = mk('tableau-inactive-timer');
@@ -961,8 +1210,17 @@ function makeHeader(player, state) {
       'aria-label',
       'Approximate idle time before this table may close if nobody acts',
     );
-    h.appendChild(tim);
+    nameRow.appendChild(tim);
   }
+
+  h.appendChild(nameRow);
+
+  const resRow = mk('player-header-res-row');
+  resRow.appendChild(makeResourceScorePill('gold', player.gold_score, 'Gold', TABLEAU_RESOURCE_ICONS.gold));
+  resRow.appendChild(makeResourceScorePill('strength', player.strength_score, 'Strength', TABLEAU_RESOURCE_ICONS.strength));
+  resRow.appendChild(makeResourceScorePill('magic', player.magic_score, 'Magic', TABLEAU_RESOURCE_ICONS.magic));
+  resRow.appendChild(makeVpScorePill(player.victory_score));
+  h.appendChild(resRow);
 
   return h;
 }
@@ -1229,17 +1487,45 @@ function initPlayerDetailModal() {
   }
   if (closeBtn) closeBtn.addEventListener('click', () => closePlayerDetailModal());
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closePlayerDetailModal();
+    if (e.key !== 'Escape') return;
+    const ac = document.getElementById('action-confirm-modal');
+    if (ac && ac.classList.contains('is-open')) return;
+    closePlayerDetailModal();
   });
 }
 
 // ── Card factory ──────────────────────────────────────────────────────────
+/** Viewer cannot see the card face (face-down domain pile, future hidden stacks, etc.). */
+function cardObscuredFromViewer(card) {
+  return !!(card && typeof card === 'object' && card.is_visible === false);
+}
+
 function isDomainStackFaceDown(card) {
-  return card.domain_id != null && card.is_visible === false;
+  return card?.domain_id != null && cardObscuredFromViewer(card);
+}
+
+function obscuredTypeBackUrl(card) {
+  if (!card || typeof card !== 'object') return '/images/domains/domain_back.jpg';
+  if (card.monster_id !== undefined && card.monster_id !== null) {
+    return '/images/monsters/monster_back.jpg';
+  }
+  if (card.citizen_id !== undefined && card.citizen_id !== null) {
+    return '/images/citizens/citizen_back.jpg';
+  }
+  if (card.domain_id !== undefined && card.domain_id !== null) {
+    return '/images/domains/domain_back.jpg';
+  }
+  if (card.duke_id !== undefined && card.duke_id !== null) {
+    return '/images/dukes/duke_back.jpg';
+  }
+  if (card.starter_id !== undefined && card.starter_id !== null) {
+    return '/images/starters/starter_back.jpg';
+  }
+  return '/images/domains/domain_back.jpg';
 }
 
 function cardImageUrl(card) {
-  if (isDomainStackFaceDown(card)) return '/images/domains/domain_back.jpg';
+  if (cardObscuredFromViewer(card)) return obscuredTypeBackUrl(card);
   if (card.monster_id !== undefined) return `/card-image/monster/${card.monster_id}`;
   if (card.citizen_id !== undefined) return `/card-image/citizen/${card.citizen_id}`;
   if (card.domain_id  !== undefined) return `/card-image/domain/${card.domain_id}`;
@@ -1271,7 +1557,9 @@ function makeCard(card, mode) {
   if (imgUrl) {
     el.classList.add('card-has-image');
     el.setAttribute('role', 'img');
-    const aria = isDomainStackFaceDown(card) ? 'Face-down domain' : (card.name || 'Card');
+    const aria = cardObscuredFromViewer(card)
+      ? (isDomainStackFaceDown(card) ? 'Face-down domain' : 'Hidden card')
+      : (card.name || 'Card');
     el.setAttribute('aria-label', aria);
 
     const img = document.createElement('img');
@@ -1576,85 +1864,6 @@ function fmtPhase(phase) {
   }[phase] || (phase || '');
 }
 
-// ── Card hover preview ────────────────────────────────────────────────────
-const _previewEl = document.createElement('img');
-_previewEl.className = 'card-preview';
-document.body.appendChild(_previewEl);
-
-let _hoverCard         = null;
-let _hoverTimer        = null;
-let _pendingRect       = null;
-let _previewPlacement  = 'auto';
-
-function previewPlacementForCard(cardEl) {
-  if (!cardEl.closest('.center-board')) return 'auto';
-  if (cardEl.closest('.citizen-row-second')) return 'above';
-  if (cardEl.closest('.board-domains')) return 'above';
-  if (cardEl.closest('.board-monsters')) return 'below';
-  if (cardEl.closest('.citizen-row-first')) return 'below';
-  return 'auto';
-}
-
-_previewEl.onload = () => {
-  if (_pendingRect) {
-    positionPreview(_pendingRect, _previewEl.naturalWidth, _previewEl.naturalHeight, _previewPlacement);
-  }
-};
-
-function positionPreview(rect, w, h, placement) {
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const mode = placement != null ? placement : _previewPlacement;
-  let top;
-  if (mode === 'below') {
-    top = rect.bottom + 8;
-    if (top + h > vh - 8) top = rect.top - h - 8;
-  } else if (mode === 'above') {
-    top = rect.top - h - 8;
-    if (top < 8) top = rect.bottom + 8;
-  } else {
-    top = rect.top - h - 8;
-    if (top < 8) top = rect.bottom + 8;
-  }
-  let left = rect.left + rect.width / 2 - w / 2;
-  left = Math.max(8, Math.min(left, vw - w - 8));
-  _previewEl.style.top  = top  + 'px';
-  _previewEl.style.left = left + 'px';
-}
-
-document.addEventListener('mouseover', e => {
-  const cardEl = e.target.closest('.card[data-card]');
-  if (cardEl === _hoverCard) return;
-  clearTimeout(_hoverTimer);
-  _hoverCard = cardEl;
-  if (!cardEl) { _previewEl.style.display = 'none'; return; }
-
-  const card = JSON.parse(cardEl.dataset.card);
-  const url  = cardImageUrl(card);
-  if (!url) return;
-
-  _previewPlacement = previewPlacementForCard(cardEl);
-
-  _hoverTimer = setTimeout(() => {
-    const rect = cardEl.getBoundingClientRect();
-    _pendingRect = rect;
-    _previewEl.style.display = 'block';
-    if (_previewEl.src.endsWith(url) && _previewEl.complete && _previewEl.naturalWidth) {
-      positionPreview(rect, _previewEl.naturalWidth, _previewEl.naturalHeight, _previewPlacement);
-    } else {
-      _previewEl.src = url;
-    }
-  }, 120);
-});
-
-document.addEventListener('mouseout', e => {
-  const cardEl = e.target.closest('.card[data-card]');
-  if (!cardEl || cardEl.contains(e.relatedTarget)) return;
-  clearTimeout(_hoverTimer);
-  _hoverCard = null;
-  _previewEl.style.display = 'none';
-});
-
 // ── Board market actions (hire / build / slay) ─────────────────────────────
 function topOfStack(stack) {
   if (!Array.isArray(stack) || stack.length === 0) return null;
@@ -1819,6 +2028,244 @@ function findMarketStack(card, state) {
     return { stack: stacks[i], stackIndex: i, top };
   }
   return null;
+}
+
+/** Fixed 20 center-board market piles: 5 monsters, 10 citizens, 5 domains (no wrap). */
+const MARKET_BOARD_PILE_COUNT = 20;
+
+function marketPileFromGlobalIndex(globalIdx) {
+  const g = Math.max(0, Math.min(MARKET_BOARD_PILE_COUNT - 1, globalIdx));
+  if (g < 5) return { kind: 'monster', gridProp: 'monster_grid', stackIndex: g };
+  if (g < 15) return { kind: 'citizen', gridProp: 'citizen_grid', stackIndex: g - 5 };
+  return { kind: 'domain', gridProp: 'domain_grid', stackIndex: g - 15 };
+}
+
+function globalMarketPileIndexFromCard(card, state) {
+  const loc = findMarketStack(card, state);
+  if (!loc) return null;
+  if (card.monster_id != null) return loc.stackIndex;
+  if (card.citizen_id != null) return 5 + loc.stackIndex;
+  if (card.domain_id != null) return 15 + loc.stackIndex;
+  return null;
+}
+
+function marketStackAtGlobalIndex(state, globalIdx) {
+  const slot = marketPileFromGlobalIndex(globalIdx);
+  const grid = Array.isArray(state?.[slot.gridProp]) ? state[slot.gridProp] : [];
+  const stack = grid[slot.stackIndex];
+  return Array.isArray(stack) ? stack : [];
+}
+
+/**
+ * Center-board market: ‹ › within the current pile; « » walks all 20 piles in order
+ * (monsters 1–5, citizens 6–15, domains 16–20), including empty slots. Hire / Build / Slay
+ * only on a non-empty pile when viewing its face-up top. Uses live `latestGameState`.
+ */
+function openBoardMarketStackModal(initialTopCard) {
+  if (document.getElementById('game-prompt-overlay')) return;
+  if (document.getElementById('card-modal-overlay')) return;
+
+  const state0 = latestGameState;
+  const g0 = globalMarketPileIndexFromCard(initialTopCard, state0);
+  const loc0 = state0 ? findMarketStack(initialTopCard, state0) : null;
+  if (g0 == null || !Number.isFinite(g0) || !loc0 || !Array.isArray(loc0.stack) || loc0.stack.length === 0) {
+    openMarketCardModal(initialTopCard);
+    return;
+  }
+
+  let globalPileIndex = g0;
+  let cardIdx = loc0.stack.length - 1;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'card-modal-overlay';
+  overlay.className = 'card-modal-overlay';
+
+  const modal = mk('card-modal card-modal--stack card-modal--board-stack');
+  modal.addEventListener('click', e => e.stopPropagation());
+
+  const main = mk('card-modal-board-stack-main');
+
+  const leftNav = mk('card-modal-board-stack-nav card-modal-board-stack-nav--left');
+  const cardPrevBtn = document.createElement('button');
+  cardPrevBtn.type = 'button';
+  cardPrevBtn.className = 'card-modal-nav card-modal-nav--prev';
+  cardPrevBtn.setAttribute('aria-label', 'Toward top of pile (face-up card)');
+  cardPrevBtn.textContent = '\u2039';
+  const stackPrevBtn = document.createElement('button');
+  stackPrevBtn.type = 'button';
+  stackPrevBtn.className = 'card-modal-nav card-modal-nav--stack-prev';
+  stackPrevBtn.setAttribute('aria-label', 'Previous market pile (of 20)');
+  stackPrevBtn.textContent = '\u00ab';
+
+  const center = mk('card-modal-board-stack-center');
+  const imgHost = mk('card-modal-stack-img-host');
+  const posEl = mk('card-modal-stack-pos');
+  posEl.setAttribute('aria-live', 'polite');
+
+  const rightNav = mk('card-modal-board-stack-nav card-modal-board-stack-nav--right');
+  const cardNextBtn = document.createElement('button');
+  cardNextBtn.type = 'button';
+  cardNextBtn.className = 'card-modal-nav card-modal-nav--next';
+  cardNextBtn.setAttribute('aria-label', 'Deeper in pile (toward bottom)');
+  cardNextBtn.textContent = '\u203a';
+  const stackNextBtn = document.createElement('button');
+  stackNextBtn.type = 'button';
+  stackNextBtn.className = 'card-modal-nav card-modal-nav--stack-next';
+  stackNextBtn.setAttribute('aria-label', 'Next market pile (of 20)');
+  stackNextBtn.textContent = '\u00bb';
+
+  leftNav.appendChild(cardPrevBtn);
+  leftNav.appendChild(stackPrevBtn);
+  center.appendChild(imgHost);
+  center.appendChild(posEl);
+  rightNav.appendChild(cardNextBtn);
+  rightNav.appendChild(stackNextBtn);
+
+  main.appendChild(leftNav);
+  main.appendChild(center);
+  main.appendChild(rightNav);
+
+  const info = mk('card-modal-info');
+  modal.appendChild(main);
+  modal.appendChild(info);
+
+  function syncFromLiveState() {
+    const state = latestGameState;
+    const slot = marketPileFromGlobalIndex(globalPileIndex);
+    const stack = marketStackAtGlobalIndex(state, globalPileIndex);
+    if (stack.length) {
+      cardIdx = Math.max(0, Math.min(stack.length - 1, cardIdx));
+    } else {
+      cardIdx = 0;
+    }
+    const card = stack.length ? stack[cardIdx] : null;
+    return { state, slot, stack, card };
+  }
+
+  function renderAt() {
+    const { state, slot, stack, card } = syncFromLiveState();
+    const isEmpty = stack.length === 0;
+
+    posEl.textContent = isEmpty
+      ? `Market pile ${globalPileIndex + 1} / ${MARKET_BOARD_PILE_COUNT} · Empty`
+      : `Market pile ${globalPileIndex + 1} / ${MARKET_BOARD_PILE_COUNT} · Card ${cardIdx + 1} / ${stack.length}`;
+
+    imgHost.innerHTML = '';
+    if (!isEmpty && card) {
+      const img = makeInspectModalImageEl(card);
+      if (img) imgHost.appendChild(img);
+    }
+
+    cardPrevBtn.disabled = isEmpty || cardIdx >= stack.length - 1;
+    cardNextBtn.disabled = isEmpty || cardIdx <= 0;
+    stackPrevBtn.disabled = globalPileIndex <= 0;
+    stackNextBtn.disabled = globalPileIndex >= MARKET_BOARD_PILE_COUNT - 1;
+
+    info.innerHTML = '';
+
+    if (isEmpty) {
+      const heading = document.createElement('h2');
+      heading.className = 'modal-card-name';
+      heading.textContent = 'Empty pile';
+      info.appendChild(heading);
+      const note = document.createElement('p');
+      note.className = 'modal-card-text';
+      const kindLabel = slot.kind === 'monster' ? 'Monster' : slot.kind === 'citizen' ? 'Citizen' : 'Domain';
+      note.textContent = `This ${kindLabel} slot has no cards.`;
+      info.appendChild(note);
+      return;
+    }
+
+    const top = topOfStack(stack);
+    const viewingTop = cardIdx === stack.length - 1;
+
+    if (viewingTop && isDomainStackFaceDown(top)) {
+      const heading = document.createElement('h2');
+      heading.className = 'modal-card-name';
+      heading.textContent = 'Face-down domain';
+      info.appendChild(heading);
+      const note = document.createElement('p');
+      note.className = 'modal-card-text';
+      note.textContent =
+        'The next domain in this pile stays face-down until the end of the turn of the player who built from here.';
+      info.appendChild(note);
+      return;
+    }
+
+    if (viewingTop && cardObscuredFromViewer(top)) {
+      fillCardModalInspectInfo(info, top);
+      return;
+    }
+
+    if (viewingTop) {
+      const heading = document.createElement('h2');
+      heading.className = 'modal-card-name';
+      heading.textContent = top.name || '?';
+      info.appendChild(heading);
+      appendMarketFaceUpInspectBody(info, top);
+      appendMarketActionUI(info, top, evaluateMarketCardContext(top, state));
+      return;
+    }
+
+    fillCardModalInspectInfo(info, card);
+  }
+
+  cardPrevBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    const stack = marketStackAtGlobalIndex(latestGameState, globalPileIndex);
+    if (cardIdx < stack.length - 1) {
+      cardIdx += 1;
+      renderAt();
+    }
+  });
+  cardNextBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (cardIdx > 0) {
+      cardIdx -= 1;
+      renderAt();
+    }
+  });
+  stackPrevBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (globalPileIndex <= 0) return;
+    globalPileIndex -= 1;
+    const st = marketStackAtGlobalIndex(latestGameState, globalPileIndex);
+    cardIdx = st.length ? st.length - 1 : 0;
+    renderAt();
+  });
+  stackNextBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (globalPileIndex >= MARKET_BOARD_PILE_COUNT - 1) return;
+    globalPileIndex += 1;
+    const st = marketStackAtGlobalIndex(latestGameState, globalPileIndex);
+    cardIdx = st.length ? st.length - 1 : 0;
+    renderAt();
+  });
+
+  const onStackKey = e => {
+    if (e.key === 'ArrowLeft') {
+      const stack = marketStackAtGlobalIndex(latestGameState, globalPileIndex);
+      if (cardIdx < stack.length - 1) {
+        cardIdx += 1;
+        renderAt();
+        e.preventDefault();
+      }
+    } else if (e.key === 'ArrowRight') {
+      if (cardIdx > 0) {
+        cardIdx -= 1;
+        renderAt();
+        e.preventDefault();
+      }
+    }
+  };
+  document.addEventListener('keydown', onStackKey);
+  overlay._stackArrowHandler = onStackKey;
+
+  renderAt();
+
+  overlay.appendChild(modal);
+  mountCardInspectOverlay(overlay, modal);
+  document.body.appendChild(overlay);
 }
 
 function evaluateMarketCardContext(card, state) {
@@ -2109,38 +2556,58 @@ function appendMarketActionUI(infoEl, card, ctx) {
   const buildDisabled = !(card.domain_id != null && ctx.canActThisCard);
   const slayDisabled = !(card.monster_id != null && ctx.canActThisCard);
 
+  const cardLabel = ((card && card.name) || 'Card').toString().trim() || 'Card';
+
   if (card.citizen_id != null) {
     attachPrimary(promptButton('Hire', () => {
       const p = readMarketPayRow(payWrap);
-      postGameAction({
-        player_id: PLAYER_ID,
-        action_type: 'hire_citizen',
-        citizen_id: Number(card.citizen_id),
-        payment: { gold: p.gold, strength: p.strength, magic: p.magic },
-      });
-      document.getElementById('card-modal-overlay')?.remove();
+      confirmAndPostGameAction(
+        {
+          player_id: PLAYER_ID,
+          action_type: 'hire_citizen',
+          citizen_id: Number(card.citizen_id),
+          payment: { gold: p.gold, strength: p.strength, magic: p.magic },
+        },
+        {
+          title: 'Hire citizen?',
+          message: `Hire ${cardLabel} using the gold and magic amounts set in this panel.`,
+        },
+        () => dismissCardInspectModal(),
+      );
     }), hireDisabled);
   } else if (card.domain_id != null) {
     attachPrimary(promptButton('Build', () => {
       const p = readMarketPayRow(payWrap);
-      postGameAction({
-        player_id: PLAYER_ID,
-        action_type: 'build_domain',
-        domain_id: Number(card.domain_id),
-        payment: { gold: p.gold, strength: p.strength, magic: p.magic },
-      });
-      document.getElementById('card-modal-overlay')?.remove();
+      confirmAndPostGameAction(
+        {
+          player_id: PLAYER_ID,
+          action_type: 'build_domain',
+          domain_id: Number(card.domain_id),
+          payment: { gold: p.gold, strength: p.strength, magic: p.magic },
+        },
+        {
+          title: 'Build domain?',
+          message: `Build ${cardLabel} using the gold and magic amounts set in this panel.`,
+        },
+        () => dismissCardInspectModal(),
+      );
     }), buildDisabled);
   } else if (card.monster_id != null) {
     attachPrimary(promptButton('Slay', () => {
       const p = readMarketPayRow(payWrap);
-      postGameAction({
-        player_id: PLAYER_ID,
-        action_type: 'slay_monster',
-        monster_id: Number(card.monster_id),
-        payment: { gold: p.gold, strength: p.strength, magic: p.magic },
-      });
-      document.getElementById('card-modal-overlay')?.remove();
+      confirmAndPostGameAction(
+        {
+          player_id: PLAYER_ID,
+          action_type: 'slay_monster',
+          monster_id: Number(card.monster_id),
+          payment: { gold: p.gold, strength: p.strength, magic: p.magic },
+        },
+        {
+          title: 'Slay monster?',
+          message: `Slay ${cardLabel} using the strength and magic amounts set in this panel.`,
+        },
+        () => dismissCardInspectModal(),
+      );
     }), slayDisabled);
   }
 
@@ -2154,6 +2621,45 @@ function appendMarketActionUI(infoEl, card, ctx) {
   if (help.textContent) panel.appendChild(help);
 
   infoEl.appendChild(panel);
+}
+
+/** Stats, roles, text, and detailed rules for a face-up market card (domain / citizen / monster). */
+function appendMarketFaceUpInspectBody(infoEl, card) {
+  appendCardModalStatRows(infoEl, card);
+
+  const rc = citizenRoleCounts(card);
+  const rp = [];
+  if (rc.sn > 0) rp.push(`Shadow +${rc.sn}`);
+  if (rc.hn > 0) rp.push(`Holy +${rc.hn}`);
+  if (rc.son > 0) rp.push(`Soldier +${rc.son}`);
+  if (rc.wn > 0) rp.push(`Worker +${rc.wn}`);
+  if (rp.length && (card.citizen_id != null || card.domain_id != null)) {
+    const row = mk('modal-stat-row');
+    const l = document.createElement('span');
+    l.className = 'modal-stat-label';
+    l.textContent = 'Roles';
+    const v = document.createElement('span');
+    v.className = 'modal-stat-value';
+    v.textContent = rp.join(' · ');
+    row.appendChild(l);
+    row.appendChild(v);
+    infoEl.appendChild(row);
+  }
+
+  if (card.text) {
+    const t = document.createElement('p');
+    t.className = 'modal-card-text';
+    t.textContent = card.text;
+    infoEl.appendChild(t);
+  }
+
+  const rules = cardDetailedRules(card);
+  if (rules && rules !== (card.text || '').toString().trim()) {
+    const t2 = document.createElement('p');
+    t2.className = 'modal-card-text market-rules-extra';
+    t2.textContent = rules;
+    infoEl.appendChild(t2);
+  }
 }
 
 function openMarketCardModal(card) {
@@ -2181,6 +2687,8 @@ function openMarketCardModal(card) {
   heading.className = 'modal-card-name';
   if (isDomainStackFaceDown(card)) {
     heading.textContent = 'Face-down domain';
+  } else if (cardObscuredFromViewer(card)) {
+    heading.textContent = 'Hidden card';
   } else {
     heading.textContent = card.name || '?';
   }
@@ -2192,52 +2700,19 @@ function openMarketCardModal(card) {
     note.textContent =
       'The next domain in this pile stays face-down until the end of the turn of the player who built from here.';
     info.appendChild(note);
+  } else if (cardObscuredFromViewer(card)) {
+    const note = document.createElement('p');
+    note.className = 'modal-card-text';
+    note.textContent = 'This card is not visible to you right now.';
+    info.appendChild(note);
   } else {
-    appendCardModalStatRows(info, card);
-
-    const rc = citizenRoleCounts(card);
-    const rp = [];
-    if (rc.sn > 0) rp.push(`Shadow +${rc.sn}`);
-    if (rc.hn > 0) rp.push(`Holy +${rc.hn}`);
-    if (rc.son > 0) rp.push(`Soldier +${rc.son}`);
-    if (rc.wn > 0) rp.push(`Worker +${rc.wn}`);
-    if (rp.length && (card.citizen_id != null || card.domain_id != null)) {
-      const row = mk('modal-stat-row');
-      const l = document.createElement('span');
-      l.className = 'modal-stat-label';
-      l.textContent = 'Roles';
-      const v = document.createElement('span');
-      v.className = 'modal-stat-value';
-      v.textContent = rp.join(' · ');
-      row.appendChild(l);
-      row.appendChild(v);
-      info.appendChild(row);
-    }
-
-    if (card.text) {
-      const t = document.createElement('p');
-      t.className = 'modal-card-text';
-      t.textContent = card.text;
-      info.appendChild(t);
-    }
-
-    const rules = cardDetailedRules(card);
-    if (rules && rules !== (card.text || '').toString().trim()) {
-      const t2 = document.createElement('p');
-      t2.className = 'modal-card-text market-rules-extra';
-      t2.textContent = rules;
-      info.appendChild(t2);
-    }
-
+    appendMarketFaceUpInspectBody(info, card);
     appendMarketActionUI(info, card, evaluateMarketCardContext(card, latestGameState));
   }
 
   modal.appendChild(info);
   overlay.appendChild(modal);
-  overlay.addEventListener('click', () => overlay.remove());
-  document.addEventListener('keydown', function esc(e) {
-    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
-  });
+  mountCardInspectOverlay(overlay, modal);
   document.body.appendChild(overlay);
 }
 
@@ -2247,13 +2722,155 @@ function isBoardMarketCard(card, cardEl) {
 }
 
 // ── Card click modal ──────────────────────────────────────────────────────
+function makeInspectModalImageEl(card) {
+  const url = cardImageUrl(card);
+  if (!url) return null;
+  const img = document.createElement('img');
+  img.className = 'card-modal-img';
+  img.src = url;
+  return img;
+}
+
+function fillCardModalInspectInfo(infoEl, card) {
+  infoEl.innerHTML = '';
+  const heading = document.createElement('h2');
+  heading.className = 'modal-card-name';
+  if (cardObscuredFromViewer(card)) {
+    heading.textContent = isDomainStackFaceDown(card) ? 'Face-down domain' : 'Hidden card';
+  } else {
+    heading.textContent = card.name || '?';
+  }
+  infoEl.appendChild(heading);
+
+  if (cardObscuredFromViewer(card)) {
+    const note = document.createElement('p');
+    note.className = 'modal-card-text';
+    note.textContent = isDomainStackFaceDown(card)
+      ? 'The next domain in this pile stays face-down until the end of the turn of the player who built from here.'
+      : 'This card is not visible to you right now.';
+    infoEl.appendChild(note);
+  } else {
+    appendCardModalStatRows(infoEl, card);
+    if (card.text) {
+      const t = document.createElement('p');
+      t.className = 'modal-card-text';
+      t.textContent = card.text;
+      infoEl.appendChild(t);
+    }
+  }
+}
+
+function openCardStackInspectModal(cards, startIndex) {
+  if (document.getElementById('game-prompt-overlay')) return;
+  if (document.getElementById('card-modal-overlay')) return;
+  const arr = Array.isArray(cards) ? cards.filter(Boolean) : [];
+  if (arr.length < 2) {
+    if (arr.length === 1) openCardModal(arr[0]);
+    return;
+  }
+
+  let idx = Number(startIndex);
+  if (!Number.isFinite(idx)) idx = arr.length - 1;
+  idx = Math.max(0, Math.min(arr.length - 1, idx));
+
+  const overlay = document.createElement('div');
+  overlay.id = 'card-modal-overlay';
+  overlay.className = 'card-modal-overlay';
+
+  const modal = mk('card-modal card-modal--stack');
+  modal.addEventListener('click', e => e.stopPropagation());
+
+  const layout = mk('card-modal-stack-layout');
+  const visual = mk('card-modal-stack-visual');
+
+  const prevBtn = document.createElement('button');
+  prevBtn.type = 'button';
+  prevBtn.className = 'card-modal-nav card-modal-nav--prev';
+  prevBtn.setAttribute('aria-label', 'Toward top of stack (newer card)');
+  prevBtn.textContent = '\u2039';
+
+  const imgHost = mk('card-modal-stack-img-host');
+
+  const nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.className = 'card-modal-nav card-modal-nav--next';
+  nextBtn.setAttribute('aria-label', 'Deeper in stack (older card)');
+  nextBtn.textContent = '\u203a';
+
+  const posEl = mk('card-modal-stack-pos');
+  posEl.setAttribute('aria-live', 'polite');
+
+  const info = mk('card-modal-info');
+
+  visual.appendChild(prevBtn);
+  visual.appendChild(imgHost);
+  visual.appendChild(nextBtn);
+  layout.appendChild(visual);
+  layout.appendChild(posEl);
+  modal.appendChild(layout);
+  modal.appendChild(info);
+
+  const renderAt = i => {
+    idx = i;
+    const c = arr[idx];
+    imgHost.innerHTML = '';
+    const img = makeInspectModalImageEl(c);
+    if (img) imgHost.appendChild(img);
+    fillCardModalInspectInfo(info, c);
+    posEl.textContent = `${idx + 1} / ${arr.length}`;
+    prevBtn.disabled = idx >= arr.length - 1;
+    nextBtn.disabled = idx <= 0;
+  };
+
+  prevBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (idx < arr.length - 1) renderAt(idx + 1);
+  });
+  nextBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (idx > 0) renderAt(idx - 1);
+  });
+
+  const onStackKey = e => {
+    if (e.key === 'ArrowLeft' && idx < arr.length - 1) {
+      e.preventDefault();
+      renderAt(idx + 1);
+    } else if (e.key === 'ArrowRight' && idx > 0) {
+      e.preventDefault();
+      renderAt(idx - 1);
+    }
+  };
+  document.addEventListener('keydown', onStackKey);
+  overlay._stackArrowHandler = onStackKey;
+
+  renderAt(idx);
+
+  overlay.appendChild(modal);
+  mountCardInspectOverlay(overlay, modal);
+  document.body.appendChild(overlay);
+}
+
 document.addEventListener('click', e => {
   const cardEl = e.target.closest('.card[data-card]');
   if (!cardEl) return;
-  _previewEl.style.display = 'none';
+
+  const stackHost = cardEl.closest('.tableau-card-stack[data-stack]');
+  if (stackHost && !cardEl.closest('.center-board')) {
+    let arr;
+    try {
+      arr = JSON.parse(stackHost.dataset.stack);
+    } catch (_) {
+      arr = null;
+    }
+    if (Array.isArray(arr) && arr.length > 1) {
+      openCardStackInspectModal(arr, arr.length - 1);
+      return;
+    }
+  }
+
   const card = JSON.parse(cardEl.dataset.card);
   if (isBoardMarketCard(card, cardEl)) {
-    openMarketCardModal(card);
+    openBoardMarketStackModal(card);
     return;
   }
   openCardModal(card);
@@ -2270,36 +2887,15 @@ function openCardModal(card) {
   const modal = mk('card-modal');
   modal.addEventListener('click', e => e.stopPropagation());
 
-  const url = cardImageUrl(card);
-  if (url) {
-    const img = document.createElement('img');
-    img.className = 'card-modal-img';
-    img.src = url;
-    modal.appendChild(img);
-  }
+  const img = makeInspectModalImageEl(card);
+  if (img) modal.appendChild(img);
 
   const info = mk('card-modal-info');
-
-  const heading = document.createElement('h2');
-  heading.className = 'modal-card-name';
-  heading.textContent = card.name || '?';
-  info.appendChild(heading);
-
-  appendCardModalStatRows(info, card);
-
-  if (card.text) {
-    const t = document.createElement('p');
-    t.className = 'modal-card-text';
-    t.textContent = card.text;
-    info.appendChild(t);
-  }
-
+  fillCardModalInspectInfo(info, card);
   modal.appendChild(info);
+
   overlay.appendChild(modal);
-  overlay.addEventListener('click', () => overlay.remove());
-  document.addEventListener('keydown', function esc(e) {
-    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
-  });
+  mountCardInspectOverlay(overlay, modal);
   document.body.appendChild(overlay);
 }
 
@@ -2414,6 +3010,90 @@ async function postGameAction(body) {
   return true;
 }
 
+let actionConfirmHandler = null;
+
+function closeActionConfirmModal() {
+  const backdrop = document.getElementById('action-confirm-modal');
+  if (!backdrop) return;
+  backdrop.classList.remove('is-open');
+  backdrop.setAttribute('aria-hidden', 'true');
+  actionConfirmHandler = null;
+  const ok = document.getElementById('action-confirm-ok');
+  const cancel = document.getElementById('action-confirm-cancel');
+  if (ok) ok.disabled = false;
+  if (cancel) cancel.disabled = false;
+}
+
+function openActionConfirmModal(opts) {
+  const backdrop = document.getElementById('action-confirm-modal');
+  const titleEl = document.getElementById('action-confirm-title');
+  const msgEl = document.getElementById('action-confirm-message');
+  const ok = document.getElementById('action-confirm-ok');
+  if (!backdrop || !titleEl || !msgEl || !ok) return;
+  if (backdrop.classList.contains('is-open')) return;
+  titleEl.textContent = (opts.title || 'Confirm').toString();
+  msgEl.textContent = (opts.message || '').toString();
+  ok.textContent = (opts.confirmLabel || 'Confirm').toString();
+  actionConfirmHandler = opts.onConfirm;
+  backdrop.classList.add('is-open');
+  backdrop.setAttribute('aria-hidden', 'false');
+  ok.focus();
+}
+
+function confirmAndPostGameAction(body, ui, afterSuccess) {
+  const title = ui && ui.title != null ? String(ui.title) : 'Confirm action';
+  const message = ui && ui.message != null ? String(ui.message) : '';
+  const confirmLabel = ui && ui.confirmLabel != null ? String(ui.confirmLabel) : 'Confirm';
+  openActionConfirmModal({
+    title,
+    message,
+    confirmLabel,
+    onConfirm: async () => {
+      const ok = await postGameAction(body);
+      if (ok && typeof afterSuccess === 'function') afterSuccess();
+    },
+  });
+}
+
+function initActionConfirmModal() {
+  const backdrop = document.getElementById('action-confirm-modal');
+  const ok = document.getElementById('action-confirm-ok');
+  const cancel = document.getElementById('action-confirm-cancel');
+  if (!backdrop || !ok || !cancel) return;
+
+  const runAndClose = async () => {
+    const fn = actionConfirmHandler;
+    if (!fn) return;
+    ok.disabled = true;
+    cancel.disabled = true;
+    closeActionConfirmModal();
+    try {
+      await fn();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  ok.addEventListener('click', () => {
+    void runAndClose();
+  });
+  cancel.addEventListener('click', () => closeActionConfirmModal());
+  backdrop.addEventListener('click', e => {
+    if (e.target === backdrop) closeActionConfirmModal();
+  });
+  document.addEventListener(
+    'keydown',
+    e => {
+      if (e.key !== 'Escape') return;
+      if (!backdrop.classList.contains('is-open')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeActionConfirmModal();
+    },
+    true,
+  );
+}
+
 function removePromptOverlay() {
   const el = document.getElementById('game-prompt-overlay');
   if (el && el._promptClickHandler) {
@@ -2431,11 +3111,64 @@ function removePromptOverlay() {
   el?.remove();
 }
 
+/** Dismisses the card image / market inspect overlay and clears its Escape listener. */
+function dismissCardInspectModal() {
+  const overlay = document.getElementById('card-modal-overlay');
+  if (overlay && overlay._stackArrowHandler) {
+    document.removeEventListener('keydown', overlay._stackArrowHandler);
+    overlay._stackArrowHandler = null;
+  }
+  if (!overlay) return;
+  if (overlay._cardModalEscHandler) {
+    document.removeEventListener('keydown', overlay._cardModalEscHandler);
+    overlay._cardModalEscHandler = null;
+  }
+  overlay.remove();
+}
+
+/** Shared close control for any panel using `.card-modal` (inspect, market, dismissible prompts). */
+function syncCardShellCloseButton(modal, visible, onClose) {
+  if (!modal) return;
+  const existing = modal.querySelector('.card-modal-close');
+  if (!visible) {
+    existing?.remove();
+    return;
+  }
+  if (!onClose) return;
+  let btn = existing;
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'card-modal-close';
+    btn.setAttribute('aria-label', 'Close');
+    btn.textContent = 'Close';
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const fn = btn._modalCloseFn;
+      if (fn) fn();
+    });
+    modal.appendChild(btn);
+  }
+  btn._modalCloseFn = onClose;
+}
+
+function mountCardInspectOverlay(overlay, modal) {
+  syncCardShellCloseButton(modal, true, dismissCardInspectModal);
+  const dismiss = () => dismissCardInspectModal();
+  overlay.addEventListener('click', dismiss);
+  const onKey = e => {
+    if (e.key === 'Escape') dismiss();
+  };
+  overlay._cardModalEscHandler = onKey;
+  document.addEventListener('keydown', onKey);
+}
+
 function openPromptOverlayShell(opts) {
   const { title, subtitle, dismissible, bodyEl, footerEl } = opts;
   const newTitle = (title || '').toString();
 
   function configureDismissBehavior(overlay) {
+    const modal = overlay.querySelector('.card-modal');
     // Clear prior handlers first.
     if (overlay._promptClickHandler) {
       overlay.removeEventListener('click', overlay._promptClickHandler);
@@ -2445,6 +3178,12 @@ function openPromptOverlayShell(opts) {
       document.removeEventListener('keydown', overlay._promptEscHandler);
       overlay._promptEscHandler = null;
     }
+
+    syncCardShellCloseButton(
+      modal,
+      !!dismissible,
+      dismissible ? () => removePromptOverlay() : null,
+    );
 
     if (!dismissible) return;
 
@@ -2924,12 +3663,18 @@ function renderConcurrentChooseDuke(state, concurrent) {
     }
     const row = mk('prompt-choice-card-actions');
     row.appendChild(promptButton('Keep this duke', () => {
-      postGameAction({
-        player_id: PLAYER_ID,
-        action_type: 'submit_concurrent_action',
-        kind: 'choose_duke',
-        response: String(id),
-      });
+      confirmAndPostGameAction(
+        {
+          player_id: PLAYER_ID,
+          action_type: 'submit_concurrent_action',
+          kind: 'choose_duke',
+          response: String(id),
+        },
+        {
+          title: 'Keep this Duke?',
+          message: `Keep ${name} (#${id}) and discard your other Duke card(s).`,
+        },
+      );
     }));
     main.appendChild(row);
     inner.appendChild(main);
@@ -3021,12 +3766,18 @@ function renderConcurrentFlipCitizen(state, concurrent) {
     }
     const row = mk('prompt-choice-card-actions');
     row.appendChild(promptButton('Flip this citizen face-down', () => {
-      postGameAction({
-        player_id: PLAYER_ID,
-        action_type: 'submit_concurrent_action',
-        kind: 'flip_one_citizen',
-        response: String(idx),
-      });
+      confirmAndPostGameAction(
+        {
+          player_id: PLAYER_ID,
+          action_type: 'submit_concurrent_action',
+          kind: 'flip_one_citizen',
+          response: String(idx),
+        },
+        {
+          title: 'Flip citizen?',
+          message: `Flip ${nm} (slot #${idx}) face-down.`,
+        },
+      );
     }));
     cardEl.appendChild(row);
     list.appendChild(cardEl);
@@ -3094,14 +3845,24 @@ function renderFinalizeRollPrompt(state) {
   body.appendChild(diceLine);
 
   const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
-  foot.appendChild(promptButton(`Keep ${rolled1} + ${rolled2}`, () => sendFinalizeRollChoice(rolled1, rolled2)));
+  foot.appendChild(promptButton(`Keep ${rolled1} + ${rolled2}`, () => {
+    openActionConfirmModal({
+      title: 'Finalize roll?',
+      message: `Keep dice as ${rolled1} + ${rolled2} (total ${rolled1 + rolled2}).`,
+      onConfirm: () => sendFinalizeRollChoice(rolled1, rolled2),
+    });
+  }));
   options.forEach(o => {
     const fromVal = o.die === 1 ? rolled1 : rolled2;
     const d1 = o.die === 1 ? o.target : rolled1;
     const d2 = o.die === 2 ? o.target : rolled2;
     foot.appendChild(promptButton(
       `Die ${o.die}: ${fromVal} → ${o.target} (${o.costGold}g · ${o.domainName})`,
-      () => sendFinalizeRollChoice(d1, d2),
+      () => openActionConfirmModal({
+        title: 'Finalize roll?',
+        message: `Change die ${o.die} from ${fromVal} to ${o.target} (${o.costGold} gold, ${o.domainName}). Resulting dice: ${d1} + ${d2}.`,
+        onConfirm: () => sendFinalizeRollChoice(d1, d2),
+      }),
     ));
   });
 
@@ -3146,16 +3907,29 @@ function renderDomainSelfConvertPrompt(state) {
   body.appendChild(sub);
 
   const foot = promptActionsRow([
-    promptButton('Confirm trade', () => postGameAction({
-      player_id: PLAYER_ID,
-      action_type: 'act_on_required_action',
-      action: 'confirm_self_convert',
-    })),
-    promptButton('Decline', () => postGameAction({
-      player_id: PLAYER_ID,
-      action_type: 'act_on_required_action',
-      action: 'skip',
-    }), true),
+    promptButton('Confirm trade', () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: 'confirm_self_convert',
+      },
+      {
+        title: 'Confirm trade?',
+        message: `Apply the optional trade for ${dn} as described above.`,
+      },
+    )),
+    promptButton('Decline', () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: 'skip',
+      },
+      {
+        title: 'Decline trade?',
+        message: 'Skip this optional trade and keep your resources as they are.',
+        confirmLabel: 'Decline',
+      },
+    ), true),
   ]);
 
   openPromptOverlayShell({
@@ -3204,16 +3978,29 @@ function renderHarvestOptionalExchangePrompt(state) {
   body.appendChild(sub);
 
   const foot = promptActionsRow([
-    promptButton('Take exchange', () => postGameAction({
-      player_id: PLAYER_ID,
-      action_type: 'act_on_required_action',
-      action: 'confirm_harvest_exchange',
-    })),
-    promptButton('Skip (keep resources)', () => postGameAction({
-      player_id: PLAYER_ID,
-      action_type: 'act_on_required_action',
-      action: 'skip_harvest_exchange',
-    }), true),
+    promptButton('Take exchange', () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: 'confirm_harvest_exchange',
+      },
+      {
+        title: 'Take exchange?',
+        message: explain,
+      },
+    )),
+    promptButton('Skip (keep resources)', () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: 'skip_harvest_exchange',
+      },
+      {
+        title: 'Skip exchange?',
+        message: 'Keep your resources and skip this optional harvest exchange.',
+        confirmLabel: 'Skip',
+      },
+    ), true),
   ]);
 
   openPromptOverlayShell({
@@ -3256,11 +4043,17 @@ function renderDomainChoosePlayer(state) {
   const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
   opts.forEach((o, idx) => {
     const nm = (o?.name || o?.player_id || '?').toString();
-    foot.appendChild(promptButton(nm, () => postGameAction({
-      player_id: PLAYER_ID,
-      action_type: 'act_on_required_action',
-      action: `choose_player ${idx + 1}`,
-    })));
+    foot.appendChild(promptButton(nm, () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: `choose_player ${idx + 1}`,
+      },
+      {
+        title: 'Choose player?',
+        message: `Target ${nm} for ${dn}.`,
+      },
+    )));
   });
 
   const kv = prc?.item?.kv || {};
@@ -3268,11 +4061,18 @@ function renderDomainChoosePlayer(state) {
     ? 'Decline (no pay, no VP)'
     : 'Skip (optional)';
   if (prc?.allow_skip) {
-    foot.appendChild(promptButton(skipLabel, () => postGameAction({
-      player_id: PLAYER_ID,
-      action_type: 'act_on_required_action',
-      action: 'skip',
-    }), true));
+    foot.appendChild(promptButton(skipLabel, () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: 'skip',
+      },
+      {
+        title: 'Skip?',
+        message: `${skipLabel} for ${dn}.`,
+        confirmLabel: 'Skip',
+      },
+    ), true));
   }
 
   openPromptOverlayShell({
@@ -3309,11 +4109,17 @@ function renderDomainChooseMonster(state) {
   const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
   opts.forEach((o, idx) => {
     const nm = (o?.name || '?').toString();
-    foot.appendChild(promptButton(nm, () => postGameAction({
-      player_id: PLAYER_ID,
-      action_type: 'act_on_required_action',
-      action: `choose_monster ${idx + 1}`,
-    })));
+    foot.appendChild(promptButton(nm, () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: `choose_monster ${idx + 1}`,
+      },
+      {
+        title: 'Choose monster?',
+        message: `Add +${delta} strength cost to ${nm} for ${dn}.`,
+      },
+    )));
   });
 
   openPromptOverlayShell({
@@ -3390,11 +4196,18 @@ function renderChoosePrompt(state, chooseCmd) {
 
   const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
   options.forEach((opt, idx) => {
-    foot.appendChild(promptButton(chooseOptionButtonLabel(opt, idx), () => postGameAction({
-      player_id: PLAYER_ID,
-      action_type: 'act_on_required_action',
-      action: `choose ${idx + 1}`,
-    })));
+    const optLabel = chooseOptionButtonLabel(opt, idx);
+    foot.appendChild(promptButton(optLabel, () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: `choose ${idx + 1}`,
+      },
+      {
+        title: 'Confirm choice?',
+        message: optLabel,
+      },
+    )));
   });
 
   openPromptOverlayShell({
@@ -3452,11 +4265,17 @@ function renderManualHarvestPrompt(state) {
     const copy = Number.isFinite(ci) ? ` · copy ${ci + 1}` : '';
     const label = `${s.name || ''} (${s.kind} #${s.card_id}${copy}${dup})`;
     const sk = (s.slot_key || '').toString();
-    foot.appendChild(promptButton(`Harvest: ${label}`, () => postGameAction({
-      player_id: PLAYER_ID,
-      action_type: 'harvest_card',
-      harvest_slot_key: sk,
-    })));
+    foot.appendChild(promptButton(`Harvest: ${label}`, () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'harvest_card',
+        harvest_slot_key: sk,
+      },
+      {
+        title: 'Harvest card?',
+        message: `Harvest ${label} next.`,
+      },
+    )));
   });
 
   openPromptOverlayShell({
@@ -3493,21 +4312,42 @@ function renderBonusResourcePrompt(state) {
   }
 
   const foot = promptActionsRow([
-    promptButton('+1 Gold', () => postGameAction({
-      player_id: PLAYER_ID,
-      action_type: 'act_on_required_action',
-      action: 'gold',
-    })),
-    promptButton('+1 Strength', () => postGameAction({
-      player_id: PLAYER_ID,
-      action_type: 'act_on_required_action',
-      action: 'strength',
-    })),
-    promptButton('+1 Magic', () => postGameAction({
-      player_id: PLAYER_ID,
-      action_type: 'act_on_required_action',
-      action: 'magic',
-    })),
+    promptButton('+1 Gold', () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: 'gold',
+      },
+      {
+        title: 'Harvest bonus',
+        message: 'Take +1 Gold from the bank.',
+        confirmLabel: 'Take gold',
+      },
+    )),
+    promptButton('+1 Strength', () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: 'strength',
+      },
+      {
+        title: 'Harvest bonus',
+        message: 'Take +1 Strength from the bank.',
+        confirmLabel: 'Take strength',
+      },
+    )),
+    promptButton('+1 Magic', () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: 'magic',
+      },
+      {
+        title: 'Harvest bonus',
+        message: 'Take +1 Magic from the bank.',
+        confirmLabel: 'Take magic',
+      },
+    )),
   ]);
 
   openPromptOverlayShell({
@@ -4064,18 +4904,9 @@ if (!GAME_ID || !PLAYER_ID) {
   connect();
   initOpponentTableauWheelScroll();
   initPlayerDetailModal();
-  let prevNarrowForLayout = isViewportNarrow();
-  const onViewportLayoutChange = () => {
-    const narrow = isViewportNarrow();
-    if (narrow !== prevNarrowForLayout && latestGameState) {
-      render(latestGameState);
-    }
-    prevNarrowForLayout = narrow;
+  initActionConfirmModal();
+  window.addEventListener('resize', () => {
     const zone = document.getElementById('zone-center');
     if (zone) syncBoardTabState(zone);
-  };
-  window.addEventListener('resize', onViewportLayoutChange);
-  const mmNarrow = window.matchMedia('(max-width: 800px)');
-  if (mmNarrow.addEventListener) mmNarrow.addEventListener('change', onViewportLayoutChange);
-  else if (mmNarrow.addListener) mmNarrow.addListener(onViewportLayoutChange);
+  });
 }

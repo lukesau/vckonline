@@ -34,10 +34,17 @@ html, body {
 /* ── Board shell (grid / flex by player count) ───────────────────────── */
 .board {
   position: relative;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  max-width: 100vw;
+  height: 100dvh;
   overflow: hidden;
   background: radial-gradient(ellipse at 50% 55%, var(--felt-light) 0%, var(--felt) 40%, var(--felt-dark) 100%);
+}
+
+/* Narrow bottom carousel: allow vertical growth of tableau (half-height cards + stacks). */
+.board:has(.tableau-carousel) {
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .game-layout {
@@ -81,8 +88,7 @@ html, body {
 }
 
 .gl-mid {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: row;
   align-items: stretch;
@@ -101,44 +107,37 @@ html, body {
   min-height: 0;
 }
 
-.board[data-layout="p3"] .gl-side-l,
-.board[data-layout="p3"] .gl-side-r,
-.board[data-layout="p4"] .gl-side-l,
-.board[data-layout="p4"] .gl-side-r,
-.board[data-layout="p5"] .gl-side-l,
-.board[data-layout="p5"] .gl-side-r {
-  display: flex;
-}
 
 .gl-center {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.gl-bottom {
-  flex: 0 0 auto;
-  padding: 6px 8px 8px;
-}
-
-/* Narrow viewport: hide seats around the board; swipe tableaus in bottom carousel */
-.board[data-narrow-layout="1"] .gl-top,
-.board[data-narrow-layout="1"] .gl-side-l,
-.board[data-narrow-layout="1"] .gl-side-r {
+.gl-top,
+.gl-side-l,
+.gl-side-r {
   display: none !important;
 }
 
-.board[data-narrow-layout="1"] .gl-bottom {
+.gl-resource-bar {
   flex: 0 0 auto;
-  height: min(38vh, 320px);
+}
+
+.gl-bottom {
+  flex: 1 1 auto;
   min-height: 160px;
   display: flex;
   flex-direction: column;
-  padding-left: max(8px, env(safe-area-inset-left, 0px));
-  padding-right: max(8px, env(safe-area-inset-right, 0px));
-  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  overflow: hidden;
+}
+
+/* Narrow bottom uses a horizontal player carousel; allow tableau cards to extend vertically
+   (half-strip sizing + future multi-row) instead of clipping inside overflow:hidden. */
+.gl-bottom:has(.tableau-carousel) {
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .tableau-carousel {
@@ -148,6 +147,10 @@ html, body {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  /* Horizontal inset lives here, not on the scroll viewport: padding on an overflow-x flex
+     scroller breaks % slide widths + scroll snap in WebKit (flush first slide, next slide peeks). */
+  padding-left: max(12px, env(safe-area-inset-left, 12px));
+  padding-right: max(12px, env(safe-area-inset-right, 12px));
 }
 
 .tableau-carousel-viewport {
@@ -158,8 +161,7 @@ html, body {
   min-height: 0;
   width: 100%;
   align-items: stretch;
-  /* Inset so .seat-my-active-turn box-shadow (5px) isn’t clipped by overflow-y */
-  padding: 8px 12px;
+  padding: 8px 0;
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-y: none;
@@ -168,7 +170,9 @@ html, body {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   cursor: grab;
+  /* Horizontal swipe scrolls between players; touches on tableau are handled separately. */
   touch-action: pan-x;
+  overflow-y: visible;
 }
 
 .tableau-carousel-viewport.is-pointer-dragging {
@@ -185,31 +189,100 @@ html, body {
   border-radius: 3px;
 }
 
+.carousel-nav-dots {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 max(8px, env(safe-area-inset-right, 8px)) 0 max(8px, env(safe-area-inset-left, 8px));
+}
+
+.carousel-nav-dot {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.5);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.carousel-nav-dot:hover {
+  background: rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.8);
+}
+
+.carousel-nav-dot.is-active {
+  background: rgba(255,255,255,0.18);
+  border-color: rgba(255,255,255,0.6);
+  color: #fff;
+}
+
+.resource-action-bar {
+  display: flex;
+  flex: 0 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.resource-action-bar .prompt-btn {
+  flex: 0 0 33.333%;
+  width: 33.333vw;
+  border-radius: 0;
+  border-right-width: 0;
+  padding: 10px 0;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+  justify-content: center;
+}
+
+.resource-action-bar .prompt-btn:first-child { border-radius: 0; }
+.resource-action-bar .prompt-btn:last-child  { border-right-width: 1px; border-radius: 0; }
+
+.resource-action-bar--inactive .prompt-btn {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .tableau-carousel-slide {
   flex: 0 0 100%;
   width: 100%;
   min-width: 0;
-  height: 100%;
-  max-height: 100%;
+  align-self: stretch;
   box-sizing: border-box;
   padding: 0 10px;
   scroll-snap-align: start;
   scroll-snap-stop: always;
   overflow-x: hidden;
   overflow-y: hidden;
-  touch-action: pan-x;
+  touch-action: auto;
   overscroll-behavior-y: none;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
+/* Carousel slides: do not clip vertically so tableau content (card height + stacks) can grow. */
+.tableau-carousel-slide:has(.seat-carousel) {
+  overflow-y: visible;
+}
+
 .tableau-carousel-slide .seat {
   width: 100%;
   min-width: 0;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -223,14 +296,19 @@ html, body {
   min-height: 0;
 }
 
-/* Narrow carousel: if it's my active turn, ring the whole carousel (inset so it can't clip). */
-.tableau-carousel.is-my-active-turn {
-  box-shadow: inset 0 0 0 5px #53d337;
-  border-radius: 10px;
+/* Carousel tableau strip height comes from flex; cards scale to that height. */
+.tableau-carousel-slide .seat-carousel .tableau-cards {
+  min-height: 0;
 }
 
-.tableau-carousel.is-my-active-turn .seat.seat-carousel.seat-my-active-turn {
-  box-shadow: none;
+/* Narrow carousel: if it's my active turn, ring the whole carousel (inset so it can't clip). */
+.board.is-my-active-turn::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  border: 3px solid #53d337;
+  pointer-events: none;
+  z-index: 9999;
 }
 
 /* ── Seats ──────────────────────────────────────────────────────────── */
@@ -253,6 +331,12 @@ html, body {
   opacity: 0.45;
   min-height: 40px;
   min-width: 80px;
+}
+
+/* Carousel seat: allow tableau to extend vertically past the rounded shell (narrow layout). */
+.seat.seat-carousel {
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .seat-ghost-label {
@@ -289,13 +373,26 @@ html, body {
 /* ── Player header bar ──────────────────────────────────────────────── */
 .player-header {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 3px;
   padding: 4px 6px;
   background: rgba(0,0,0,0.3);
   border-radius: 5px;
   flex-shrink: 0;
+}
+
+.player-header-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.player-header-res-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
 }
 
 .player-name {
@@ -345,11 +442,6 @@ html, body {
 .score-pill.magic    { color: var(--mag); }
 .score-pill.victory  { color: var(--vp); }
 
-/* ── Your turn: static ring around your whole zone (header + cards) ───── */
-.seat.seat-me.seat-my-active-turn,
-.seat.seat-carousel.seat-my-active-turn {
-  box-shadow: 0 0 0 5px #53d337;
-}
 
 /* Idle countdown on whoever’s turn it is (all seats); ring above is viewer-only */
 .tableau-inactive-timer {
@@ -376,14 +468,12 @@ html, body {
   align-items: flex-start;
 }
 
-.seat-me .tableau-cards,
-.seat-carousel .tableau-cards {
+.seat-me .tableau-cards {
   justify-content: safe center;
 }
 
 @supports not (justify-content: safe center) {
-  .seat-me .tableau-cards,
-  .seat-carousel .tableau-cards {
+  .seat-me .tableau-cards {
     justify-content: center;
   }
 }
@@ -401,6 +491,11 @@ html, body {
   flex-shrink: 0;
 }
 .card-group:last-child { border-right: none; }
+
+/* Wrap stacks so carousel can use a 2-row grid per section; other layouts use flat flex. */
+.card-group-stacks {
+  display: contents;
+}
 
 .card-group-label {
   writing-mode: vertical-rl;
@@ -489,7 +584,6 @@ html, body {
   user-select: none;
   overflow: hidden;
 }
-.card:hover { filter: brightness(1.2); }
 
 /* Card with image — image fills card, overlay sits at bottom */
 .card.card-has-image { padding: 0; }
@@ -541,51 +635,140 @@ html, body {
 .seat-me .card { width: 108px; min-height: 118px; height: 158px; }
 .seat-me .card:not(.card-has-image) { height: auto; min-height: 118px; }
 
-/*
- * Narrow carousel: tableau height is fixed by layout — cards fill that height so nothing
- * spills vertically (no inner scroll). Image cards keep ~108:158 proportion from height.
- */
+/* Carousel tableau: horizontal scroll of sections; height defines card row (50% = one future row). */
 .seat-carousel .tableau-cards {
+  container-name: carousel-tableau;
+  container-type: size;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: stretch;
-  height: 100%;
-  padding-bottom: 0;
+  justify-content: flex-start;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+  /* JS sets pan-x when the strip can scroll horizontally; otherwise none so swipes do not move the carousel. */
+  touch-action: none;
+  overscroll-behavior-x: contain;
 }
 
 .seat-carousel .card-group {
+  display: grid;
+  grid-template-columns: auto max-content;
+  grid-template-rows: minmax(0, auto);
   align-items: stretch;
+  align-self: stretch;
+  flex-shrink: 0;
+  min-width: 0;
   min-height: 0;
-  height: 100%;
+  overflow: visible;
+  padding-right: 6px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  column-gap: 6px;
 }
 
-/* Stack wrapper is the flex item in each row — stretch it so inner cards get a real height */
-.seat-carousel .grid-stack {
+.seat-carousel .card-group-label {
+  grid-column: 1;
+  grid-row: 1;
   align-self: stretch;
+  justify-self: start;
+  margin-right: 0;
+}
+
+/* Two rows (50cqh each); fill columns top→bottom, then new column → width grows every 2 stacks. */
+.seat-carousel .card-group-stacks {
+  display: grid;
+  grid-column: 2;
+  grid-row: 1;
+  grid-template-rows: repeat(2, minmax(0, clamp(40px, 50cqh, 200px)));
+  grid-template-rows: repeat(2, minmax(0, 50cqh));
+  grid-auto-flow: column dense;
+  grid-auto-columns: max-content;
+  gap: 4px;
+  max-height: clamp(88px, 100cqh, 900px);
+  max-height: 100cqh;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: auto;
+  align-content: start;
+  justify-items: center;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+}
+
+.seat-carousel .card-group-stacks > .grid-stack:not(.tableau-card-stack) {
+  position: relative;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  flex-shrink: 0;
-  height: 100%;
-}
-
-.seat-carousel .grid-stack > .card {
-  flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
-}
-
-.seat-carousel .card {
-  width: auto;
-  min-height: 0;
-  height: 100%;
   align-self: stretch;
-  aspect-ratio: 108 / 158;
+  min-height: 0;
+  max-height: clamp(40px, 50cqh, 200px);
+  max-height: 50cqh;
+  min-width: 0;
+  width: auto;
+  overflow: hidden;
 }
 
-.seat-carousel .card:not(.card-has-image) {
-  aspect-ratio: auto;
-  width: clamp(64px, 18vw, 96px);
-  height: 100%;
+.seat-carousel .card-group-stacks > .grid-stack.tableau-card-stack {
+  grid-row: span 2;
+  align-self: stretch;
+  min-height: 0;
+  max-height: clamp(88px, 100cqh, 900px);
+  max-height: 100cqh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* One “row” target height = half the tableau strip (50cqh); second row can be added later at same size. */
+.seat-carousel .grid-stack .card.card-has-image {
+  flex-direction: column;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: clamp(56px, 22vmin, 160px);
+  height: 50cqh;
+  min-height: 52px;
+  width: auto;
+  aspect-ratio: 108 / 158;
+  padding: 0;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.seat-carousel .grid-stack .card:not(.card-has-image) {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: clamp(56px, 22vmin, 160px);
+  max-height: 50cqh;
+  width: auto;
+  min-width: clamp(56px, 22vw, 108px);
+  max-width: 100%;
+  height: auto;
+  flex-shrink: 0;
+  align-self: center;
   justify-content: center;
+}
+
+.seat-carousel .tableau-stack-top > .card.card-has-image {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: clamp(56px, 22vmin, 160px);
+  height: 50cqh;
+  min-height: 52px;
+  width: auto;
+  aspect-ratio: 108 / 158;
+  align-self: center;
+}
+
+.seat-carousel .grid-stack.tableau-card-stack {
+  height: auto;
+  min-height: 0;
 }
 
 .seat-carousel .card.card-has-image .card-overlay {
@@ -595,7 +778,8 @@ html, body {
 .seat-carousel .card.card-has-image .card-name,
 .seat-carousel .card.card-has-image .card-sub,
 .seat-carousel .card.card-has-image .card-extra {
-  font-size: clamp(10px, 3.2vw, 14px);
+  font-size: clamp(9px, 2.2vmin, 15px);
+  font-size: clamp(9px, 10cqh, 15px);
 }
 
 /* Opponent compact text chips */
@@ -666,11 +850,10 @@ html, body {
 /* ── Center board ───────────────────────────────────────────────────── */
 .center-board {
   position: relative;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   z-index: 10;
   width: 100%;
   max-width: 100%;
-  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -690,28 +873,33 @@ html, body {
 }
 
 .center-board-body {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
   width: 100%;
   max-width: 100%;
 }
 
-.center-board-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  width: 100%;
-  max-width: 100%;
+.center-board-viewport {
+  display: flex;
+  flex-direction: row;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  flex: 0 0 auto;
 }
 
-.center-board-scroll::-webkit-scrollbar { width: 6px; }
-.center-board-scroll::-webkit-scrollbar-track { background: transparent; }
-.center-board-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 3px; }
+.center-board-viewport::-webkit-scrollbar { display: none; }
+
+.center-board-slide {
+  flex: 0 0 100%;
+  width: 100%;
+  scroll-snap-align: start;
+  box-sizing: border-box;
+}
 
 /* ── Grid stacks (center board only — tableaus use own card sizes) ─── */
 .grid-stack {
@@ -738,6 +926,42 @@ html, body {
   padding: 2px 5px;
   border-radius: 3px;
   pointer-events: none;
+}
+
+/* Ordered tableau stacks (e.g. slain monsters — newest on top, slivers beneath) */
+.grid-stack.tableau-card-stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 0;
+}
+.tableau-stack-foundation {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 3px 1px;
+  pointer-events: none;
+}
+.tableau-stack-sliver {
+  height: 5px;
+  border-radius: 3px;
+  border: 1px dashed rgba(255, 255, 255, 0.28);
+  box-sizing: border-box;
+  margin: 0 6px;
+  opacity: 0.92;
+}
+.tableau-stack-top {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 2;
+}
+.tableau-stack-top > .card {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .center-board .card-slot-empty {
@@ -842,67 +1066,51 @@ html, body {
 /* ── Info bar ───────────────────────────────────────────────────────── */
 .info-bar {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   padding: 6px 10px;
   background: rgba(0,0,0,0.35);
   border-bottom: 1px solid rgba(255,255,255,0.07);
   flex-shrink: 0;
-  flex-wrap: wrap;
   width: 100%;
   box-sizing: border-box;
-}
-
-.info-bar-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
 }
 
 .info-bar-dice-row {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  flex: 0 0 auto;
-}
-
-/* Tabbed (narrow) layout: one block per row, no wrap overflow */
-.info-bar--stacked {
-  flex-direction: column;
-  align-items: stretch;
-  flex-wrap: nowrap;
-  gap: 8px;
-}
-
-.info-bar--stacked .info-bar-meta {
+  gap: 10px;
   width: 100%;
+  min-width: 0;
 }
 
-.info-bar--stacked .info-bar-take-resource {
-  width: 100%;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-  padding: 0;
+.info-bar-turn-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.88);
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.info-bar--stacked .info-bar-take-label {
-  width: 100%;
+.info-bar-dice-btn {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  cursor: pointer;
+  gap: 0;
 }
 
-.info-bar--stacked .info-bar-take-buttons {
-  width: 100%;
-  justify-content: flex-start;
-}
-
-.info-bar--stacked .info-bar-dice-row {
-  margin-left: 0;
-  width: 100%;
-  justify-content: flex-start;
+.info-bar-dice-btn:hover .die {
+  box-shadow: 0 2px 8px rgba(255,255,255,0.18);
 }
 
 .phase-label {
@@ -940,23 +1148,6 @@ html, body {
   color: var(--gold);
 }
 
-.info-bar-take-resource {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 2px 0;
-}
-
-.info-bar-take-label {
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: rgba(255,255,255,0.72);
-  white-space: nowrap;
-}
-
 .info-bar-take-buttons {
   display: flex;
   align-items: center;
@@ -967,6 +1158,51 @@ html, body {
 .info-bar-take-buttons .prompt-btn {
   padding: 5px 10px;
   font-size: 16px;
+}
+
+/* ── Dice info modal ────────────────────────────────────────────────── */
+.dice-info-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 350;
+}
+
+.dice-info-modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: #1a1a2a;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  padding: 28px 32px;
+  min-width: 200px;
+  max-width: calc(100vw - 40px);
+  box-shadow: 0 16px 64px rgba(0,0,0,0.8);
+}
+
+.dice-info-modal .info-bar-lobby-btn,
+.dice-info-modal .info-bar-rulebook-btn {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.dice-info-modal .game-log {
+  margin: 4px 0 0;
+  max-height: min(200px, 40vh);
+  width: 100%;
+}
+
+.dice-info-modal .turn-label {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Game log (scrolls internally when many entries) ───────────────── */
@@ -1007,31 +1243,32 @@ html, body {
 
 /* ── Board section tabs (viewport width ≤ 800px) ────────────────────── */
 .board-tabs-bar {
-  display: none;
+  display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 8px 4px;
+  flex-wrap: nowrap;
+  gap: 4px;
+  padding: 4px 6px 3px;
   border-bottom: 1px solid rgba(255,255,255,0.08);
   background: rgba(0,0,0,0.25);
   flex-shrink: 0;
 }
 
-.center-board.board-use-tabs .board-tabs-bar {
-  display: flex;
-}
-
 .board-tab {
+  flex: 1 1 0;
+  min-width: 0;
   cursor: pointer;
   border: 1px solid rgba(255,255,255,0.14);
   background: rgba(0,0,0,0.35);
   color: var(--muted);
-  font-size: 14px;
+  font-size: clamp(10px, 2.8vw, 13px);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
-  padding: 6px 12px;
+  padding: 5px 4px;
   border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .board-tab:hover {
@@ -1045,13 +1282,6 @@ html, body {
   background: rgba(240, 192, 64, 0.08);
 }
 
-.center-board.board-use-tabs .center-board-scroll > .center-section {
-  display: none;
-}
-
-.center-board.board-use-tabs .center-board-scroll > .center-section.board-tab-visible {
-  display: flex;
-}
 
 /* ── Player detail modal (tableau drill-down) ───────────────────────── */
 .player-detail-backdrop {
@@ -1119,6 +1349,55 @@ html, body {
   font-size: 15px;
   color: var(--text);
   line-height: 1.45;
+}
+
+/* ── In-game action confirmation (above card inspect / player detail) ─ */
+.action-confirm-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 450;
+  background: rgba(0, 0, 0, 0.82);
+  align-items: center;
+  justify-content: center;
+  padding: 20px 16px;
+  backdrop-filter: blur(5px) saturate(1.05);
+}
+
+.action-confirm-backdrop.is-open {
+  display: flex;
+}
+
+.action-confirm-panel {
+  width: min(440px, 100%);
+  padding: 20px 20px 18px;
+  background: #151d18;
+  border: 1px solid rgba(240, 192, 64, 0.32);
+  border-radius: 12px;
+  box-shadow: 0 20px 64px rgba(0, 0, 0, 0.75);
+}
+
+.action-confirm-title {
+  margin: 0 0 10px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1.25;
+}
+
+.action-confirm-message {
+  margin: 0 0 20px;
+  font-size: 15px;
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 1.5em;
+}
+
+.action-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .player-detail-kv {
@@ -1386,7 +1665,7 @@ html, body {
 /* ── Connection status ──────────────────────────────────────────────── */
 .conn-status {
   position: fixed;
-  bottom: 8px; right: 10px;
+  top: 8px; right: 10px;
   font-size: 16px;
   color: var(--muted);
   pointer-events: none;
@@ -1737,17 +2016,6 @@ html, body {
   }
 }
 
-/* ── Card hover preview ─────────────────────────────────────────────── */
-.card-preview {
-  display: none;
-  position: fixed;
-  z-index: 200;
-  pointer-events: none;
-  border-radius: 6px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.7);
-  /* show at native resolution — no width/height override */
-}
-
 /* ── Card click modal ───────────────────────────────────────────────── */
 .card-modal-overlay {
   position: fixed;
@@ -1759,19 +2027,32 @@ html, body {
   z-index: 300;
 }
 
+/* Stack inspect: column flex + top alignment so the panel fills the viewport; image stays pinned while details scroll */
+.card-modal-overlay:has(.card-modal--stack) {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: max(8px, env(safe-area-inset-top, 0px));
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+  box-sizing: border-box;
+}
+
 .card-modal {
+  position: relative;
   display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
+  flex-direction: column;
+  flex-wrap: nowrap;
   gap: 28px;
-  align-items: flex-start;
-  justify-content: center;
+  align-items: stretch;
   background: #1a1a2a;
   border: 1px solid rgba(255,255,255,0.12);
   border-radius: 12px;
   padding: 28px;
   box-sizing: border-box;
-  width: max-content;
+  /* Width from viewport only — content grows vertically, not horizontally */
+  width: min(640px, calc(100vw - 24px));
   max-width: calc(100vw - 24px);
   max-height: 90vh;
   overflow-x: hidden;
@@ -1779,14 +2060,190 @@ html, body {
   box-shadow: 0 16px 64px rgba(0,0,0,0.8);
 }
 
+.card-modal-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(0,0,0,0.45);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+}
+
+.card-modal-close:hover {
+  border-color: rgba(255,255,255,0.28);
+}
+
+.card-modal-info .modal-card-name {
+  padding-right: 76px;
+}
+
+.card-modal--stack {
+  gap: 16px;
+  /* Grow to all space under safe-area padding — height is not driven by sparse vs rich card copy */
+  flex: 1 1 auto;
+  min-height: 0;
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  max-width: min(640px, 100%);
+  max-height: none;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.card-modal--stack .card-modal-info {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.card-modal--stack .card-modal-stack-layout {
+  flex: 0 0 auto;
+  min-width: 0;
+  width: 100%;
+  justify-content: center;
+}
+
+.card-modal--stack .card-modal-stack-visual {
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.card-modal--stack .card-modal-stack-img-host {
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-modal--stack.card-modal--board-stack .card-modal-board-stack-main {
+  flex: 0 0 auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.card-modal--stack.card-modal--board-stack .card-modal-board-stack-center {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: center;
+}
+
+/* Center board market: ‹ › in-pile, « » cycles all 20 piles (monsters → citizens → domains) */
+.card-modal-board-stack-main {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 10px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.card-modal-board-stack-nav {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+  min-width: 44px;
+}
+.card-modal-board-stack-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.card-modal-board-stack-nav .card-modal-nav--stack-prev,
+.card-modal-board-stack-nav .card-modal-nav--stack-next {
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+
+.card-modal-stack-layout {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.card-modal-stack-visual {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.card-modal-stack-img-host {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+.card-modal-stack-img-host .card-modal-img {
+  max-height: min(52vh, 420px);
+  max-width: 100%;
+}
+.card-modal-nav {
+  flex-shrink: 0;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font-size: 26px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+.card-modal-nav:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+.card-modal-nav:not(:disabled):hover {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+.card-modal-stack-pos {
+  font-size: 14px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.card-modal--stack .card-modal-info .modal-card-name {
+  padding-right: 76px;
+}
+
+.card-modal--prompt .prompt-modal-head {
+  padding-right: 84px;
+}
+
 .card-modal-img {
   display: block;
   width: auto;
   height: auto;
-  max-height: 75vh;
-  max-width: min(560px, calc(100vw - 120px));
+  max-height: min(52vh, 440px);
+  max-width: 100%;
   border-radius: 6px;
   flex-shrink: 1;
+  align-self: center;
   object-fit: contain;
   box-shadow: 0 4px 16px rgba(0,0,0,0.6);
 }
@@ -1795,9 +2252,10 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  flex: 1 1 260px;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: min(520px, calc(100vw - 48px));
+  width: 100%;
+  max-width: none;
 }
 
 .modal-card-name {
@@ -1854,14 +2312,11 @@ html, body {
   word-break: break-word;
 }
 
-.card-modal--market {
-  max-width: calc(100vw - 24px);
-}
-
 .card-modal--market .card-modal-info {
-  flex: 1 1 320px;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: min(600px, calc(100vw - 48px));
+  max-width: none;
+  width: 100%;
 }
 
 .market-rules-extra {
@@ -2030,9 +2485,9 @@ html, body {
   flex-wrap: nowrap;
   align-items: stretch;
   gap: 18px;
-  width: auto;
-  min-width: min(92vw, 360px);
-  max-width: min(calc(100vw - 24px), 720px);
+  width: min(640px, calc(100vw - 24px));
+  min-width: 0;
+  max-width: calc(100vw - 24px);
 }
 
 .prompt-modal-head {

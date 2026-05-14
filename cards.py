@@ -334,6 +334,7 @@ class Duke(Card):
         self.beast_multiplier = beast_mult
         self.titan_multiplier = titan_mult
         self.expansion = expansion
+        self.toggle_visibility(True)
 
     def to_dict(self):
         return {
