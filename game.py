@@ -2945,6 +2945,9 @@ class Game:
         scores = []
         for player in self.player_list:
             duke_vp = 0
+            duke_summary = None
+            duke_vp_breakdown = []
+
             if player.owned_dukes:
                 duke = player.owned_dukes[0]
                 roles = player.calc_roles()
@@ -2957,22 +2960,87 @@ class Game:
                 def _cnt(count, multiplier):
                     return int(count) * int(multiplier or 0)
 
+                def _line(label, vp, detail):
+                    v = int(vp)
+                    if v:
+                        duke_vp_breakdown.append({"label": label, "vp": v, "detail": detail})
+
+                gsc = int(player.gold_score)
+                gdiv = int(duke.gold_multiplier or 0)
+                gvp = _res(player.gold_score, duke.gold_multiplier)
+                _line("Gold", gvp, f"{gsc} gold ÷ {gdiv}" if gdiv > 0 else None)
+
+                ssc = int(player.strength_score)
+                sdiv = int(duke.strength_multiplier or 0)
+                svp = _res(player.strength_score, duke.strength_multiplier)
+                _line("Strength", svp, f"{ssc} strength ÷ {sdiv}" if sdiv > 0 else None)
+
+                msc = int(player.magic_score)
+                mdiv = int(duke.magic_multiplier or 0)
+                mvp = _res(player.magic_score, duke.magic_multiplier)
+                _line("Magic", mvp, f"{msc} magic ÷ {mdiv}" if mdiv > 0 else None)
+
+                shc = int(roles["shadow_count"])
+                shm = int(duke.shadow_multiplier or 0)
+                shvp = _cnt(shc, duke.shadow_multiplier)
+                _line("Shadow role", shvp, f"{shc} × {shm}" if shm else None)
+
+                hoc = int(roles["holy_count"])
+                hom = int(duke.holy_multiplier or 0)
+                hovp = _cnt(hoc, duke.holy_multiplier)
+                _line("Holy role", hovp, f"{hoc} × {hom}" if hom else None)
+
+                soc = int(roles["soldier_count"])
+                som = int(duke.soldier_multiplier or 0)
+                sovp = _cnt(soc, duke.soldier_multiplier)
+                _line("Soldier role", sovp, f"{soc} × {som}" if som else None)
+
+                woc = int(roles["worker_count"])
+                wom = int(duke.worker_multiplier or 0)
+                wovp = _cnt(woc, duke.worker_multiplier)
+                _line("Worker role", wovp, f"{woc} × {wom}" if wom else None)
+
+                nmon = len(player.owned_monsters)
+                mm = int(duke.monster_multiplier or 0)
+                mmonvp = _cnt(nmon, duke.monster_multiplier)
+                _line("Monsters", mmonvp, f"{nmon} × {mm}" if mm else None)
+
+                ncit = len(player.owned_citizens)
+                cm = int(duke.citizen_multiplier or 0)
+                citvp = _cnt(ncit, duke.citizen_multiplier)
+                _line("Citizens", citvp, f"{ncit} × {cm}" if cm else None)
+
+                ndom = len(player.owned_domains)
+                dm = int(duke.domain_multiplier or 0)
+                domvp = _cnt(ndom, duke.domain_multiplier)
+                _line("Domains", domvp, f"{ndom} × {dm}" if dm else None)
+
+                nb = int(monster_attrs.get("Boss", 0))
+                bm = int(duke.boss_multiplier or 0)
+                bvp = _cnt(nb, duke.boss_multiplier)
+                _line("Boss monsters", bvp, f"{nb} × {bm}" if bm else None)
+
+                nmin = int(monster_attrs.get("Minion", 0))
+                minm = int(duke.minion_multiplier or 0)
+                minvp = _cnt(nmin, duke.minion_multiplier)
+                _line("Minion monsters", minvp, f"{nmin} × {minm}" if minm else None)
+
+                nbe = int(monster_attrs.get("Beast", 0))
+                bem = int(duke.beast_multiplier or 0)
+                bevp = _cnt(nbe, duke.beast_multiplier)
+                _line("Beast monsters", bevp, f"{nbe} × {bem}" if bem else None)
+
+                nti = int(monster_attrs.get("Titan", 0))
+                tim = int(duke.titan_multiplier or 0)
+                tivp = _cnt(nti, duke.titan_multiplier)
+                _line("Titan monsters", tivp, f"{nti} × {tim}" if tim else None)
+
                 duke_vp = (
-                    _res(player.gold_score, duke.gold_multiplier)
-                    + _res(player.strength_score, duke.strength_multiplier)
-                    + _res(player.magic_score, duke.magic_multiplier)
-                    + _cnt(roles["shadow_count"], duke.shadow_multiplier)
-                    + _cnt(roles["holy_count"], duke.holy_multiplier)
-                    + _cnt(roles["soldier_count"], duke.soldier_multiplier)
-                    + _cnt(roles["worker_count"], duke.worker_multiplier)
-                    + _cnt(len(player.owned_monsters), duke.monster_multiplier)
-                    + _cnt(len(player.owned_citizens), duke.citizen_multiplier)
-                    + _cnt(len(player.owned_domains), duke.domain_multiplier)
-                    + _cnt(monster_attrs.get("Boss", 0), duke.boss_multiplier)
-                    + _cnt(monster_attrs.get("Minion", 0), duke.minion_multiplier)
-                    + _cnt(monster_attrs.get("Beast", 0), duke.beast_multiplier)
-                    + _cnt(monster_attrs.get("Titan", 0), duke.titan_multiplier)
+                    gvp + svp + mvp + shvp + hovp + sovp + wovp
+                    + mmonvp + citvp + domvp + bvp + minvp + bevp + tivp
                 )
+                duke_summary = {"duke_id": duke.duke_id, "name": duke.name or "Duke"}
+
             total_vp = int(player.victory_score) + duke_vp
             tableau_size = (
                 len(player.owned_starters)
@@ -2986,6 +3054,8 @@ class Game:
                 "name": player.name,
                 "base_vp": int(player.victory_score),
                 "duke_vp": duke_vp,
+                "duke": duke_summary,
+                "duke_vp_breakdown": duke_vp_breakdown,
                 "total_vp": total_vp,
                 "tableau_size": tableau_size,
             })

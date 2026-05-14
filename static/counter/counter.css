@@ -53,6 +53,34 @@
   color: var(--text);
 }
 
+.counter-toolbar {
+  width: 100%;
+  margin-top: 14px;
+}
+
+.counter-reset-btn {
+  display: block;
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.38);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.counter-reset-btn:active {
+  background: rgba(0, 0, 0, 0.52);
+}
+
+.counter-reset-btn:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
 .counter-rows {
   display: flex;
   flex-direction: column;
@@ -60,7 +88,7 @@
 }
 
 .counter-hint {
-  margin-top: 16px;
+  margin-top: 12px;
   font-size: 0.88rem;
   color: var(--muted);
   line-height: 1.45;

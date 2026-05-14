@@ -157,6 +157,7 @@ html, body {
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
+  align-items: stretch;
   /* Inset so .seat-my-active-turn box-shadow (5px) isn’t clipped by overflow-y */
   padding: 8px 12px;
   overflow-x: auto;
@@ -188,6 +189,7 @@ html, body {
   flex: 0 0 100%;
   width: 100%;
   min-width: 0;
+  height: 100%;
   max-height: 100%;
   box-sizing: border-box;
   padding: 0 10px;
@@ -207,6 +209,7 @@ html, body {
   min-width: 0;
   flex: 1;
   min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -218,6 +221,16 @@ html, body {
 
 .tableau-carousel-slide .tableau-cards {
   min-height: 0;
+}
+
+/* Narrow carousel: if it's my active turn, ring the whole carousel (inset so it can't clip). */
+.tableau-carousel.is-my-active-turn {
+  box-shadow: inset 0 0 0 5px #53d337;
+  border-radius: 10px;
+}
+
+.tableau-carousel.is-my-active-turn .seat.seat-carousel.seat-my-active-turn {
+  box-shadow: none;
 }
 
 /* ── Seats ──────────────────────────────────────────────────────────── */
@@ -534,11 +547,14 @@ html, body {
  */
 .seat-carousel .tableau-cards {
   align-items: stretch;
+  height: 100%;
+  padding-bottom: 0;
 }
 
 .seat-carousel .card-group {
   align-items: stretch;
   min-height: 0;
+  height: 100%;
 }
 
 /* Stack wrapper is the flex item in each row — stretch it so inner cards get a real height */
@@ -548,17 +564,19 @@ html, body {
   flex-direction: column;
   min-height: 0;
   flex-shrink: 0;
+  height: 100%;
 }
 
 .seat-carousel .grid-stack > .card {
   flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
 }
 
 .seat-carousel .card {
   width: auto;
   min-height: 0;
-  height: auto;
+  height: 100%;
   align-self: stretch;
   aspect-ratio: 108 / 158;
 }
@@ -566,7 +584,7 @@ html, body {
 .seat-carousel .card:not(.card-has-image) {
   aspect-ratio: auto;
   width: clamp(64px, 18vw, 96px);
-  max-height: 100%;
+  height: 100%;
   justify-content: center;
 }
 
@@ -1199,7 +1217,8 @@ html, body {
   border-radius: 12px;
   padding: 32px 48px;
   text-align: center;
-  min-width: 360px;
+  min-width: min(480px, 94vw);
+  max-width: min(560px, 96vw);
 }
 
 .game-over-title {
@@ -1209,20 +1228,138 @@ html, body {
   margin-bottom: 20px;
 }
 
+.game-over-winner {
+  font-size: 18px;
+  font-weight: 900;
+  color: #fff;
+  margin-bottom: 14px;
+}
+
+.game-shutdown-msg {
+  font-size: 16px;
+  color: rgba(255,255,255,0.85);
+  margin-bottom: 14px;
+}
+
+.game-shutdown-countdown {
+  font-size: 16px;
+  color: var(--muted);
+  margin-top: 18px;
+}
+
+.game-shutdown-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+}
+
+.game-shutdown-btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.22);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 10px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.game-shutdown-btn:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
 .score-row {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 24px;
-  padding: 8px 0;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 0;
   border-bottom: 1px solid rgba(255,255,255,0.1);
   font-size: 16px;
+  text-align: left;
 }
 .score-row:last-child { border-bottom: none; }
-.score-row .rank  { color: var(--gold); font-weight: 700; width: 32px; }
-.score-row .sname { flex: 1; text-align: left; color: #fff; font-weight: 600; }
-.score-row .total { color: var(--vp); font-weight: 900; font-size: 16px; }
-.score-row .breakdown { color: var(--muted); font-size: 16px; }
+.score-row .rank  {
+  color: var(--gold);
+  font-weight: 700;
+  width: 36px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+.score-row-mid {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.score-row .sname { color: #fff; font-weight: 700; font-size: 16px; }
+.score-row .total {
+  color: var(--vp);
+  font-weight: 900;
+  font-size: 16px;
+  flex-shrink: 0;
+  padding-top: 2px;
+  white-space: nowrap;
+}
+.score-duke-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.score-duke-thumb {
+  width: 44px;
+  height: 62px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+.score-duke-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+}
+.score-duke-none {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  font-style: italic;
+}
+.duke-vp-breakdown {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.duke-vp-line {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.88);
+}
+.duke-vp-line-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.duke-vp-line-label { color: rgba(255, 255, 255, 0.82); }
+.duke-vp-line-vp {
+  color: var(--vp);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.duke-vp-line-detail {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+.score-vp-summary {
+  font-size: 14px;
+  color: var(--muted);
+  font-weight: 600;
+}
 
 /* ── Lobby link (in info bar next to dice; hidden in tabbed / narrow layout) ── */
 .info-bar-lobby-btn {
@@ -1332,6 +1469,14 @@ html, body {
   text-transform: uppercase;
   color: var(--muted);
   margin-bottom: 8px;
+}
+
+.lobby-name-block {
+  margin-bottom: 16px;
+}
+
+.lobby-name-block .lobby-input {
+  width: 100%;
 }
 
 .lobby-join-row {

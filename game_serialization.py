@@ -79,6 +79,7 @@ class GameObjectEncoder(JSONEncoder):
             ca_enc = ca_raw
             if isinstance(ca_raw, dict) and not (ca_raw.get("pending") or []):
                 ca_enc = None
+            shutdown = getattr(obj, "shutdown", None)
             return {
                 "game_id": obj.game_id,
                 "player_list": obj.player_list,
@@ -112,5 +113,6 @@ class GameObjectEncoder(JSONEncoder):
                 "harvest_consumed": getattr(obj, "harvest_consumed", {}) or {},
                 "harvest_prompt_slots": obj.harvest_slots_for_api() if hasattr(obj, "harvest_slots_for_api") else [],
                 "game_log": list(getattr(obj, "game_log", None) or []),
+                "shutdown": shutdown,
             }
         return super().default(obj)

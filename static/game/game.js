@@ -1,9 +1,46 @@
 'use strict';
 
-// ── URL params ────────────────────────────────────────────────────────────
-const params   = new URLSearchParams(location.search);
-const GAME_ID  = params.get('game_id')  || '';
-const PLAYER_ID = params.get('player_id') || '';
+// ── URL params + cookie-backed ids (vck_client) ───────────────────────────
+const params = new URLSearchParams(location.search);
+const _vckStored =
+  typeof VCK_CLIENT_META !== 'undefined' && VCK_CLIENT_META.read ? VCK_CLIENT_META.read() : {};
+const _qGid = (params.get('game_id') || '').trim();
+const _qPid = (params.get('player_id') || '').trim();
+const GAME_ID = _qGid || String(_vckStored.game_id || '').trim();
+const PLAYER_ID = _qPid || String(_vckStored.player_id || '').trim();
+if (typeof VCK_CLIENT_META !== 'undefined' && VCK_CLIENT_META.patch) {
+  if (_qGid || _qPid) {
+    const pu = {};
+    if (_qGid) pu.game_id = _qGid;
+    if (_qPid) pu.player_id = _qPid;
+    VCK_CLIENT_META.patch(pu);
+  } else if (GAME_ID && PLAYER_ID) {
+    VCK_CLIENT_META.patch({ game_id: GAME_ID, player_id: PLAYER_ID });
+  }
+}
+
+function vckStoredPlayerId() {
+  try {
+    if (typeof VCK_CLIENT_META !== 'undefined' && VCK_CLIENT_META.read) {
+      return String(VCK_CLIENT_META.read().player_id || '').trim();
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  try {
+    return String(localStorage.getItem('playerId') || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+function vckClientPatch(obj) {
+  try {
+    if (typeof VCK_CLIENT_META !== 'undefined' && VCK_CLIENT_META.patch) VCK_CLIENT_META.patch(obj);
+  } catch (_) {
+    /* ignore */
+  }
+}
 
 // ── WebSocket ─────────────────────────────────────────────────────────────
 let ws = null;
@@ -32,8 +69,36 @@ function isGameNotFoundText(s) {
     .includes('game not found');
 }
 
+function clearStaleStoredGame() {
+  vckClientPatch({ game_id: null });
+  try {
+    localStorage.removeItem('gameId');
+  } catch (_) {
+    /* ignore */
+  }
+}
+
+function clientShouldDropStoredGame(payload) {
+  if (!payload || typeof payload !== 'object') return false;
+  if (payload.drop_stored_game) return true;
+  if (isGameNotFoundText(payload.detail)) return true;
+  return false;
+}
+
 function redirectToLobby() {
+  clearStaleStoredGame();
   location.replace('/');
+}
+
+function vckStoredDisplayName() {
+  try {
+    if (typeof VCK_CLIENT_META !== 'undefined' && VCK_CLIENT_META.read) {
+      return String(VCK_CLIENT_META.read().display_name || '').trim();
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  return '';
 }
 
 function bumpIdleDeadline() {
@@ -82,7 +147,7 @@ function connect() {
     const msg = JSON.parse(evt.data);
     if (msg.type === 'state') render(msg.state);
     if (msg.type === 'error') {
-      if (isGameNotFoundText(msg.message)) {
+      if (msg.drop_stored_game || isGameNotFoundText(msg.message)) {
         redirectToLobby();
         return;
       }
@@ -190,6 +255,23 @@ function tableauGroupsForPlayer(player) {
 function render(state) {
   latestGameState = state;
   bumpIdleDeadline();
+  // During blocking concurrent prompts (e.g. choose duke), we poll frequently.
+  // Rebuilding the entire board every poll causes narrow-layout tableau/carousel
+  // scroll resets + scrollbar flicker. While the prompt overlay is open and the
+  // concurrent gate is still pending, keep the existing board DOM and only
+  // update the prompt + polling/timers.
+  const ca = state?.concurrent_action;
+  const pend = ca && Array.isArray(ca.pending) ? ca.pending : [];
+  const hasBlockingConcurrent = pend.length > 0;
+  const promptOverlayOpen = !!document.getElementById('game-prompt-overlay');
+  if (hasBlockingConcurrent && promptOverlayOpen) {
+    syncConcurrentPolling(state);
+    renderPromptModal(state);
+    tickIdleTimerElements();
+    ensureIdleTicking();
+    return;
+  }
+
   const layout = layoutSlotAssignment(state);
   const narrow = isViewportNarrow();
   const board = document.getElementById('board');
@@ -227,6 +309,7 @@ function render(state) {
 
   renderCenter(state);
   renderGameOver(state);
+  renderGameShutdown(state);
   syncBoardTabsObserver();
   syncConcurrentPolling(state);
   maybeAutoFinalizeRoll(state);
@@ -343,6 +426,12 @@ function renderTableauCarousel(state, bottomEl) {
   const root = mk('tableau-carousel');
   root.setAttribute('role', 'region');
   root.setAttribute('aria-label', 'Player tableaus');
+
+  // In narrow mode, ring the whole carousel on your turn (avoids clipped outer box-shadows).
+  const me = players.find(p => idsMatch(p && p.player_id, PLAYER_ID));
+  if (me && isActiveTurnForPlayer(me, state)) {
+    root.classList.add('is-my-active-turn');
+  }
 
   const viewport = mk('tableau-carousel-viewport');
   players.forEach(p => {
@@ -603,6 +692,18 @@ function makeInfoBar(state) {
     lobby.href = '/';
     lobby.className = 'info-bar-lobby-btn';
     lobby.textContent = 'Lobby';
+    lobby.addEventListener('click', ev => {
+      ev.preventDefault();
+      if (latestGameState?.shutdown) {
+        goToLobbyNow();
+        return;
+      }
+      const ok = window.confirm(
+        'Leave to the lobby and abandon this game for everyone?\n\nThe game will end for all players and redirect to the lobby after 30 seconds.'
+      );
+      if (!ok) return;
+      abandonGame();
+    });
     diceRow.appendChild(lobby);
   }
 
@@ -1230,6 +1331,13 @@ function renderGameOver(state) {
   title.textContent = 'Game Over';
   panel.appendChild(title);
 
+  const winner = (state.final_scores || []).find(s => Number(s.rank) === 1) || (state.final_scores || [])[0];
+  if (winner) {
+    const win = mk('game-over-winner');
+    win.textContent = `${winner.name} wins!`;
+    panel.appendChild(win);
+  }
+
   (state.final_scores || []).forEach(s => {
     const row = mk('score-row');
 
@@ -1237,23 +1345,197 @@ function renderGameOver(state) {
     rank.textContent = `#${s.rank}`;
     row.appendChild(rank);
 
+    const mid = mk('score-row-mid');
+
     const name = mk('sname');
     name.textContent = s.name;
-    row.appendChild(name);
+    mid.appendChild(name);
+
+    const dukeInfo = s.duke;
+    if (dukeInfo && dukeInfo.duke_id != null) {
+      const dukeStrip = mk('score-duke-strip');
+      const img = document.createElement('img');
+      img.className = 'score-duke-thumb';
+      img.alt = '';
+      img.loading = 'lazy';
+      img.src = `/card-image/duke/${dukeInfo.duke_id}`;
+      dukeStrip.appendChild(img);
+      const dn = mk('score-duke-name');
+      dn.textContent = dukeInfo.name || 'Duke';
+      dukeStrip.appendChild(dn);
+      mid.appendChild(dukeStrip);
+    } else if (Number(s.duke_vp) > 0) {
+      const legacy = mk('score-duke-none');
+      legacy.textContent = 'Duke (card not in snapshot)';
+      mid.appendChild(legacy);
+    } else {
+      const noDuke = mk('score-duke-none');
+      noDuke.textContent = 'No Duke';
+      mid.appendChild(noDuke);
+    }
+
+    const lines = Array.isArray(s.duke_vp_breakdown) ? s.duke_vp_breakdown : [];
+    if (lines.length) {
+      const list = mk('duke-vp-breakdown');
+      lines.forEach(line => {
+        const li = mk('duke-vp-line');
+        const top = mk('duke-vp-line-top');
+        const lbl = mk('duke-vp-line-label');
+        lbl.textContent = line.label || '';
+        const val = mk('duke-vp-line-vp');
+        val.textContent = `+${line.vp} VP`;
+        top.appendChild(lbl);
+        top.appendChild(val);
+        li.appendChild(top);
+        if (line.detail) {
+          const det = mk('duke-vp-line-detail');
+          det.textContent = line.detail;
+          li.appendChild(det);
+        }
+        list.appendChild(li);
+      });
+      mid.appendChild(list);
+    }
+
+    const summary = mk('score-vp-summary');
+    summary.textContent = `${s.base_vp} base + ${s.duke_vp} Duke`;
+    mid.appendChild(summary);
+
+    row.appendChild(mid);
 
     const total = mk('total');
     total.textContent = `${s.total_vp} VP`;
     row.appendChild(total);
 
-    const bd = mk('breakdown');
-    bd.textContent = `${s.base_vp} base + ${s.duke_vp} Duke`;
-    row.appendChild(bd);
-
     panel.appendChild(row);
   });
 
+  const shutdown = state.shutdown || null;
+  const countdown = mk('game-shutdown-countdown');
+  countdown.id = 'game-shutdown-countdown';
+  countdown.textContent = shutdown?.redirect_at
+    ? `Returning to lobby in ${fmtSecondsRemaining(shutdown.redirect_at)}s…`
+    : 'Returning to lobby soon…';
+  panel.appendChild(countdown);
+
+  const actions = mk('game-shutdown-actions');
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'game-shutdown-btn';
+  btn.textContent = 'Go to lobby now';
+  btn.addEventListener('click', () => goToLobbyNow());
+  actions.appendChild(btn);
+  panel.appendChild(actions);
+
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
+}
+
+// ── Game shutdown / abandon overlay ────────────────────────────────────────
+let _shutdownUiTimer = null;
+
+function fmtSecondsRemaining(redirectAtEpochSeconds) {
+  const msLeft = Math.max(0, Number(redirectAtEpochSeconds || 0) * 1000 - Date.now());
+  return Math.ceil(msLeft / 1000);
+}
+
+function goToLobbyNow() {
+  redirectToLobby();
+}
+
+async function abandonGame() {
+  try {
+    await fetch(`/api/game/${encodeURIComponent(GAME_ID)}/abandon`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player_id: PLAYER_ID }),
+    });
+  } catch (_) {
+    // Even if the request fails, don't auto-navigate; player can try again.
+  }
+}
+
+function renderGameShutdown(state) {
+  const shutdown = state?.shutdown || null;
+  const existing = document.getElementById('game-shutdown-overlay');
+
+  if (!shutdown) {
+    if (existing) existing.remove();
+    if (_shutdownUiTimer) {
+      clearInterval(_shutdownUiTimer);
+      _shutdownUiTimer = null;
+    }
+    return;
+  }
+
+  const redirectAt = shutdown.redirect_at;
+  const reason = String(shutdown.reason || '');
+  const initiatorName = shutdown?.initiated_by?.name ? String(shutdown.initiated_by.name) : '';
+
+  if (redirectAt && fmtSecondsRemaining(redirectAt) <= 0) {
+    goToLobbyNow();
+    return;
+  }
+
+  // If game over overlay exists, we reuse it and just keep countdown updated there.
+  if (state.phase === 'game_over' && state.final_scores) {
+    const c = document.getElementById('game-shutdown-countdown');
+    if (c && redirectAt) c.textContent = `Returning to lobby in ${fmtSecondsRemaining(redirectAt)}s…`;
+    return;
+  }
+
+  if (!existing) {
+    const overlay = mk('game-over-overlay');
+    overlay.id = 'game-shutdown-overlay';
+    const panel = mk('game-over-panel');
+    const title = mk('game-over-title');
+    title.textContent = 'Game Ending';
+    panel.appendChild(title);
+
+    const msg = mk('game-shutdown-msg');
+    if (reason === 'abandoned') {
+      msg.textContent = initiatorName
+        ? `${initiatorName} abandoned the game.`
+        : 'A player abandoned the game.';
+    } else {
+      msg.textContent = 'This game is ending.';
+    }
+    panel.appendChild(msg);
+
+    const countdown = mk('game-shutdown-countdown');
+    countdown.id = 'game-shutdown-countdown';
+    countdown.textContent = redirectAt
+      ? `Returning to lobby in ${fmtSecondsRemaining(redirectAt)}s…`
+      : 'Returning to lobby soon…';
+    panel.appendChild(countdown);
+
+    const actions = mk('game-shutdown-actions');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'game-shutdown-btn';
+    btn.textContent = 'Go to lobby now';
+    btn.addEventListener('click', () => goToLobbyNow());
+    actions.appendChild(btn);
+    panel.appendChild(actions);
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+  }
+
+  const countdown = document.getElementById('game-shutdown-countdown');
+  if (countdown && redirectAt) {
+    countdown.textContent = `Returning to lobby in ${fmtSecondsRemaining(redirectAt)}s…`;
+  }
+
+  if (!_shutdownUiTimer) {
+    _shutdownUiTimer = setInterval(() => {
+      if (!latestGameState?.shutdown) return;
+      const ra = latestGameState.shutdown.redirect_at;
+      if (ra && fmtSecondsRemaining(ra) <= 0) goToLobbyNow();
+      const c = document.getElementById('game-shutdown-countdown');
+      if (c && ra) c.textContent = `Returning to lobby in ${fmtSecondsRemaining(ra)}s…`;
+    }, 250);
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -2068,7 +2350,7 @@ async function fetchGameStateFromApi() {
     if (!res.ok) {
       if (res.status === 404) {
         const payload = await res.json().catch(() => ({}));
-        if (isGameNotFoundText(payload?.detail)) {
+        if (clientShouldDropStoredGame(payload)) {
           redirectToLobby();
           return;
         }
@@ -2091,7 +2373,7 @@ async function postGameAction(body) {
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) {
     const detail = payload?.detail || res.statusText || 'Request failed';
-    if (res.status === 404 && isGameNotFoundText(detail)) {
+    if (res.status === 404 && clientShouldDropStoredGame(payload)) {
       redirectToLobby();
       return false;
     }
@@ -2105,33 +2387,112 @@ async function postGameAction(body) {
 
 function removePromptOverlay() {
   const el = document.getElementById('game-prompt-overlay');
+  if (el && el._promptClickHandler) {
+    el.removeEventListener('click', el._promptClickHandler);
+    el._promptClickHandler = null;
+  }
   if (el && el._promptEscHandler) {
     document.removeEventListener('keydown', el._promptEscHandler);
     el._promptEscHandler = null;
+  }
+  if (el && el._prevBodyOverflow !== undefined) {
+    document.body.style.overflow = el._prevBodyOverflow;
+    el._prevBodyOverflow = undefined;
   }
   el?.remove();
 }
 
 function openPromptOverlayShell(opts) {
-  const prevOverlay = document.getElementById('game-prompt-overlay');
-  const oldTitle = prevOverlay?.querySelector('.prompt-modal-title')?.textContent?.trim() || '';
-  let preservedModalScroll = 0;
-  let preservedChoiceListScroll = 0;
-  if (prevOverlay) {
-    const prevModal = prevOverlay.querySelector('.card-modal');
-    if (prevModal) preservedModalScroll = prevModal.scrollTop;
-    const prevList = prevOverlay.querySelector('.prompt-choice-list');
-    if (prevList) preservedChoiceListScroll = prevList.scrollTop;
+  const { title, subtitle, dismissible, bodyEl, footerEl } = opts;
+  const newTitle = (title || '').toString();
+
+  function configureDismissBehavior(overlay) {
+    // Clear prior handlers first.
+    if (overlay._promptClickHandler) {
+      overlay.removeEventListener('click', overlay._promptClickHandler);
+      overlay._promptClickHandler = null;
+    }
+    if (overlay._promptEscHandler) {
+      document.removeEventListener('keydown', overlay._promptEscHandler);
+      overlay._promptEscHandler = null;
+    }
+
+    if (!dismissible) return;
+
+    const dismiss = () => removePromptOverlay();
+    const onKey = e => {
+      if (e.key === 'Escape') dismiss();
+    };
+    overlay._promptClickHandler = dismiss;
+    overlay._promptEscHandler = onKey;
+    overlay.addEventListener('click', dismiss);
+    document.addEventListener('keydown', onKey);
   }
 
-  removePromptOverlay();
-  const { title, subtitle, dismissible, bodyEl, footerEl } = opts;
-  const newTitle = (title || '').toString().trim();
-  const restorePromptScroll = oldTitle && newTitle && oldTitle === newTitle;
+  // If a prompt overlay already exists, update it in-place.
+  const overlay = document.getElementById('game-prompt-overlay');
+  if (overlay) {
+    const modal = overlay.querySelector('.card-modal');
+    if (!modal) {
+      removePromptOverlay();
+      return openPromptOverlayShell(opts);
+    }
 
-  const overlay = document.createElement('div');
-  overlay.id = 'game-prompt-overlay';
-  overlay.className = 'card-modal-overlay game-prompt-overlay';
+    // Lock background scroll while overlay is present.
+    if (overlay._prevBodyOverflow === undefined) {
+      overlay._prevBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+    }
+
+    const head = modal.querySelector('.prompt-modal-head');
+    const titleEl = modal.querySelector('.prompt-modal-title');
+    if (titleEl) titleEl.textContent = newTitle;
+    if (head) {
+      let subEl = head.querySelector('.prompt-modal-subtitle');
+      if (subtitle) {
+        if (!subEl) {
+          subEl = mk('prompt-modal-subtitle');
+          head.appendChild(subEl);
+        }
+        subEl.textContent = subtitle;
+      } else if (subEl) {
+        subEl.remove();
+      }
+    }
+
+    // Preserve current scroll positions while we swap content.
+    const preservedModalScroll = modal.scrollTop;
+    const preservedList = modal.querySelector('.prompt-choice-list');
+    const preservedChoiceListScroll = preservedList ? preservedList.scrollTop : 0;
+
+    // Remove existing body/footer (keep head).
+    Array.from(modal.children).forEach(ch => {
+      if (ch.classList?.contains('prompt-modal-head')) return;
+      ch.remove();
+    });
+
+    if (bodyEl) modal.appendChild(bodyEl);
+    if (footerEl) {
+      const ft = mk('prompt-modal-footer');
+      ft.appendChild(footerEl);
+      modal.appendChild(ft);
+    }
+
+    configureDismissBehavior(overlay);
+
+    // Restore scroll without any overlay teardown/recreate flicker.
+    modal.scrollTop = preservedModalScroll;
+    const list = modal.querySelector('.prompt-choice-list');
+    if (list) list.scrollTop = preservedChoiceListScroll;
+    return;
+  }
+
+  // Otherwise create it fresh.
+  const newOverlay = document.createElement('div');
+  newOverlay.id = 'game-prompt-overlay';
+  newOverlay.className = 'card-modal-overlay game-prompt-overlay';
+  newOverlay._prevBodyOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
 
   const modal = mk('card-modal card-modal--prompt');
   modal.addEventListener('click', e => e.stopPropagation());
@@ -2139,7 +2500,7 @@ function openPromptOverlayShell(opts) {
   const head = mk('prompt-modal-head');
   const h = document.createElement('h2');
   h.className = 'modal-card-name prompt-modal-title';
-  h.textContent = title;
+  h.textContent = newTitle;
   head.appendChild(h);
   if (subtitle) {
     const sub = mk('prompt-modal-subtitle');
@@ -2149,62 +2510,15 @@ function openPromptOverlayShell(opts) {
   modal.appendChild(head);
 
   if (bodyEl) modal.appendChild(bodyEl);
-
   if (footerEl) {
     const ft = mk('prompt-modal-footer');
     ft.appendChild(footerEl);
     modal.appendChild(ft);
   }
 
-  overlay.appendChild(modal);
-
-  function dismiss() {
-    removePromptOverlay();
-  }
-
-  function onKey(e) {
-    if (e.key === 'Escape' && dismissible) dismiss();
-  }
-
-  if (dismissible) {
-    overlay.addEventListener('click', dismiss);
-    overlay._promptEscHandler = onKey;
-    document.addEventListener('keydown', onKey);
-  }
-
-  document.body.appendChild(overlay);
-
-  if (restorePromptScroll) {
-    const applyPreservedScroll = () => {
-      const m = overlay.querySelector('.card-modal');
-      if (m) m.scrollTop = preservedModalScroll;
-      const pl = overlay.querySelector('.prompt-choice-list');
-      if (pl) pl.scrollTop = preservedChoiceListScroll;
-    };
-    applyPreservedScroll();
-    requestAnimationFrame(() => {
-      applyPreservedScroll();
-      requestAnimationFrame(applyPreservedScroll);
-    });
-    // Re-apply after lazy images / layout expand scrollHeight (otherwise scrollTop was clamped to 0).
-    const m = overlay.querySelector('.card-modal');
-    const pl = overlay.querySelector('.prompt-choice-list');
-    const targets = [m, pl].filter(Boolean);
-    if (targets.length && typeof ResizeObserver !== 'undefined') {
-      const ro = new ResizeObserver(() => {
-        applyPreservedScroll();
-      });
-      targets.forEach(t => ro.observe(t));
-      setTimeout(() => {
-        try {
-          ro.disconnect();
-        } catch (_) {
-          /* ignore */
-        }
-        applyPreservedScroll();
-      }, 4000);
-    }
-  }
+  newOverlay.appendChild(modal);
+  configureDismissBehavior(newOverlay);
+  document.body.appendChild(newOverlay);
 }
 
 function promptButton(label, onClick, secondary) {
@@ -2238,12 +2552,15 @@ function playerById(state, pid) {
   return list.find(p => idsMatch(p.player_id, pid)) || null;
 }
 
+function playerDisplayName(state, pid) {
+  const p = playerById(state, pid);
+  const nm = (p?.name ?? '').toString().trim();
+  const id = (pid ?? '').toString();
+  return nm || id || 'Player';
+}
+
 function pendingPlayerLabels(state, pending) {
-  const players = state?.player_list || [];
-  return (pending || []).map(pid => {
-    const p = players.find(x => idsMatch(x.player_id, pid));
-    return p?.name ? p.name : pid;
-  });
+  return (pending || []).map(pid => playerDisplayName(state, pid));
 }
 
 function ownedCitizenRoleSelectorCount(player, roleSelector) {
@@ -2703,8 +3020,9 @@ function renderConcurrentPanel(state, concurrent) {
   const pending = Array.isArray(concurrent.pending) ? concurrent.pending : [];
   const body = mk('prompt-modal-body');
   const note = mk('prompt-modal-note');
+  const who = pending.length ? ` Waiting on: ${pendingPlayerLabels(state, pending).join(', ')}.` : '';
   note.textContent =
-    `Waiting on concurrent action "${kind}" (${pending.length} player(s) still need to respond).`;
+    `Waiting on concurrent action "${kind}" (${pending.length} player(s) still need to respond).${who}`;
   body.appendChild(note);
   openPromptOverlayShell({
     title: 'Waiting',
@@ -2725,7 +3043,7 @@ function renderFinalizeRollPrompt(state) {
 
   if (!isYou) {
     const note = mk('prompt-modal-note');
-    note.textContent = `Waiting on ${reqId} to finalize the roll.`;
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} to finalize the roll.`;
     body.appendChild(note);
     openPromptOverlayShell({
       title: 'Finalize roll',
@@ -2783,7 +3101,7 @@ function renderDomainSelfConvertPrompt(state) {
   const body = mk('prompt-modal-body');
   if (!isYou) {
     const note = mk('prompt-modal-note');
-    note.textContent = `Waiting on ${reqId} — ${dn} optional trade.`;
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — ${dn} optional trade.`;
     body.appendChild(note);
     openPromptOverlayShell({
       title: `${dn}: trade`,
@@ -2841,7 +3159,7 @@ function renderHarvestOptionalExchangePrompt(state) {
   const body = mk('prompt-modal-body');
   if (!isYou) {
     const note = mk('prompt-modal-note');
-    note.textContent = `Waiting on ${reqId} — optional citizen harvest exchange.`;
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — optional citizen harvest exchange.`;
     body.appendChild(note);
     openPromptOverlayShell({
       title: 'Harvest exchange',
@@ -2891,7 +3209,7 @@ function renderDomainChoosePlayer(state) {
   const body = mk('prompt-modal-body');
   if (!isYou) {
     const note = mk('prompt-modal-note');
-    note.textContent = `Waiting on ${reqId} to choose a player for ${dn}.`;
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} to choose a player for ${dn}.`;
     body.appendChild(note);
     openPromptOverlayShell({
       title: `${dn}`,
@@ -2948,7 +3266,7 @@ function renderDomainChooseMonster(state) {
   const body = mk('prompt-modal-body');
   if (!isYou) {
     const note = mk('prompt-modal-note');
-    note.textContent = `Waiting on ${reqId} — ${dn} (monster +${delta} strength cost).`;
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — ${dn} (monster +${delta} strength cost).`;
     body.appendChild(note);
     openPromptOverlayShell({
       title: dn,
@@ -3030,7 +3348,7 @@ function renderChoosePrompt(state, chooseCmd) {
     const note = mk('prompt-modal-note');
     note.textContent = !options.length
       ? `Waiting on required choice: ${chooseCmd}`
-      : `Waiting on ${reqId} — ${chooseCmd}`;
+      : `Waiting on ${playerDisplayName(state, reqId)} — ${chooseCmd}`;
     body.appendChild(note);
     openPromptOverlayShell({
       title: 'Choose one',
@@ -3069,7 +3387,7 @@ function renderManualHarvestPrompt(state) {
   const body = mk('prompt-modal-body');
   const headRow = mk('prompt-modal-inline');
   const ht = mk('prompt-modal-note');
-  ht.textContent = isYou ? 'Harvest — choose order' : `Harvest in progress for ${reqId}`;
+  ht.textContent = isYou ? 'Harvest — choose order' : `Harvest in progress for ${playerDisplayName(state, reqId)}`;
   headRow.appendChild(ht);
   if (chip) headRow.appendChild(chip);
   body.appendChild(headRow);
@@ -3130,7 +3448,7 @@ function renderBonusResourcePrompt(state) {
   const body = mk('prompt-modal-body');
   const headRow = mk('prompt-modal-inline');
   const ht = mk('prompt-modal-note');
-  ht.textContent = isYou ? 'Harvest bonus — choose +1 resource' : `Harvest bonus pending for ${reqId}`;
+  ht.textContent = isYou ? 'Harvest bonus — choose +1 resource' : `Harvest bonus pending for ${playerDisplayName(state, reqId)}`;
   headRow.appendChild(ht);
   if (chip) headRow.appendChild(chip);
   body.appendChild(headRow);
@@ -3174,7 +3492,7 @@ function renderBonusResourcePrompt(state) {
 function renderUnknownRequired(state, reqAction, reqId) {
   const body = mk('prompt-modal-body');
   const note = mk('prompt-modal-note');
-  note.textContent = `Waiting on ${reqId}: ${reqAction}`;
+  note.textContent = `Waiting on ${playerDisplayName(state, reqId)}: ${reqAction}`;
   body.appendChild(note);
   openPromptOverlayShell({
     title: 'Waiting',
@@ -3274,6 +3592,11 @@ function initLobbyModal() {
     return;
   }
 
+  const savedDisplay = vckStoredDisplayName();
+  if (savedDisplay && !String(nameInput.value || '').trim()) {
+    nameInput.value = savedDisplay;
+  }
+
   let lobbyPlayerId = '';
   let lobbyWs = null;
   let lobbyWsReconnectTimer = null;
@@ -3325,7 +3648,7 @@ function initLobbyModal() {
 
   function sendLobbyIdentify() {
     if (!lobbyWs || lobbyWs.readyState !== WebSocket.OPEN) return;
-    const pid = lobbyPlayerId || localStorage.getItem('playerId') || '';
+    const pid = lobbyPlayerId || vckStoredPlayerId() || '';
     lobbyWs.send(JSON.stringify({ type: 'identify', player_id: pid || null }));
   }
 
@@ -3384,14 +3707,13 @@ function initLobbyModal() {
 
   function enterGameFromLobby(gameId, playerId) {
     tearDownLobbyConnection();
-    localStorage.setItem('playerId', playerId);
-    localStorage.setItem('gameId', gameId);
+    vckClientPatch({ player_id: playerId, game_id: gameId });
     const q = new URLSearchParams({ game_id: gameId, player_id: playerId });
     location.replace(`${location.pathname}?${q}`);
   }
 
   function handleGameStarted(msg) {
-    const pid = lobbyPlayerId || localStorage.getItem('playerId');
+    const pid = lobbyPlayerId || vckStoredPlayerId();
     const gid = msg.game_id;
     const ids = msg.player_ids || [];
     if (!pid || !gid) return;
@@ -3402,16 +3724,16 @@ function initLobbyModal() {
   function applyLobbyStatusPayload(data) {
     lastLobbySnapshot = data;
     if (data.in_game && data.game_id) {
-      const pid = lobbyPlayerId || localStorage.getItem('playerId');
+      const pid = lobbyPlayerId || vckStoredPlayerId();
       if (pid) enterGameFromLobby(data.game_id, pid);
       return;
     }
-    const selfId = lobbyPlayerId || localStorage.getItem('playerId') || '';
+    const selfId = lobbyPlayerId || vckStoredPlayerId() || '';
     const inList = selfId && (data.lobby || []).some(x => idsMatch(x.player_id, selfId));
     if (selfId && stepWait && !stepWait.classList.contains('lobby-hidden') && !inList) {
       showLobbyError('You are no longer in this lobby. Join again.');
       lobbyPlayerId = '';
-      localStorage.removeItem('playerId');
+      vckClientPatch({ player_id: null });
       tearDownLobbyConnection();
       connectLobbyWs();
       stepWait.classList.add('lobby-hidden');
@@ -3434,7 +3756,7 @@ function initLobbyModal() {
   }
 
   async function fetchLobbyPayload() {
-    const pid = lobbyPlayerId || localStorage.getItem('playerId') || '';
+    const pid = lobbyPlayerId || vckStoredPlayerId() || '';
     const url = pid
       ? `/api/lobby/status?player_id=${encodeURIComponent(pid)}`
       : '/api/lobby/status';
@@ -3472,7 +3794,7 @@ function initLobbyModal() {
   }
 
   async function tryResumeStoredPlayer() {
-    const saved = localStorage.getItem('playerId');
+    const saved = vckStoredPlayerId();
     if (!saved) return;
     try {
       const res = await fetch(`/api/lobby/status?player_id=${encodeURIComponent(saved)}`);
@@ -3511,7 +3833,7 @@ function initLobbyModal() {
         throw new Error(data.detail != null ? String(data.detail) : res.statusText || 'Join failed');
       }
       lobbyPlayerId = data.player_id || '';
-      localStorage.setItem('playerId', lobbyPlayerId);
+      vckClientPatch({ player_id: lobbyPlayerId, display_name: name });
       showWaitUi();
     } catch (e) {
       showLobbyError(e.message || 'Could not join lobby.');
@@ -3525,7 +3847,7 @@ function initLobbyModal() {
   });
 
   readyBtn.addEventListener('click', async () => {
-    const pid = lobbyPlayerId || localStorage.getItem('playerId');
+    const pid = lobbyPlayerId || vckStoredPlayerId();
     if (!pid) return;
     readyBtn.disabled = true;
     try {
@@ -3561,7 +3883,7 @@ function initLobbyModal() {
   });
 
   leaveBtn.addEventListener('click', async () => {
-    const pid = lobbyPlayerId || localStorage.getItem('playerId');
+    const pid = lobbyPlayerId || vckStoredPlayerId();
     if (!pid) return;
     leaveBtn.disabled = true;
     try {
@@ -3570,7 +3892,7 @@ function initLobbyModal() {
       /* still reset UI */
     }
     lobbyPlayerId = '';
-    localStorage.removeItem('playerId');
+    vckClientPatch({ player_id: null });
     showLobbyError('');
     sendLobbyIdentify();
     stepWait.classList.add('lobby-hidden');

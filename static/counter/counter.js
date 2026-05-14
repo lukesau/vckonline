@@ -26,6 +26,29 @@
     { key: 'victory', label: 'Victory points', kind: 'vp' },
   ];
 
+  function normalizeCounterSlice(src, initial) {
+    const out = {};
+    ROWS.forEach(spec => {
+      const raw = src && src[spec.key];
+      const n = typeof raw === 'number' ? raw : parseInt(raw, 10);
+      let v = Number.isFinite(n) && n >= 0 ? Math.trunc(n) : initial[spec.key];
+      out[spec.key] = v;
+    });
+    return out;
+  }
+
+  function persistCounter(values) {
+    if (typeof VCK_CLIENT_META === 'undefined' || !VCK_CLIENT_META.patch) return;
+    VCK_CLIENT_META.patch({
+      counter: {
+        gold: values.gold,
+        strength: values.strength,
+        magic: values.magic,
+        victory: values.victory,
+      },
+    });
+  }
+
   /** Remove whitespace for parsing only */
   function stripSpaces(s) {
     return String(s).replace(/\s+/g, '');
@@ -226,7 +249,7 @@
     cell.appendChild(img);
   }
 
-  function setupRow(container, spec, values, rowClass) {
+  function setupRow(container, spec, values, rowClass, onPersist) {
     const row = mk('div', 'counter-row ' + rowClass);
     row._fullLabel = spec.label;
 
@@ -286,17 +309,20 @@
       values[spec.key] = committed;
       refreshView();
       exitEdit(false);
+      if (typeof onPersist === 'function') onPersist();
     }
 
     minus.addEventListener('click', () => {
       values[spec.key] = Math.max(0, values[spec.key] - 1);
       snapshot = values[spec.key];
       refreshView();
+      if (typeof onPersist === 'function') onPersist();
     });
     plus.addEventListener('click', () => {
       values[spec.key] += 1;
       snapshot = values[spec.key];
       refreshView();
+      if (typeof onPersist === 'function') onPersist();
     });
 
     function enterEdit() {
@@ -333,11 +359,19 @@
 
     container.appendChild(row);
     refreshView();
+    return { refresh: refreshView };
   }
 
   const root = document.getElementById('counter-rows');
-  const values = { ...INITIAL };
+  const stored =
+    typeof VCK_CLIENT_META !== 'undefined' && VCK_CLIENT_META.read ? VCK_CLIENT_META.read() : {};
+  const values = normalizeCounterSlice(stored.counter, INITIAL);
 
+  function bumpPersist() {
+    persistCounter(values);
+  }
+
+  const rowRefs = [];
   ROWS.forEach((spec) => {
     const cls =
       spec.key === 'gold'
@@ -347,6 +381,18 @@
           : spec.key === 'magic'
             ? 'counter-row--magic'
             : 'counter-row--victory';
-    setupRow(root, spec, values, cls);
+    rowRefs.push(setupRow(root, spec, values, cls, bumpPersist));
   });
+  bumpPersist();
+
+  const resetBtn = document.getElementById('counter-reset-scores');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      ROWS.forEach((spec) => {
+        values[spec.key] = INITIAL[spec.key];
+      });
+      rowRefs.forEach((r) => r.refresh());
+      bumpPersist();
+    });
+  }
 })();

@@ -7,12 +7,13 @@ Simple REST API to replace the socket-based protocol
 import re
 import time
 import uuid
+import asyncio
 from pathlib import Path
 from typing import Dict, List, Optional
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 import shortuuid
 
@@ -164,6 +165,8 @@ lobby: List[LobbyMember] = []
 games: Dict[str, Game] = {}
 gamers: List[GameMember] = []
 
+_GAME_SHUTDOWN_DELAY_S = 30
+
 
 # Request/Response models
 class JoinLobbyRequest(BaseModel):
@@ -178,6 +181,10 @@ class RenameRequest(BaseModel):
 class ReadyRequest(BaseModel):
     player_id: str
     debug_starting_resources: bool = False
+
+
+class AbandonGameRequest(BaseModel):
+    player_id: str
 
 
 class ResourcePayment(BaseModel):
@@ -387,12 +394,86 @@ def _serialize_game_for_player(game, viewer_player_id: Optional[str]):
     return state
 
 
+def _player_name_from_game_state(game, player_id: str) -> str:
+    for p in getattr(game, "player_list", []) or []:
+        if getattr(p, "player_id", None) == player_id:
+            return getattr(p, "name", "") or "Player"
+    for g in gamers:
+        if g.player_id == player_id and g.game_id == getattr(game, "game_id", None):
+            return getattr(g, "name", "") or "Player"
+    return "Player"
+
+
+async def _initiate_game_shutdown(game_id: str, reason: str, initiated_by_player_id: Optional[str] = None):
+    """
+    Start a 30s shutdown countdown for the game.
+
+    - Broadcasts `state.shutdown` to all connected game clients.
+    - Removes all `gamers` entries for the game so lobby won't auto-redirect people back in.
+    - Destroys the game after the delay.
+    """
+    game = games.get(game_id)
+    if not game:
+        return
+
+    # Idempotent: only start once.
+    if getattr(game, "shutdown", None):
+        return
+
+    now = time.time()
+    initiator = None
+    if initiated_by_player_id:
+        initiator = {
+            "player_id": initiated_by_player_id,
+            "name": _player_name_from_game_state(game, initiated_by_player_id),
+        }
+
+    game.shutdown = {
+        "reason": str(reason or "ended"),
+        "started_at": now,
+        "redirect_at": now + float(_GAME_SHUTDOWN_DELAY_S),
+        "initiated_by": initiator,
+    }
+
+    # Ensure lobby doesn't bounce players back into a game that is ending.
+    global gamers
+    gamers = [g for g in gamers if g.game_id != game_id]
+    await lobby_ws_manager.broadcast_lobby()
+
+    # Push state update immediately.
+    await manager.broadcast(game_id, game)
+
+    async def _destroy_later():
+        await asyncio.sleep(_GAME_SHUTDOWN_DELAY_S)
+        # Only destroy if still the same game object and still marked shutdown.
+        g = games.get(game_id)
+        if not g:
+            return
+        if not getattr(g, "shutdown", None):
+            return
+        games.pop(game_id, None)
+        # Just in case anything re-added entries.
+        global gamers
+        gamers = [gm for gm in gamers if gm.game_id != game_id]
+        await lobby_ws_manager.broadcast_lobby()
+
+    asyncio.create_task(_destroy_later())
+
+
+def game_not_found_json():
+    """404 body for missing games so the client can clear a stale stored game_id."""
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Game not found", "drop_stored_game": True},
+    )
+
+
 @app.get("/api/game/{game_id}/state")
 async def get_game_state(game_id: str, player_id: Optional[str] = None):
     """Get the current game state"""
     game = games.get(game_id)
     if not game:
-        raise HTTPException(status_code=404, detail="Game not found")
+        return game_not_found_json()
     
     game.last_active_time = time.time()
     # Ensure the beginning-of-turn roll/harvest are automatic (including the very first fetch).
@@ -401,6 +482,9 @@ async def get_game_state(game_id: str, player_id: Optional[str] = None):
             break
         if getattr(game, "phase", None) == "action":
             break
+    # If the engine already ended the game, kick off the shutdown countdown.
+    if getattr(game, "phase", None) == "game_over" and not getattr(game, "shutdown", None):
+        await _initiate_game_shutdown(game_id, reason="game_over", initiated_by_player_id=None)
     return _serialize_game_for_player(game, player_id)
 
 
@@ -409,7 +493,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
     """Perform a game action (hire citizen, build domain, slay monster, etc.)"""
     game = games.get(game_id)
     if not game:
-        raise HTTPException(status_code=404, detail="Game not found")
+        return game_not_found_json()
     
     game.last_active_time = time.time()
     
@@ -543,12 +627,31 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
         
         # Push updated state to all WebSocket subscribers for this game.
         await manager.broadcast(game_id, game)
+        # If this action ended the game, start the countdown once.
+        if getattr(game, "phase", None) == "game_over" and not getattr(game, "shutdown", None):
+            await _initiate_game_shutdown(game_id, reason="game_over", initiated_by_player_id=None)
         return {"message": "Action performed", "game_state": _serialize_game_for_player(game, request.player_id)}
     
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Action failed: {str(e)}")
+
+
+@app.post("/api/game/{game_id}/abandon")
+async def abandon_game(game_id: str, request: AbandonGameRequest):
+    """Abandon a game. Ends the game for everyone, then destroys it after 30s."""
+    game = games.get(game_id)
+    if not game:
+        return game_not_found_json()
+    pid = str(request.player_id or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="player_id required")
+    in_game = any(getattr(p, "player_id", None) == pid for p in getattr(game, "player_list", []) or [])
+    if not in_game:
+        raise HTTPException(status_code=403, detail="player not in this game")
+    await _initiate_game_shutdown(game_id, reason="abandoned", initiated_by_player_id=pid)
+    return {"message": "Game abandoned", "game_id": game_id}
 
 
 # Cleanup inactive games (runs periodically)
@@ -605,7 +708,14 @@ async def ws_game(websocket: WebSocket, game_id: str, player_id: Optional[str] =
     game = games.get(game_id)
     if not game:
         await websocket.accept()
-        await websocket.send_json({"type": "error", "code": 4004, "message": "Game not found"})
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": 4004,
+                "message": "Game not found",
+                "drop_stored_game": True,
+            }
+        )
         await websocket.close(code=4004)
         return
     await manager.connect(game_id, websocket, player_id)
