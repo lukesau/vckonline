@@ -4442,11 +4442,15 @@ function renderPromptModal(state) {
   renderBonusResourcePrompt(state);
 }
 
-// ── Lobby background (random card art on canvas) ─────────────────────────
-async function paintLobbyBackgroundCanvas(canvas) {
+// ── Lobby background ───────────────────────────────────────────────────────
+// `'collage'` = static overlapping card grid (original). `'bounce'` = one card, constant speed, specular wall bounces, new random card each bounce.
+const LOBBY_BACKGROUND_MODE = 'collage';
+
+async function paintLobbyBackgroundCollage(canvas) {
   const t0 = performance.now();
   const overlay = canvas.closest('.lobby-overlay');
   if (!overlay) return;
+  canvas.classList.remove('lobby-bg-canvas--fill');
   const vw = Math.max(window.innerWidth || 0, 1024);
   const vh = Math.max(window.innerHeight || 0, 640);
   // One large bitmap, centered; window resizes clip it (no stretch).
@@ -4466,12 +4470,24 @@ async function paintLobbyBackgroundCanvas(canvas) {
 
   const tAfterList = performance.now();
 
-  // Tight staggered grid + oversized tiles so cards overlap heavily (little base fill shows through).
-  const cellW = 138;
-  const cellH = 192;
-  const overlap = 1.56;
+  // Staggered grid; wider spacing + less overlap than before (fewer tiles, less duplicate clutter).
+  const cellW = 218;
+  const cellH = 302;
+  const overlap = 1.2;
   const tileCols = Math.ceil(bw / cellW) + 2;
   const tileRows = Math.ceil(bh / cellH) + 2;
+  const tileCount = tileCols * tileRows;
+  const srcDeck = [];
+  while (srcDeck.length < tileCount) {
+    const pass = urls.slice();
+    for (let i = pass.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      const t = pass[i];
+      pass[i] = pass[j];
+      pass[j] = t;
+    }
+    srcDeck.push(...pass);
+  }
   const positions = [];
   for (let row = 0; row < tileRows; row++) {
     const brick = (row % 2) * (cellW * 0.5);
@@ -4488,7 +4504,7 @@ async function paintLobbyBackgroundCanvas(canvas) {
         pw: cellW * scale * overlap,
         ph: cellH * scale * overlap,
         rot: (Math.random() - 0.5) * 0.42,
-        src: urls[(Math.random() * urls.length) | 0],
+        src: srcDeck[positions.length],
       });
     }
   }
@@ -4561,6 +4577,260 @@ async function paintLobbyBackgroundCanvas(canvas) {
     positions.length,
     drawn
   );
+}
+
+function startLobbyBackgroundBounce(canvas) {
+  const overlay = canvas.closest('.lobby-overlay');
+  if (!overlay) return Promise.resolve();
+
+  const existingStop = canvas._lobbyBounceStop;
+  if (typeof existingStop === 'function') existingStop();
+
+  const DARKEN = 'rgba(4, 10, 7, 0.4)';
+  const SPEED_PX = 220;
+  const POOL_TARGET = 22;
+  const CARD_MAX_H_FRAC = 0.28;
+
+  let urls = [];
+  let ctx = null;
+  let rafId = 0;
+  let lastTs = 0;
+  let cssW = 1;
+  let cssH = 1;
+  let dpr = 1;
+  let x = 0;
+  let y = 0;
+  let vx = 0;
+  let vy = 0;
+  let currentUrl = '';
+  let currentImg = null;
+  let halfW = 60;
+  let halfH = 84;
+  const pool = new Map();
+
+  function syncSize() {
+    const rect = overlay.getBoundingClientRect();
+    cssW = Math.max(1, Math.floor(rect.width || window.innerWidth || 1));
+    cssH = Math.max(1, Math.floor(rect.height || window.innerHeight || 1));
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.max(1, Math.floor(cssW * dpr));
+    canvas.height = Math.max(1, Math.floor(cssH * dpr));
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+    ctx = canvas.getContext('2d');
+    return !!ctx;
+  }
+
+  function measureCard(img) {
+    if (!img || !img.naturalWidth) return { dw: halfW * 2, dh: halfH * 2 };
+    const ar = img.naturalWidth / img.naturalHeight;
+    let dh = Math.min(cssH * CARD_MAX_H_FRAC, 240);
+    let dw = dh * ar;
+    const maxW = cssW * 0.42;
+    if (dw > maxW) {
+      dw = maxW;
+      dh = dw / ar;
+    }
+    return { dw, dh };
+  }
+
+  function clampPos() {
+    halfW = Math.min(halfW, cssW * 0.5 - 0.5);
+    halfH = Math.min(halfH, cssH * 0.5 - 0.5);
+    x = Math.max(halfW, Math.min(cssW - halfW, x));
+    y = Math.max(halfH, Math.min(cssH - halfH, y));
+  }
+
+  function pickRandomUrl(exclude) {
+    if (!urls.length) return '';
+    const filtered = urls.filter(u => u !== exclude);
+    const list = filtered.length ? filtered : urls;
+    return list[(Math.random() * list.length) | 0];
+  }
+
+  function pickNextFromPool(exclude) {
+    const keys = [...pool.keys()].filter(k => k !== exclude);
+    const pickFrom = keys.length ? keys : [...pool.keys()];
+    if (!pickFrom.length) return '';
+    return pickFrom[(Math.random() * pickFrom.length) | 0];
+  }
+
+  function swapCardOnBounce() {
+    const next = pickNextFromPool(currentUrl);
+    if (!next || !pool.has(next)) return;
+    currentUrl = next;
+    currentImg = pool.get(next);
+    const m = measureCard(currentImg);
+    halfW = m.dw * 0.5;
+    halfH = m.dh * 0.5;
+    clampPos();
+  }
+
+  function loadImage(src) {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        if (img.decode) {
+          img
+            .decode()
+            .then(() => resolve(img))
+            .catch(() => resolve(img));
+        } else {
+          resolve(img);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+  }
+
+  async function warmPool() {
+    pool.clear();
+    const n = Math.min(POOL_TARGET, urls.length);
+    const shuffled = urls.slice().sort(() => Math.random() - 0.5);
+    const slice = shuffled.slice(0, n);
+    const loaded = await Promise.all(
+      slice.map(async u => {
+        const img = await loadImage(u);
+        return img ? [u, img] : null;
+      })
+    );
+    for (const row of loaded) {
+      if (row) pool.set(row[0], row[1]);
+    }
+  }
+
+  function seedMotion() {
+    const theta = Math.random() * Math.PI * 2;
+    vx = Math.cos(theta) * SPEED_PX;
+    vy = Math.sin(theta) * SPEED_PX;
+  }
+
+  function step(dt) {
+    if (!ctx || !currentImg) return;
+    x += vx * dt;
+    y += vy * dt;
+
+    let hitX = false;
+    let hitY = false;
+    if (x - halfW < 0) {
+      x = halfW;
+      vx = -vx;
+      hitX = true;
+    } else if (x + halfW > cssW) {
+      x = cssW - halfW;
+      vx = -vx;
+      hitX = true;
+    }
+    if (y - halfH < 0) {
+      y = halfH;
+      vy = -vy;
+      hitY = true;
+    } else if (y + halfH > cssH) {
+      y = cssH - halfH;
+      vy = -vy;
+      hitY = true;
+    }
+
+    if (hitX || hitY) {
+      swapCardOnBounce();
+      const sp = Math.hypot(vx, vy) || 1;
+      vx = (vx / sp) * SPEED_PX;
+      vy = (vy / sp) * SPEED_PX;
+    }
+  }
+
+  function drawFrame() {
+    if (!ctx || !currentImg) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#0a1610';
+    ctx.fillRect(0, 0, cssW, cssH);
+    const { dw, dh } = measureCard(currentImg);
+    ctx.drawImage(currentImg, x - dw * 0.5, y - dh * 0.5, dw, dh);
+    ctx.fillStyle = DARKEN;
+    ctx.fillRect(0, 0, cssW, cssH);
+  }
+
+  function frame(ts) {
+    if (!lastTs) lastTs = ts;
+    const dt = Math.min(0.05, Math.max(0, (ts - lastTs) / 1000));
+    lastTs = ts;
+    step(dt);
+    drawFrame();
+    rafId = window.requestAnimationFrame(frame);
+  }
+
+  function onResize() {
+    if (!syncSize()) return;
+    const m = measureCard(currentImg);
+    halfW = m.dw * 0.5;
+    halfH = m.dh * 0.5;
+    clampPos();
+    drawFrame();
+  }
+
+  function stop() {
+    if (rafId) window.cancelAnimationFrame(rafId);
+    rafId = 0;
+    window.removeEventListener('resize', onResize);
+    pool.clear();
+    canvas.classList.remove('lobby-bg-canvas--fill');
+    if (canvas._lobbyBounceStop === stop) delete canvas._lobbyBounceStop;
+  }
+
+  canvas.classList.add('lobby-bg-canvas--fill');
+  canvas._lobbyBounceStop = stop;
+
+  return fetch('/api/lobby/background-card-urls')
+    .then(res => (res.ok ? res.json() : {}))
+    .then(data => {
+      urls = Array.isArray(data.urls) ? data.urls : [];
+    })
+    .catch(() => {
+      urls = [];
+    })
+    .then(async () => {
+      if (!urls.length) {
+        stop();
+        return;
+      }
+      if (!syncSize()) {
+        stop();
+        return;
+      }
+      await warmPool();
+      if (!pool.size) {
+        stop();
+        return;
+      }
+      currentUrl = pickRandomUrl('');
+      currentImg = pool.get(currentUrl) || pool.values().next().value;
+      if (!currentImg) {
+        stop();
+        return;
+      }
+      const m0 = measureCard(currentImg);
+      halfW = m0.dw * 0.5;
+      halfH = m0.dh * 0.5;
+      x = cssW * 0.5;
+      y = cssH * 0.5;
+      clampPos();
+      seedMotion();
+      lastTs = 0;
+      window.addEventListener('resize', onResize);
+      drawFrame();
+      rafId = window.requestAnimationFrame(frame);
+    });
+}
+
+async function initLobbyBackgroundCanvas(canvas) {
+  if (LOBBY_BACKGROUND_MODE === 'collage') {
+    await paintLobbyBackgroundCollage(canvas);
+    return;
+  }
+  await startLobbyBackgroundBounce(canvas);
 }
 
 // ── Lobby modal when visiting without game_id / player_id ────────────────
@@ -4892,7 +5162,7 @@ function initLobbyModal() {
 
   openOverlay();
   const bgCanvas = document.getElementById('lobby-bg-canvas');
-  if (bgCanvas) paintLobbyBackgroundCanvas(bgCanvas).catch(() => {});
+  if (bgCanvas) initLobbyBackgroundCanvas(bgCanvas).catch(() => {});
   connectLobbyWs();
   tryResumeStoredPlayer();
 }
