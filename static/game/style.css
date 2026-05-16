@@ -189,43 +189,11 @@ html, body {
   border-radius: 3px;
 }
 
+/* Player carousel tabs — layout only; appearance matches .board-tab / .board-tabs-bar */
 .carousel-nav-dots {
   flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 max(8px, env(safe-area-inset-right, 8px)) 0 max(8px, env(safe-area-inset-left, 8px));
-}
-
-.carousel-nav-dot {
-  flex: 1;
-  padding: 7px 10px;
-  border-radius: 20px;
-  border: 1px solid rgba(255,255,255,0.2);
-  background: rgba(255,255,255,0.08);
-  color: rgba(255,255,255,0.5);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  cursor: pointer;
-  flex-shrink: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.carousel-nav-dot:hover {
-  background: rgba(255,255,255,0.15);
-  color: rgba(255,255,255,0.8);
-}
-
-.carousel-nav-dot.is-active {
-  background: rgba(255,255,255,0.18);
-  border-color: rgba(255,255,255,0.6);
-  color: #fff;
+  padding-left: max(8px, env(safe-area-inset-left, 8px));
+  padding-right: max(8px, env(safe-area-inset-right, 8px));
 }
 
 .resource-action-bar {

@@ -579,10 +579,11 @@ function renderTableauCarousel(state, bottomEl) {
   wireTableauCarouselViewport(viewport);
 
   const navDotsEl = document.createElement('div');
-  navDotsEl.className = 'carousel-nav-dots';
+  navDotsEl.className = 'board-tabs-bar carousel-nav-dots';
   const dots = players.map((p, i) => {
     const dot = document.createElement('button');
-    dot.className = 'carousel-nav-dot';
+    dot.type = 'button';
+    dot.className = 'board-tab';
     dot.textContent = p.name || `Player ${i + 1}`;
     dot.addEventListener('click', () => {
       const slide = viewport.children[i];
