@@ -1,0 +1,4 @@
+{
+  "_description": "Dukes listed under \"dukes\" are excluded from the random duke deal at game setup (by database id_dukes). Remove an id from the array to unban that duke.",
+  "dukes": [3]
+}
