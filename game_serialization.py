@@ -97,6 +97,7 @@ class GameObjectEncoder(JSONEncoder):
                 "exhausted_stack_size": len(getattr(obj, "exhausted_stack", None) or []),
                 "end_game_triggered": getattr(obj, "end_game_triggered", False),
                 "final_scores": getattr(obj, "final_scores", None),
+                "final_result": getattr(obj, "final_result", None),
                 "effects": obj.effects,
                 "action_required": obj.action_required,
                 "pending_required_choice": getattr(obj, "pending_required_choice", None),

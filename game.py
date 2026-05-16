@@ -235,6 +235,7 @@ class Game:
         self.exhausted_stack = list(game_state.get('exhausted_stack') or [])
         self.end_game_triggered = game_state.get('end_game_triggered', False)
         self.final_scores = game_state.get('final_scores', None)
+        self.final_result = game_state.get('final_result', None)
         self.effects = game_state['effects']
         self.action_required = game_state['action_required']
         # Concurrent (non-ordered) prompt: all listed players must respond before progression.
@@ -3135,6 +3136,48 @@ class Game:
             return "exhausted stacks filled"
         return None
 
+    def _build_final_result(self, scores):
+        """Summarize win / tie-break / true-tie outcome for clients and logs."""
+        if not scores:
+            return None
+        top_vp = int(scores[0]["total_vp"])
+        vp_tied = [s for s in scores if int(s["total_vp"]) == top_vp]
+        if len(vp_tied) == 1:
+            w = vp_tied[0]
+            return {
+                "kind": "win",
+                "headline": f"{w['name']} wins!",
+                "detail": None,
+                "winner_player_ids": [w["player_id"]],
+            }
+        min_tableau = min(int(s["tableau_size"]) for s in vp_tied)
+        winners = [s for s in vp_tied if int(s["tableau_size"]) == min_tableau]
+        if len(winners) == 1:
+            w = winners[0]
+            losers = [s for s in vp_tied if s["player_id"] != w["player_id"]]
+            loser_bits = ", ".join(
+                f"{s['name']} ({int(s['tableau_size'])} cards)" for s in losers
+            )
+            return {
+                "kind": "tiebreak",
+                "headline": f"{w['name']} wins on tie-break!",
+                "detail": (
+                    f"Tied at {top_vp} VP; {w['name']} had the smaller tableau "
+                    f"({int(w['tableau_size'])} cards vs {loser_bits})."
+                ),
+                "winner_player_ids": [w["player_id"]],
+            }
+        names = ", ".join(s["name"] for s in winners)
+        tableau_n = int(winners[0]["tableau_size"])
+        return {
+            "kind": "tie",
+            "headline": "Tie game!",
+            "detail": (
+                f"{names} tied at {top_vp} VP with {tableau_n} tableau cards each."
+            ),
+            "winner_player_ids": [s["player_id"] for s in winners],
+        }
+
     def _calculate_final_scores(self):
         """Compute final VP for each player including Duke multipliers. Returns ranked list."""
         self.unflip_all_citizens_for_final_scoring()
@@ -3235,7 +3278,11 @@ class Game:
                     gvp + svp + mvp + shvp + hovp + sovp + wovp
                     + mmonvp + citvp + domvp + bvp + minvp + bevp + tivp
                 )
-                duke_summary = {"duke_id": duke.duke_id, "name": duke.name or "Duke"}
+                duke_summary = {
+                    "duke_id": duke.duke_id,
+                    "name": duke.name or "Duke",
+                    "card": duke.to_dict(),
+                }
 
             total_vp = int(player.victory_score) + duke_vp
             tableau_size = (
@@ -3256,13 +3303,16 @@ class Game:
                 "tableau_size": tableau_size,
             })
         scores.sort(key=lambda s: (-s["total_vp"], s["tableau_size"]))
+        top_vp = int(scores[0]["total_vp"]) if scores else None
         for rank, s in enumerate(scores):
             s["rank"] = rank + 1
+            s["tied_on_vp"] = top_vp is not None and int(s["total_vp"]) == top_vp
         return scores
 
     def _finalize_game(self):
         """Compute final scores, set phase to game_over, and log the result."""
         self.final_scores = self._calculate_final_scores()
+        self.final_result = self._build_final_result(self.final_scores)
         self.phase = "game_over"
         if self.final_scores:
             for s in self.final_scores:
@@ -3271,7 +3321,12 @@ class Game:
                     f"{place}: {s['name']} — {s['total_vp']} VP "
                     f"({s['base_vp']} base + {s['duke_vp']} Duke)."
                 )
-            self._log_game_event(f"Game over! {self.final_scores[0]['name']} wins!")
+            fr = self.final_result or {}
+            headline = fr.get("headline") or f"Game over! {self.final_scores[0]['name']} wins!"
+            self._log_game_event(headline)
+            detail = fr.get("detail")
+            if detail:
+                self._log_game_event(detail)
 
     def end_check(self):
         if self.exhausted_count <= (len(self.player_list) * 2):

@@ -1653,6 +1653,253 @@ function cardExtra(card) {
 }
 
 // ── Game over overlay ─────────────────────────────────────────────────────
+let _gameOverDetailsPage = 0;
+
+function finalScoresSorted(state) {
+  return [...(state.final_scores || [])].sort(
+    (a, b) => (Number(a.rank) || 99) - (Number(b.rank) || 99)
+  );
+}
+
+function finalResultFromState(state) {
+  if (state.final_result && typeof state.final_result === 'object') {
+    return state.final_result;
+  }
+  const scores = finalScoresSorted(state);
+  if (!scores.length) return null;
+  const topVp = Number(scores[0].total_vp);
+  const vpTied = scores.filter(s => Number(s.total_vp) === topVp);
+  if (vpTied.length === 1) {
+    return { kind: 'win', headline: `${scores[0].name} wins!`, detail: null };
+  }
+  const minTableau = Math.min(...vpTied.map(s => Number(s.tableau_size) || 0));
+  const winners = vpTied.filter(s => Number(s.tableau_size) === minTableau);
+  if (winners.length === 1) {
+    const w = winners[0];
+    return {
+      kind: 'tiebreak',
+      headline: `${w.name} wins on tie-break!`,
+      detail: `Tied at ${topVp} VP; ${w.name} had the smaller tableau.`,
+    };
+  }
+  const names = winners.map(s => s.name).join(', ');
+  return {
+    kind: 'tie',
+    headline: 'Tie game!',
+    detail: `${names} tied at ${topVp} VP with ${minTableau} tableau cards each.`,
+  };
+}
+
+function dukeCardFromScore(s) {
+  const duke = s && s.duke;
+  if (!duke || typeof duke !== 'object') return null;
+  if (duke.card && typeof duke.card === 'object') return duke.card;
+  if (duke.duke_id != null) return duke;
+  return null;
+}
+
+function appendGameOverFooter(panel, state) {
+  const shutdown = state.shutdown || null;
+  let countdown = panel.querySelector('#game-shutdown-countdown');
+  if (!countdown) {
+    countdown = mk('game-shutdown-countdown');
+    countdown.id = 'game-shutdown-countdown';
+    panel.appendChild(countdown);
+  }
+  countdown.textContent = shutdown?.redirect_at
+    ? `Returning to lobby in ${fmtSecondsRemaining(shutdown.redirect_at)}s…`
+    : 'Returning to lobby soon…';
+
+  let actions = panel.querySelector('.game-shutdown-actions');
+  if (!actions) {
+    actions = mk('game-shutdown-actions');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'game-shutdown-btn';
+    btn.textContent = 'Go to lobby now';
+    btn.addEventListener('click', () => goToLobbyNow());
+    actions.appendChild(btn);
+    panel.appendChild(actions);
+  }
+}
+
+function fillGameOverSummaryBody(body, state) {
+  body.replaceChildren();
+  body.className = 'game-over-body game-over-body-summary';
+
+  const fr = finalResultFromState(state);
+  if (fr && fr.headline) {
+    const headline = mk('game-over-winner');
+    headline.textContent = fr.headline;
+    body.appendChild(headline);
+    if (fr.detail) {
+      const note = mk('game-over-result-note');
+      note.textContent = fr.detail;
+      body.appendChild(note);
+    }
+  }
+
+  const list = mk('game-over-standings');
+  finalScoresSorted(state).forEach(s => {
+    const row = mk('game-over-standing-row');
+    const rank = mk('rank');
+    rank.textContent = `#${s.rank}`;
+    row.appendChild(rank);
+    const name = mk('sname');
+    name.textContent = s.name;
+    row.appendChild(name);
+    const total = mk('total');
+    total.textContent = `${s.total_vp} VP`;
+    row.appendChild(total);
+    list.appendChild(row);
+  });
+  body.appendChild(list);
+
+  const actions = mk('game-over-summary-actions');
+  const detailsBtn = document.createElement('button');
+  detailsBtn.type = 'button';
+  detailsBtn.className = 'game-shutdown-btn game-over-details-btn';
+  detailsBtn.textContent = 'Scoring details';
+  detailsBtn.addEventListener('click', () => {
+    _gameOverDetailsPage = 0;
+    showGameOverDetailsView(state);
+  });
+  actions.appendChild(detailsBtn);
+  body.appendChild(actions);
+}
+
+function fillGameOverDetailsBody(body, state, pageIndex) {
+  body.replaceChildren();
+  body.className = 'game-over-body game-over-body-details';
+
+  const scores = finalScoresSorted(state);
+  const totalPages = scores.length;
+  const idx = Math.max(0, Math.min(pageIndex, Math.max(0, totalPages - 1)));
+  _gameOverDetailsPage = idx;
+  const s = scores[idx];
+  if (!s) return;
+
+  const header = mk('game-over-details-header');
+  const backBtn = document.createElement('button');
+  backBtn.type = 'button';
+  backBtn.className = 'game-over-back-btn';
+  backBtn.textContent = '← Summary';
+  backBtn.addEventListener('click', () => showGameOverSummaryView(state));
+  header.appendChild(backBtn);
+
+  const pageLbl = mk('game-over-details-page');
+  pageLbl.textContent = totalPages > 1 ? `${idx + 1} / ${totalPages}` : '';
+  header.appendChild(pageLbl);
+  body.appendChild(header);
+
+  const title = mk('game-over-details-player');
+  title.textContent = `#${s.rank} — ${s.name}`;
+  body.appendChild(title);
+
+  const dukeCard = dukeCardFromScore(s);
+  const dukeInfo = s.duke;
+  if (dukeInfo && dukeInfo.duke_id != null) {
+    const dukeBlock = mk('game-over-duke-block');
+    const strip = mk('score-duke-strip');
+    const img = document.createElement('img');
+    img.className = 'score-duke-thumb';
+    img.alt = '';
+    img.loading = 'lazy';
+    img.src = `/card-image/duke/${dukeInfo.duke_id}`;
+    strip.appendChild(img);
+    const dn = mk('score-duke-name');
+    dn.textContent = dukeInfo.name || 'Duke';
+    strip.appendChild(dn);
+    dukeBlock.appendChild(strip);
+    const dukeText = tableauCardFullText(dukeCard);
+    if (dukeText) {
+      const rules = mk('game-over-duke-text');
+      rules.textContent = dukeText;
+      dukeBlock.appendChild(rules);
+    }
+    body.appendChild(dukeBlock);
+  } else if (Number(s.duke_vp) > 0) {
+    const legacy = mk('score-duke-none');
+    legacy.textContent = 'Duke (card not in snapshot)';
+    body.appendChild(legacy);
+  } else {
+    const noDuke = mk('score-duke-none');
+    noDuke.textContent = 'No Duke';
+    body.appendChild(noDuke);
+  }
+
+  const lines = Array.isArray(s.duke_vp_breakdown) ? s.duke_vp_breakdown : [];
+  if (lines.length) {
+    const list = mk('duke-vp-breakdown');
+    lines.forEach(line => {
+      const li = mk('duke-vp-line');
+      const top = mk('duke-vp-line-top');
+      const lbl = mk('duke-vp-line-label');
+      lbl.textContent = line.label || '';
+      const val = mk('duke-vp-line-vp');
+      val.textContent = `+${line.vp} VP`;
+      top.appendChild(lbl);
+      top.appendChild(val);
+      li.appendChild(top);
+      if (line.detail) {
+        const det = mk('duke-vp-line-detail');
+        det.textContent = line.detail;
+        li.appendChild(det);
+      }
+      list.appendChild(li);
+    });
+    body.appendChild(list);
+  }
+
+  const summary = mk('score-vp-summary');
+  summary.textContent = `${s.base_vp} base + ${s.duke_vp} Duke = ${s.total_vp} VP`;
+  body.appendChild(summary);
+
+  if (Number(s.tableau_size) > 0 || s.tied_on_vp) {
+    const tb = mk('game-over-tableau-note');
+    tb.textContent = `Tableau: ${s.tableau_size ?? '?'} cards`;
+    body.appendChild(tb);
+  }
+
+  if (totalPages > 1) {
+    const pager = mk('game-over-details-pager');
+    const prev = document.createElement('button');
+    prev.type = 'button';
+    prev.className = 'game-shutdown-btn';
+    prev.textContent = 'Previous';
+    prev.disabled = idx <= 0;
+    prev.addEventListener('click', () => showGameOverDetailsView(state, idx - 1));
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.className = 'game-shutdown-btn';
+    next.textContent = 'Next';
+    next.disabled = idx >= totalPages - 1;
+    next.addEventListener('click', () => showGameOverDetailsView(state, idx + 1));
+    pager.appendChild(prev);
+    pager.appendChild(next);
+    body.appendChild(pager);
+  }
+}
+
+function showGameOverSummaryView(state) {
+  const overlay = document.getElementById('game-over-overlay');
+  if (!overlay) return;
+  const body = overlay.querySelector('.game-over-body');
+  if (!body) return;
+  overlay.dataset.view = 'summary';
+  fillGameOverSummaryBody(body, state);
+}
+
+function showGameOverDetailsView(state, pageIndex) {
+  const overlay = document.getElementById('game-over-overlay');
+  if (!overlay) return;
+  const body = overlay.querySelector('.game-over-body');
+  if (!body) return;
+  overlay.dataset.view = 'details';
+  const page = pageIndex != null ? pageIndex : _gameOverDetailsPage;
+  fillGameOverDetailsBody(body, state, page);
+}
+
 function renderGameOver(state) {
   const existing = document.getElementById('game-over-overlay');
   if (state.phase !== 'game_over' || !state.final_scores) {
@@ -1663,107 +1910,18 @@ function renderGameOver(state) {
 
   const overlay = mk('game-over-overlay');
   overlay.id = 'game-over-overlay';
+  overlay.dataset.view = 'summary';
 
   const panel = mk('game-over-panel');
   const title = mk('game-over-title');
   title.textContent = 'Game Over';
   panel.appendChild(title);
 
-  const winner = (state.final_scores || []).find(s => Number(s.rank) === 1) || (state.final_scores || [])[0];
-  if (winner) {
-    const win = mk('game-over-winner');
-    win.textContent = `${winner.name} wins!`;
-    panel.appendChild(win);
-  }
+  const body = mk('game-over-body');
+  panel.appendChild(body);
+  fillGameOverSummaryBody(body, state);
 
-  (state.final_scores || []).forEach(s => {
-    const row = mk('score-row');
-
-    const rank = mk('rank');
-    rank.textContent = `#${s.rank}`;
-    row.appendChild(rank);
-
-    const mid = mk('score-row-mid');
-
-    const name = mk('sname');
-    name.textContent = s.name;
-    mid.appendChild(name);
-
-    const dukeInfo = s.duke;
-    if (dukeInfo && dukeInfo.duke_id != null) {
-      const dukeStrip = mk('score-duke-strip');
-      const img = document.createElement('img');
-      img.className = 'score-duke-thumb';
-      img.alt = '';
-      img.loading = 'lazy';
-      img.src = `/card-image/duke/${dukeInfo.duke_id}`;
-      dukeStrip.appendChild(img);
-      const dn = mk('score-duke-name');
-      dn.textContent = dukeInfo.name || 'Duke';
-      dukeStrip.appendChild(dn);
-      mid.appendChild(dukeStrip);
-    } else if (Number(s.duke_vp) > 0) {
-      const legacy = mk('score-duke-none');
-      legacy.textContent = 'Duke (card not in snapshot)';
-      mid.appendChild(legacy);
-    } else {
-      const noDuke = mk('score-duke-none');
-      noDuke.textContent = 'No Duke';
-      mid.appendChild(noDuke);
-    }
-
-    const lines = Array.isArray(s.duke_vp_breakdown) ? s.duke_vp_breakdown : [];
-    if (lines.length) {
-      const list = mk('duke-vp-breakdown');
-      lines.forEach(line => {
-        const li = mk('duke-vp-line');
-        const top = mk('duke-vp-line-top');
-        const lbl = mk('duke-vp-line-label');
-        lbl.textContent = line.label || '';
-        const val = mk('duke-vp-line-vp');
-        val.textContent = `+${line.vp} VP`;
-        top.appendChild(lbl);
-        top.appendChild(val);
-        li.appendChild(top);
-        if (line.detail) {
-          const det = mk('duke-vp-line-detail');
-          det.textContent = line.detail;
-          li.appendChild(det);
-        }
-        list.appendChild(li);
-      });
-      mid.appendChild(list);
-    }
-
-    const summary = mk('score-vp-summary');
-    summary.textContent = `${s.base_vp} base + ${s.duke_vp} Duke`;
-    mid.appendChild(summary);
-
-    row.appendChild(mid);
-
-    const total = mk('total');
-    total.textContent = `${s.total_vp} VP`;
-    row.appendChild(total);
-
-    panel.appendChild(row);
-  });
-
-  const shutdown = state.shutdown || null;
-  const countdown = mk('game-shutdown-countdown');
-  countdown.id = 'game-shutdown-countdown';
-  countdown.textContent = shutdown?.redirect_at
-    ? `Returning to lobby in ${fmtSecondsRemaining(shutdown.redirect_at)}s…`
-    : 'Returning to lobby soon…';
-  panel.appendChild(countdown);
-
-  const actions = mk('game-shutdown-actions');
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'game-shutdown-btn';
-  btn.textContent = 'Go to lobby now';
-  btn.addEventListener('click', () => goToLobbyNow());
-  actions.appendChild(btn);
-  panel.appendChild(actions);
+  appendGameOverFooter(panel, state);
 
   overlay.appendChild(panel);
   document.body.appendChild(overlay);

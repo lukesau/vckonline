@@ -280,6 +280,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
             "exhausted_stack": exhausted_stack,
             "end_game_triggered": False,
             "final_scores": None,
+            "final_result": None,
             "effects": effects,
             "action_required": action_required,
             "concurrent_action": None,
