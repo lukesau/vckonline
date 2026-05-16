@@ -841,12 +841,33 @@ function activeTurnNamePart(state) {
   return { hasActive: true, isMe, displayName };
 }
 
-/** Short line for the main board (no turn number): "Your turn" / "Name's turn". */
-function boardActiveTurnLine(state) {
+/** Keep info bar compact: short name + ellipsis before "'s turn". */
+function ellipsizeForTurnLabel(name, maxChars) {
+  const t = String(name || '').trim();
+  const m = Number(maxChars);
+  const cap = Number.isFinite(m) && m > 0 ? Math.floor(m) : 8;
+  if (t.length <= cap) return t;
+  if (cap <= 1) return '\u2026';
+  return `${t.slice(0, cap - 1)}\u2026`;
+}
+
+const INFO_BAR_TURN_NAME_MAX_CHARS = 8;
+
+/** Full line for tooltips: "Your turn" / "Name's turn" (untruncated). */
+function boardActiveTurnFullLine(state) {
   const t = activeTurnNamePart(state);
   if (!t.hasActive) return '';
   if (t.isMe) return 'Your turn';
   return `${t.displayName}'s turn`;
+}
+
+/** Short line for the main board (no turn number): "Your turn" / "Name's turn" (name truncated). */
+function boardActiveTurnLine(state) {
+  const t = activeTurnNamePart(state);
+  if (!t.hasActive) return '';
+  if (t.isMe) return 'Your turn';
+  const short = ellipsizeForTurnLabel(t.displayName, INFO_BAR_TURN_NAME_MAX_CHARS);
+  return `${short}'s turn`;
 }
 
 function openDiceInfoModal(state) {
@@ -935,11 +956,20 @@ function makeInfoBar(state) {
   diceBtn.addEventListener('click', () => openDiceInfoModal(state));
   row.appendChild(diceBtn);
 
+  const turnCluster = mk('info-bar-turn-cluster');
   const turnLine = mk('info-bar-turn-label');
   const turnText = boardActiveTurnLine(state);
+  const turnFull = boardActiveTurnFullLine(state);
   turnLine.textContent = turnText;
-  if (turnText) turnLine.title = turnText;
-  row.appendChild(turnLine);
+  if (turnFull) turnLine.title = turnFull;
+  turnCluster.appendChild(turnLine);
+  if (state.end_game_triggered) {
+    const fr = mk('info-bar-final-round');
+    fr.textContent = '\u2691 Final round';
+    fr.title = 'Final round';
+    turnCluster.appendChild(fr);
+  }
+  row.appendChild(turnCluster);
 
   bar.appendChild(row);
 
@@ -3000,6 +3030,16 @@ async function postGameAction(body) {
     const detail = payload?.detail || res.statusText || 'Request failed';
     if (res.status === 404 && clientShouldDropStoredGame(payload)) {
       redirectToLobby();
+      return false;
+    }
+    // Duplicate or stale finalize_roll (e.g. second tab, double network delivery): roll already applied.
+    const detailStr = typeof detail === 'string' ? detail : '';
+    if (
+      body?.action_type === 'finalize_roll' &&
+      detailStr &&
+      /not waiting to finalize/i.test(detailStr)
+    ) {
+      fetchGameStateFromApi();
       return false;
     }
     window.alert(detail);

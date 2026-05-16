@@ -2331,6 +2331,15 @@ class Game:
                 })
         return expanded
 
+    def _finalize_citizen_stack_after_claiming_top(self, citizen_stack):
+        if citizen_stack:
+            citizen_stack[-1].toggle_accessibility(True)
+            return
+        if self.exhausted_stack:
+            exhausted = self.exhausted_stack.pop()
+            citizen_stack.append(exhausted)
+            self.exhausted_count = int(self.exhausted_count) + 1
+
     def _claim_specific_board_citizen(self, player_id, citizen_id):
         target = self._player_by_id(player_id)
         if not target:
@@ -2350,8 +2359,7 @@ class Game:
             claimed = stack.pop(-1)
             self._citizen_set_flipped(claimed, False)
             target.owned_citizens.append(claimed)
-            if stack:
-                stack[-1].toggle_accessibility(True)
+            self._finalize_citizen_stack_after_claiming_top(stack)
             return True
         return False
 
@@ -2921,12 +2929,7 @@ class Game:
             self._citizen_set_flipped(hired, False)
             player.owned_citizens.append(hired)
 
-            if citizen_stack:
-                citizen_stack[-1].toggle_accessibility(True)
-            elif self.exhausted_stack:
-                exhausted = self.exhausted_stack.pop()
-                citizen_stack.append(exhausted)
-                self.exhausted_count = int(self.exhausted_count) + 1
+            self._finalize_citizen_stack_after_claiming_top(citizen_stack)
             after = self._player_scores_line(player)
             pay = self._format_resource_payment(gp, sp, mp)
             self._log_game_event(

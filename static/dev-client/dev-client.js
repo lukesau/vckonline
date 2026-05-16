@@ -407,7 +407,13 @@ let playerId = localStorage.getItem('playerId') || '';
                     });
                     const payload = await res.json();
                     if (!res.ok) {
-                        alert(payload?.detail || 'Finalize roll failed');
+                        const msg = payload?.detail || 'Finalize roll failed';
+                        const msgStr = typeof msg === 'string' ? msg : '';
+                        if (msgStr && /not waiting to finalize/i.test(msgStr)) {
+                            getGameState(false);
+                            return;
+                        }
+                        alert(msg);
                         return;
                     }
                     if (payload && payload.game_state) applyGameStateClientUpdate(payload.game_state);
