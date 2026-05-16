@@ -1,6 +1,7 @@
 import random
 from typing import List
 
+from banned_cards import banned_duke_ids
 from cards import Citizen, Domain, Duke, Exhausted, Monster, Starter
 from game_models import Player
 
@@ -137,6 +138,16 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
 
         my_cursor.callproc(duke_query)
         results = my_cursor.fetchall()
+        skip_dukes = banned_duke_ids()
+        if skip_dukes:
+            results = [r for r in results if int(r["id_dukes"]) not in skip_dukes]
+        dukes_needed = 2 * len(player_list_from_lobby)
+        if len(results) < dukes_needed:
+            raise ValueError(
+                "Not enough dukes after applying banned_cards.json "
+                f"(need {dukes_needed} for {len(player_list_from_lobby)} players, "
+                f"have {len(results)}). Remove ids from the \"dukes\" list to unban."
+            )
         for row in results:
             my_duke = Duke(
                 row["id_dukes"],
