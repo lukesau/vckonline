@@ -59,6 +59,11 @@ class GameObjectEncoder(JSONEncoder):
                 "holy_count": roles["holy_count"],
                 "soldier_count": roles["soldier_count"],
                 "worker_count": roles["worker_count"],
+                "minion_count": roles["minion_count"],
+                "titan_count": roles["titan_count"],
+                "warden_count": roles["warden_count"],
+                "boss_count": roles["boss_count"],
+                "beast_count": roles["beast_count"],
                 "effects": obj.effects,
                 "harvest_delta": getattr(obj, "harvest_delta", {"gold": 0, "strength": 0, "magic": 0, "victory": 0}),
             }

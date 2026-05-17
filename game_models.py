@@ -1,5 +1,13 @@
 from cards import Citizen, Domain, Duke, Monster, Starter
 
+_MONSTER_TYPE_COUNT_KEYS = {
+    "Minion": "minion_count",
+    "Titan": "titan_count",
+    "Warden": "warden_count",
+    "Boss": "boss_count",
+    "Beast": "beast_count",
+}
+
 
 class Player:
     def __init__(self, player_id, name):
@@ -19,6 +27,11 @@ class Player:
         self.holy_count = 0
         self.soldier_count = 0
         self.worker_count = 0
+        self.minion_count = 0
+        self.titan_count = 0
+        self.warden_count = 0
+        self.boss_count = 0
+        self.beast_count = 0
         self.effects = {
             "roll_phase": [],
             "harvest_phase": [],
@@ -48,6 +61,11 @@ class Player:
         player.holy_count = roles["holy_count"]
         player.soldier_count = roles["soldier_count"]
         player.worker_count = roles["worker_count"]
+        player.minion_count = roles["minion_count"]
+        player.titan_count = roles["titan_count"]
+        player.warden_count = roles["warden_count"]
+        player.boss_count = roles["boss_count"]
+        player.beast_count = roles["beast_count"]
         return player
 
     def calc_roles(self):
@@ -65,11 +83,17 @@ class Player:
             holy_count = holy_count + domain.holy_count
             soldier_count = soldier_count + domain.soldier_count
             worker_count = worker_count + domain.worker_count
+        monster_counts = {key: 0 for key in _MONSTER_TYPE_COUNT_KEYS.values()}
+        for monster in self.owned_monsters:
+            count_key = _MONSTER_TYPE_COUNT_KEYS.get(monster.monster_type)
+            if count_key:
+                monster_counts[count_key] += 1
         roles_dict = {
             "shadow_count": shadow_count,
             "holy_count": holy_count,
             "soldier_count": soldier_count,
             "worker_count": worker_count,
+            **monster_counts,
             "owned_domains": len(self.owned_domains),
             "owned_citizens": len(self.owned_citizens),
             "owned_monsters": len(self.owned_monsters),

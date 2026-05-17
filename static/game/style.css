@@ -121,10 +121,6 @@ html, body {
   display: none !important;
 }
 
-.gl-resource-bar {
-  flex: 0 0 auto;
-}
-
 .gl-bottom {
   flex: 1 1 auto;
   min-height: 160px;
@@ -204,8 +200,8 @@ html, body {
 }
 
 .resource-action-bar .prompt-btn {
-  flex: 0 0 33.333%;
-  width: 33.333vw;
+  flex: 1 1 0;
+  min-width: 0;
   border-radius: 0;
   border-right-width: 0;
   padding: 10px 0;
@@ -1234,10 +1230,14 @@ html, body {
   flex-direction: row;
   flex-wrap: nowrap;
   gap: 4px;
-  padding: 4px 6px 3px;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding: 3px 6px 4px;
+  border-top: 1px solid rgba(255,255,255,0.08);
   background: rgba(0,0,0,0.25);
   flex-shrink: 0;
+}
+
+.center-board-body > .resource-action-bar {
+  border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 
 .board-tab {

@@ -893,6 +893,11 @@ let playerId = localStorage.getItem('playerId') || '';
                         ${pill('Holy', subject.holy_count ?? 0)}
                         ${pill('Soldier', subject.soldier_count ?? 0)}
                         ${pill('Worker', subject.worker_count ?? 0)}
+                        ${pill('Minion', subject.minion_count ?? 0)}
+                        ${pill('Titan', subject.titan_count ?? 0)}
+                        ${pill('Warden', subject.warden_count ?? 0)}
+                        ${pill('Boss', subject.boss_count ?? 0)}
+                        ${pill('Beast', subject.beast_count ?? 0)}
                     </div>
                 `;
 

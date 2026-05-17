@@ -289,30 +289,6 @@ function render(state) {
     board.classList.toggle('is-my-active-turn', isMyTurn);
   }
   clearEl('gl-bottom');
-  clearEl('gl-resource-bar');
-
-  const resourceBarEl = document.getElementById('gl-resource-bar');
-  if (resourceBarEl) {
-    const canTake = canOfferTakeResourceAction(state);
-    const resourceBar = document.createElement('div');
-    resourceBar.className = 'resource-action-bar' + (canTake ? '' : ' resource-action-bar--inactive');
-    ['gold', 'strength', 'magic'].forEach(r => {
-      const lab = r.charAt(0).toUpperCase() + r.slice(1);
-      const btn = promptButton(`+1 ${lab}`, () => {
-        if (!canOfferTakeResourceAction(latestGameState)) return;
-        confirmAndPostGameAction(
-          { player_id: PLAYER_ID, action_type: 'take_resource', resource: r },
-          {
-            title: 'Take resource?',
-            message: `Take +1 ${lab} from the bank as your standard action.`,
-          },
-        );
-      });
-      if (!canTake) btn.disabled = true;
-      resourceBar.appendChild(btn);
-    });
-    resourceBarEl.appendChild(resourceBar);
-  }
 
   const bottomEl = document.getElementById('gl-bottom');
   renderTableauCarousel(state, bottomEl);
@@ -696,8 +672,9 @@ function renderCenter(state) {
 
   const body = mk('center-board-body');
   body.appendChild(makeInfoBar(state));
-  body.appendChild(tabsBar);
+  body.appendChild(makeResourceActionBar(state));
   body.appendChild(viewport);
+  body.appendChild(tabsBar);
   el.appendChild(body);
 
   setupBoardTabs(el, tabsBar, viewport);
@@ -821,6 +798,28 @@ function syncBoardTabState(zoneCenter) {
 
 const RULEBOOK_PDF_URL = '/static/game/b0-valeria-card-kingdoms-rulebook.pdf';
 
+
+function makeResourceActionBar(state) {
+  const canTake = canOfferTakeResourceAction(state);
+  const resourceBar = document.createElement('div');
+  resourceBar.className = 'resource-action-bar' + (canTake ? '' : ' resource-action-bar--inactive');
+  ['gold', 'strength', 'magic'].forEach(r => {
+    const lab = r.charAt(0).toUpperCase() + r.slice(1);
+    const btn = promptButton(`+1 ${lab}`, () => {
+      if (!canOfferTakeResourceAction(latestGameState)) return;
+      confirmAndPostGameAction(
+        { player_id: PLAYER_ID, action_type: 'take_resource', resource: r },
+        {
+          title: 'Take resource?',
+          message: `Take +1 ${lab} from the bank as your standard action.`,
+        },
+      );
+    });
+    if (!canTake) btn.disabled = true;
+    resourceBar.appendChild(btn);
+  });
+  return resourceBar;
+}
 
 function canOfferTakeResourceAction(state) {
   if (!PLAYER_ID || !state) return false;
@@ -1459,6 +1458,11 @@ function renderPlayerDetailInner(state, playerId) {
       ${detailPill('Holy', subject.holy_count ?? 0)}
       ${detailPill('Soldier', subject.soldier_count ?? 0)}
       ${detailPill('Worker', subject.worker_count ?? 0)}
+      ${detailPill('Minion', subject.minion_count ?? 0)}
+      ${detailPill('Titan', subject.titan_count ?? 0)}
+      ${detailPill('Warden', subject.warden_count ?? 0)}
+      ${detailPill('Boss', subject.boss_count ?? 0)}
+      ${detailPill('Beast', subject.beast_count ?? 0)}
     </div>
   `;
 
