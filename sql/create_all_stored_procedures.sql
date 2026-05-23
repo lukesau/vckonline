@@ -42,10 +42,10 @@ BEGIN
     SELECT * FROM monsters WHERE expansion IN ('base2', 'gnolls', 'undeadsamurai');
 END //
 
--- Base Domains (shared by base1/base2: ids 1-22 in randomized order)
+-- Base Domains (shared by base1/base2)
 CREATE PROCEDURE select_base_domains()
 BEGIN
-    SELECT * FROM domains WHERE id_domains BETWEEN 1 AND 22 ORDER BY RAND();
+    SELECT * FROM domains WHERE expansion = 'base' ORDER BY RAND();
 END //
 
 -- Random Domains
