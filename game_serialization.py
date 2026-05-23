@@ -66,6 +66,9 @@ class GameObjectEncoder(JSONEncoder):
                 "beast_count": roles["beast_count"],
                 "effects": obj.effects,
                 "harvest_delta": getattr(obj, "harvest_delta", {"gold": 0, "strength": 0, "magic": 0, "victory": 0}),
+                "free_slay_actions": int(getattr(obj, "free_slay_actions", 0) or 0),
+                "free_hire_actions": int(getattr(obj, "free_hire_actions", 0) or 0),
+                "free_build_actions": int(getattr(obj, "free_build_actions", 0) or 0),
             }
         if isinstance(obj, Duke):
             return obj.to_dict()

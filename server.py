@@ -217,7 +217,7 @@ class ResourcePayment(BaseModel):
 
 class GameActionRequest(BaseModel):
     player_id: str
-    action_type: str  # "hire_citizen", "build_domain", "slay_monster", "take_resource", "act_on_required_action", "submit_concurrent_action"
+    action_type: str  # "hire_citizen", "build_domain", "slay_monster", "take_resource", "pass_bonus_actions", "act_on_required_action", "submit_concurrent_action"
     # Action parameters (varies by action type)
     citizen_id: Optional[int] = None
     domain_id: Optional[int] = None
@@ -241,6 +241,10 @@ class GameActionRequest(BaseModel):
 
 
 def _rollback_consumed_action(game):
+    rollback = getattr(game, "rollback_last_consumed_action", None)
+    if callable(rollback):
+        rollback()
+        return
     game.actions_remaining = int(getattr(game, "actions_remaining", 0)) + 1
     game.tick_id = int(getattr(game, "tick_id", 0)) - 1
 
@@ -537,7 +541,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 raise HTTPException(status_code=400, detail="citizen_id required")
             if request.payment is None and request.gold_cost is None and request.magic_cost is None:
                 raise HTTPException(status_code=400, detail="payment or gold_cost/magic_cost required")
-            if not game.consume_player_action(request.player_id):
+            if not game.consume_player_action(request.player_id, action_type="hire_citizen"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             g, s, m = resolve_action_payment(request)
             try:
@@ -555,7 +559,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 raise HTTPException(status_code=400, detail="domain_id required")
             if request.payment is None and request.gold_cost is None and request.magic_cost is None:
                 raise HTTPException(status_code=400, detail="payment or gold_cost/magic_cost required")
-            if not game.consume_player_action(request.player_id):
+            if not game.consume_player_action(request.player_id, action_type="build_domain"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             g, s, m = resolve_action_payment(request)
             try:
@@ -573,7 +577,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 raise HTTPException(status_code=400, detail="monster_id required")
             if request.payment is None and request.strength_cost is None and request.magic_cost is None:
                 raise HTTPException(status_code=400, detail="payment or strength_cost/magic_cost required")
-            if not game.consume_player_action(request.player_id):
+            if not game.consume_player_action(request.player_id, action_type="slay_monster"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             g, s, m = resolve_action_payment(request)
             try:
@@ -592,7 +596,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             r = str(request.resource).strip().lower()
             if r not in ("gold", "strength", "magic"):
                 raise HTTPException(status_code=400, detail='resource must be "gold", "strength", or "magic"')
-            if not game.consume_player_action(request.player_id):
+            if not game.consume_player_action(request.player_id, action_type="take_resource"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             try:
                 game.take_resource(request.player_id, r)
@@ -603,7 +607,11 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 _rollback_consumed_action(game)
                 raise
             game.finish_turn_if_no_actions_remaining()
-        
+
+        elif request.action_type == "pass_bonus_actions":
+            if not game.pass_bonus_actions(request.player_id):
+                raise HTTPException(status_code=400, detail="No bonus actions to pass (or not your turn).")
+
         elif request.action_type == "act_on_required_action":
             if request.action is None:
                 raise HTTPException(status_code=400, detail="action required")

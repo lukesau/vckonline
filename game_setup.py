@@ -1,7 +1,7 @@
 import random
 from typing import List
 
-from banned_cards import banned_duke_ids
+from banned_cards import banned_domain_ids, banned_duke_ids
 from cards import Citizen, Domain, Duke, Exhausted, Monster, Starter
 from game_models import Player
 
@@ -49,9 +49,11 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
         case "base1":
             monster_query = "select_base1_monsters"
             citizen_query = "select_base1_citizens"
+            domain_query = "select_base1_domains"
         case "base2":
             monster_query = "select_base2_monsters"
             citizen_query = "select_base2_citizens"
+            domain_query = "select_base2_domains"
     try:
         my_connect = mariadb.connect(
             user="vckonline", password="vckonline", host="127.0.0.1", database="vckonline", port=3306
@@ -117,6 +119,16 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
 
         my_cursor.callproc(domain_query)
         results = my_cursor.fetchall()
+        skip_domains = banned_domain_ids()
+        if skip_domains:
+            results = [r for r in results if int(r["id_domains"]) not in skip_domains]
+        domains_needed = 15  # 5 stacks x 3 cards
+        if len(results) < domains_needed:
+            raise ValueError(
+                "Not enough domains after applying banned_cards.json "
+                f"(need {domains_needed}, have {len(results)}). "
+                "Remove ids from the \"domains\" list to unban."
+            )
         for row in results:
             my_domain = Domain(
                 row["id_domains"],

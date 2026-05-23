@@ -1,4 +1,5 @@
 {
-  "_description": "Dukes listed under \"dukes\" are excluded from the random duke deal at game setup (by database id_dukes). Remove an id from the array to unban that duke.",
-  "dukes": [3]
+  "_description": "Cards listed here are excluded from the random deal at game setup (by database id). Remove an id from a list to unban that card. Keys: 'dukes' uses id_dukes, 'domains' uses id_domains.",
+  "dukes": [3],
+  "domains": [12, 15, 16, 17, 18, 19, 21, 22]
 }

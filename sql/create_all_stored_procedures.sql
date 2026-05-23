@@ -8,8 +8,10 @@ DELIMITER //
 -- Drop existing procedures if they exist (to allow re-running this script)
 DROP PROCEDURE IF EXISTS select_base1_citizens //
 DROP PROCEDURE IF EXISTS select_base1_monsters //
+DROP PROCEDURE IF EXISTS select_base1_domains //
 DROP PROCEDURE IF EXISTS select_base2_citizens //
 DROP PROCEDURE IF EXISTS select_base2_monsters //
+DROP PROCEDURE IF EXISTS select_base2_domains //
 DROP PROCEDURE IF EXISTS select_random_domains //
 DROP PROCEDURE IF EXISTS select_random_dukes //
 
@@ -37,6 +39,18 @@ END //
 CREATE PROCEDURE select_base2_monsters()
 BEGIN
     SELECT * FROM monsters WHERE expansion IN ('base2', 'gnolls', 'undeadsamurai');
+END //
+
+-- Base 1 Domains (first 15 by id_domains)
+CREATE PROCEDURE select_base1_domains()
+BEGIN
+    SELECT * FROM domains WHERE id_domains BETWEEN 1 AND 15 ORDER BY RAND();
+END //
+
+-- Base 2 Domains (ids 16-30)
+CREATE PROCEDURE select_base2_domains()
+BEGIN
+    SELECT * FROM domains WHERE id_domains BETWEEN 16 AND 30 ORDER BY RAND();
 END //
 
 -- Random Domains

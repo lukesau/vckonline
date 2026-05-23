@@ -376,6 +376,7 @@ class Game:
                     self.end_game_triggered = True
                     self._log_game_event(f"End-game condition met ({reason}); finishing this round.")
             self._reveal_hidden_domain_stack_tops()
+            self._reset_free_actions_for_all_players()
             self.turn_index = (self.turn_index + 1) % max(1, len(self.player_list))
             self.turn_number = int(self.turn_number) + 1
             if self.end_game_triggered and self.player_list[self.turn_index].is_first:
@@ -431,6 +432,8 @@ class Game:
             self._log_game_event(
                 f"Harvest finished; {ap}'s action phase ({int(self.actions_remaining)} action(s))."
             )
+            active = self._player_by_id(self.current_player_id())
+            self._apply_action_start_domain_passives(active)
             return True
 
         if self.phase == 'action':
@@ -451,6 +454,7 @@ class Game:
                     self.end_game_triggered = True
                     self._log_game_event(f"End-game condition met ({reason}); finishing this round.")
             self._reveal_hidden_domain_stack_tops()
+            self._reset_free_actions_for_all_players()
             self.turn_index = (self.turn_index + 1) % max(1, len(self.player_list))
             self.turn_number = int(self.turn_number) + 1
             if self.end_game_triggered and self.player_list[self.turn_index].is_first:
@@ -478,13 +482,146 @@ class Game:
         self.tick_id += 1
         return True
 
-    def consume_player_action(self, player_id):
+    # ----------------------------------------------------------------------
+    # Free / bonus actions
+    #
+    # A player may accrue "free" (a.k.a. bonus) actions during a turn from
+    # domain/citizen effects (e.g. Eye of Asteraten activation: "s 5 + grant_action slay").
+    # These persist only for the turn they were granted and stack with each other.
+    # When the player performs a matching action (slay/hire/build) we prefer to
+    # spend a free action over a regular one. When their regular actions are
+    # spent but a free action remains, the engine surfaces a "bonus_action_offer"
+    # required-action so the client can offer "use bonus / pass turn".
+    # ----------------------------------------------------------------------
+
+    _FREE_ACTION_ATTR_BY_KIND = {
+        "slay": "free_slay_actions",
+        "hire": "free_hire_actions",
+        "build": "free_build_actions",
+    }
+
+    _FREE_ACTION_KIND_BY_ACTION_TYPE = {
+        "slay_monster": "slay",
+        "hire_citizen": "hire",
+        "build_domain": "build",
+    }
+
+    def _free_kind_for_action_type(self, action_type):
+        if not action_type:
+            return None
+        return self._FREE_ACTION_KIND_BY_ACTION_TYPE.get(str(action_type).strip().lower())
+
+    def _free_action_attr(self, kind):
+        return self._FREE_ACTION_ATTR_BY_KIND.get((kind or "").strip().lower())
+
+    def _get_free_action_count(self, player, kind):
+        attr = self._free_action_attr(kind)
+        if not attr or not player:
+            return 0
+        return int(getattr(player, attr, 0) or 0)
+
+    def _set_free_action_count(self, player, kind, value):
+        attr = self._free_action_attr(kind)
+        if not attr or not player:
+            return
+        setattr(player, attr, max(0, int(value)))
+
+    def _player_has_any_free_actions(self, player):
+        if not player:
+            return False
+        return any(
+            int(getattr(player, attr, 0) or 0) > 0
+            for attr in self._FREE_ACTION_ATTR_BY_KIND.values()
+        )
+
+    def _grant_free_action(self, player, kind, amount=1):
+        if not player or amount <= 0:
+            return False
+        if not self._free_action_attr(kind):
+            return False
+        self._set_free_action_count(player, kind, self._get_free_action_count(player, kind) + int(amount))
+        return True
+
+    def _reset_free_actions_for_all_players(self):
+        for p in list(getattr(self, "player_list", []) or []):
+            for attr in self._FREE_ACTION_ATTR_BY_KIND.values():
+                setattr(p, attr, 0)
+
+    def _bonus_action_offer_state(self, player):
+        return {
+            "id": player.player_id,
+            "action": "bonus_action_offer",
+            "free_slay_actions": int(getattr(player, "free_slay_actions", 0) or 0),
+            "free_hire_actions": int(getattr(player, "free_hire_actions", 0) or 0),
+            "free_build_actions": int(getattr(player, "free_build_actions", 0) or 0),
+        }
+
+    def _refresh_action_phase_required(self, player_id):
         """
-        Consume one standard action for the active player.
+        After a consume / rollback, set action_required to the appropriate idle
+        state for the action phase. Leaves non-idle prompts (choose_*,
+        domain_self_convert, etc.) untouched.
+        """
+        ar = getattr(self, "action_required", None)
+        if not isinstance(ar, dict):
+            return
+        aa = str(ar.get("action", "") or "")
+        if aa not in ("", "standard_action", "bonus_action_offer"):
+            return
+        player = self._player_by_id(player_id)
+        if not player:
+            return
+        if int(getattr(self, "actions_remaining", 0) or 0) > 0:
+            ar.clear()
+            ar["id"] = player_id
+            ar["action"] = "standard_action"
+            return
+        if self._player_has_any_free_actions(player):
+            ar.clear()
+            ar.update(self._bonus_action_offer_state(player))
+            return
+        ar.clear()
+        ar["id"] = player_id
+        ar["action"] = "standard_action"
+
+    def _execute_grant_action_payout(self, raw, player_id):
+        """Compound / activation payout fragment: grant a free (bonus) action for this turn."""
+        parts = (raw or "").split()
+        if len(parts) < 2:
+            return [-9999, 0, 0, 0]
+        kind = parts[1].strip().lower()
+        if not self._free_action_attr(kind):
+            return [-9999, 0, 0, 0]
+        amount = 1
+        if len(parts) >= 3:
+            try:
+                amount = int(parts[2])
+            except (TypeError, ValueError):
+                amount = 1
+        if amount <= 0:
+            return [0, 0, 0, 0]
+        player = self._player_by_id(player_id)
+        if not player:
+            return [-9999, 0, 0, 0]
+        self._grant_free_action(player, kind, amount)
+        plural = "s" if amount != 1 else ""
+        self._log_game_event(
+            f"{self._player_label(player_id)} gained {amount} bonus {kind} action{plural} this turn."
+        )
+        return [0, 0, 0, 0]
+
+    def consume_player_action(self, player_id, action_type=None):
+        """
+        Consume one action for the active player. Prefers spending a matching
+        free (bonus) action over a regular one.
 
         When this drops actions_remaining to 0, the turn is not advanced here:
         the caller must apply the hire/build/slay/take first, then call
         finish_turn_if_no_actions_remaining() so logs and engine state stay ordered.
+
+        `action_type` should be the request action_type (e.g. "slay_monster",
+        "hire_citizen", "build_domain", "take_resource"). It is used to decide
+        whether a matching free counter is available.
         """
         if self.phase == "action_end_pending":
             return False
@@ -498,10 +635,19 @@ class Game:
                 if self.phase == 'action':
                     break
 
-        # If we're blocked on a required choice, no standard actions can be taken.
+        free_kind = self._free_kind_for_action_type(action_type)
+        player = self._player_by_id(player_id)
+        free_count = self._get_free_action_count(player, free_kind) if (player and free_kind) else 0
+
+        # If we're blocked on a required choice, only allow consumption when
+        # the prompt is our own bonus_action_offer AND the requested action
+        # type matches a free counter that's still > 0.
         if self.action_required and self.action_required.get("id") and self.action_required.get("id") != self.game_id:
             aa = str(self.action_required.get("action", "") or "")
-            if self.action_required.get("action") in (
+            if aa == "bonus_action_offer":
+                if not (free_kind and free_count > 0):
+                    return False
+            elif self.action_required.get("action") in (
                 "bonus_resource_choice",
                 "manual_harvest",
                 "harvest_optional_exchange",
@@ -515,23 +661,58 @@ class Game:
 
         if self.actions_remaining is None:
             self.actions_remaining = 2
-        if int(self.actions_remaining) <= 0:
+        regulars = int(self.actions_remaining)
+        if regulars <= 0 and free_count <= 0:
             return False
 
-        self.actions_remaining = int(self.actions_remaining) - 1
-        self.tick_id += 1
-        # Keep standard action prompt while actions remain.
-        if int(self.actions_remaining) > 0:
-            self.action_required["id"] = self.current_player_id()
-            self.action_required["action"] = "standard_action"
+        if free_kind and free_count > 0:
+            self._set_free_action_count(player, free_kind, free_count - 1)
+            self._last_consumed_action_marker = ("free", free_kind)
+        else:
+            self.actions_remaining = regulars - 1
+            self._last_consumed_action_marker = ("regular", None)
 
+        self.tick_id += 1
+        self._refresh_action_phase_required(player_id)
         return True
 
+    def rollback_last_consumed_action(self):
+        """Undo the most recent consume_player_action when the underlying action failed."""
+        marker = getattr(self, "_last_consumed_action_marker", None)
+        if not marker:
+            self.actions_remaining = int(getattr(self, "actions_remaining", 0)) + 1
+            self.tick_id = int(getattr(self, "tick_id", 0)) - 1
+            return
+        kind_a, kind_b = marker
+        if kind_a == "regular":
+            self.actions_remaining = int(getattr(self, "actions_remaining", 0)) + 1
+        elif kind_a == "free" and kind_b:
+            player = self._player_by_id(self.current_player_id())
+            if player:
+                cur = self._get_free_action_count(player, kind_b)
+                self._set_free_action_count(player, kind_b, cur + 1)
+        self.tick_id = int(getattr(self, "tick_id", 0)) - 1
+        self._last_consumed_action_marker = None
+        self._refresh_action_phase_required(self.current_player_id())
+
     def finish_turn_if_no_actions_remaining(self):
-        """After a successful standard action, advance roll/harvest if the turn was just spent."""
+        """After a successful standard action, advance roll/harvest if the turn was just spent.
+
+        If the active player has unspent free (bonus) actions, the turn does
+        not end yet: instead, surface a "bonus_action_offer" required-action so
+        the client can offer "use bonus / pass turn".
+        """
         if getattr(self, "phase", None) != "action" or int(getattr(self, "actions_remaining", 0) or 0) != 0:
             return
         if self.is_blocked_on_concurrent_action():
+            return
+        player = self._player_by_id(self.current_player_id())
+        if player and self._player_has_any_free_actions(player):
+            ar = self.action_required if isinstance(self.action_required, dict) else None
+            aa = str((ar or {}).get("action", "") or "")
+            if ar is not None and aa in ("", "standard_action"):
+                ar.clear()
+                ar.update(self._bonus_action_offer_state(player))
             return
         ar = getattr(self, "action_required", None) or {}
         aid = ar.get("id")
@@ -541,6 +722,37 @@ class Game:
         if self._start_action_end_domain_sequence(self.current_player_id()):
             return
         self.advance_tick()
+
+    def pass_bonus_actions(self, player_id):
+        """
+        Player declines to spend any remaining bonus actions. Zero the
+        counters and advance the turn as usual.
+        """
+        if getattr(self, "phase", None) != "action":
+            return False
+        if player_id != self.current_player_id():
+            return False
+        player = self._player_by_id(player_id)
+        if not player:
+            return False
+        had_free = self._player_has_any_free_actions(player)
+        in_offer = False
+        if isinstance(self.action_required, dict):
+            in_offer = str(self.action_required.get("action", "") or "") == "bonus_action_offer"
+        if not had_free and not in_offer:
+            return False
+        for attr in self._FREE_ACTION_ATTR_BY_KIND.values():
+            setattr(player, attr, 0)
+        if isinstance(self.action_required, dict) and in_offer:
+            self.action_required.clear()
+            self.action_required["id"] = player_id
+            self.action_required["action"] = "standard_action"
+        self.tick_id += 1
+        self._log_game_event(
+            f"{self._player_label(player_id)} declined remaining bonus action(s)."
+        )
+        self.finish_turn_if_no_actions_remaining()
+        return True
 
     def roll_phase(self):
         # Roll the RNG dice first (display value).
@@ -1359,7 +1571,9 @@ class Game:
         raw = (command or "").strip()
         low = raw.lower()
         if low.startswith("manipulate_resources"):
-            return self._execute_manipulate_resources_self_convert_payout(raw, player_id)
+            return self._execute_manipulate_resources_payout(raw, player_id)
+        if low.startswith("grant_action"):
+            return self._execute_grant_action_payout(raw, player_id)
         if low.startswith("steal"):
             return self._execute_steal_payout(raw, player_id)
         if low == "concurrent_flip_one_citizen":
@@ -1909,6 +2123,30 @@ class Game:
             return [-9999, 0, 0, 0]
         return self._prompt_or_apply_self_convert(raw, player, None)
 
+    def _execute_manipulate_resources_gain_payout(self, raw, player_id):
+        """Activation / compound payout fragment: simple bank gain (mode=gain gain=<r>:<n>)."""
+        player = self._player_by_id(player_id)
+        if not player:
+            return [-9999, 0, 0, 0]
+        kv = _parse_domain_effect_kv(raw)
+        if (kv.get("mode") or "").strip().lower() != "gain":
+            return [-9999, 0, 0, 0]
+        gain_k, gain_n = _parse_resource_kv(kv.get("gain", ""))
+        if not gain_k or gain_n <= 0:
+            return [-9999, 0, 0, 0]
+        idx = {"g": 0, "s": 1, "m": 2, "v": 3}
+        payout = [0, 0, 0, 0]
+        payout[idx[gain_k]] += gain_n
+        return payout
+
+    def _execute_manipulate_resources_payout(self, raw, player_id):
+        """Dispatch a manipulate_resources payout fragment by mode."""
+        kv = _parse_domain_effect_kv(raw)
+        mode = (kv.get("mode") or "").strip().lower()
+        if mode == "gain":
+            return self._execute_manipulate_resources_gain_payout(raw, player_id)
+        return self._execute_manipulate_resources_self_convert_payout(raw, player_id)
+
     def _player_resource_tuple(self, player):
         return (
             int(getattr(player, "gold_score", 0) or 0),
@@ -1955,6 +2193,46 @@ class Game:
         if not rest.lower().startswith("manipulate_resources"):
             return None
         return _parse_domain_effect_kv(rest)
+
+    def _parse_manipulate_action_start(self, passive_text):
+        s = (passive_text or "").strip()
+        low = s.lower()
+        if not low.startswith("action.start"):
+            return None
+        rest = s[len("action.start"):].strip()
+        if not rest.lower().startswith("manipulate_resources"):
+            return None
+        return _parse_domain_effect_kv(rest)
+
+    def _apply_manipulate_gain(self, player, kv, source_label="Domain"):
+        """Apply a 'mode=gain' bank gain to the player and log the score delta."""
+        if not player:
+            return False
+        gain_k, gain_n = _parse_resource_kv(kv.get("gain", ""))
+        if not gain_k or gain_n <= 0:
+            return False
+        before = self._player_scores_line(player)
+        self._bank_gain_for_active(player, gain_k, gain_n)
+        after = self._player_scores_line(player)
+        if before != after:
+            self._log_game_event(
+                f"{self._player_label(player.player_id)} \"{source_label}\" gain; scores {before} -> {after}"
+            )
+        return True
+
+    def _apply_action_start_domain_passives(self, player):
+        """Fire any owned-domain passives keyed to 'action.start' for the active player."""
+        if not player:
+            return
+        for d in list(getattr(player, "owned_domains", []) or []):
+            if self._domain_recurring_passive_on_build_turn_cooldown(d):
+                continue
+            kv = self._parse_manipulate_action_start(getattr(d, "passive_effect", None) or "")
+            if not kv:
+                continue
+            mode = (kv.get("mode") or "").strip().lower()
+            if mode == "gain":
+                self._apply_manipulate_gain(player, kv, source_label=getattr(d, "name", "Domain"))
 
     def _collect_action_end_manipulate_queue(self, active_player):
         out = []
