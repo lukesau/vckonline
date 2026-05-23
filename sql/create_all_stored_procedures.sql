@@ -48,10 +48,10 @@ BEGIN
     SELECT * FROM domains WHERE expansion = 'base' ORDER BY RAND();
 END //
 
--- Random Domains
+-- Random Domains (returns all rows; caller trims to what it needs after bans)
 CREATE PROCEDURE select_random_domains()
 BEGIN
-    SELECT * FROM domains ORDER BY RAND() LIMIT 15;
+    SELECT * FROM domains ORDER BY RAND();
 END //
 
 -- Random Dukes

@@ -49,11 +49,11 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
         case "base1":
             monster_query = "select_base1_monsters"
             citizen_query = "select_base1_citizens"
-            domain_query = "select_base_domains"
+            domain_query = "select_random_domains"
         case "base2":
             monster_query = "select_base2_monsters"
             citizen_query = "select_base2_citizens"
-            domain_query = "select_base_domains"
+            domain_query = "select_random_domains"
     try:
         my_connect = mariadb.connect(
             user="vckonline", password="vckonline", host="127.0.0.1", database="vckonline", port=3306
