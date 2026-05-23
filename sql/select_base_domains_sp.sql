@@ -1,0 +1,8 @@
+DELIMITER //
+
+CREATE PROCEDURE select_base_domains()
+BEGIN
+    SELECT * FROM domains WHERE id_domains BETWEEN 1 AND 22 ORDER BY RAND();
+END //
+
+DELIMITER ;

@@ -12,6 +12,7 @@ DROP PROCEDURE IF EXISTS select_base1_domains //
 DROP PROCEDURE IF EXISTS select_base2_citizens //
 DROP PROCEDURE IF EXISTS select_base2_monsters //
 DROP PROCEDURE IF EXISTS select_base2_domains //
+DROP PROCEDURE IF EXISTS select_base_domains //
 DROP PROCEDURE IF EXISTS select_random_domains //
 DROP PROCEDURE IF EXISTS select_random_dukes //
 
@@ -41,16 +42,10 @@ BEGIN
     SELECT * FROM monsters WHERE expansion IN ('base2', 'gnolls', 'undeadsamurai');
 END //
 
--- Base 1 Domains (first 15 by id_domains)
-CREATE PROCEDURE select_base1_domains()
+-- Base Domains (shared by base1/base2: ids 1-22 in randomized order)
+CREATE PROCEDURE select_base_domains()
 BEGIN
-    SELECT * FROM domains WHERE id_domains BETWEEN 1 AND 15 ORDER BY RAND();
-END //
-
--- Base 2 Domains (ids 16-30)
-CREATE PROCEDURE select_base2_domains()
-BEGIN
-    SELECT * FROM domains WHERE id_domains BETWEEN 16 AND 30 ORDER BY RAND();
+    SELECT * FROM domains WHERE id_domains BETWEEN 1 AND 22 ORDER BY RAND();
 END //
 
 -- Random Domains
