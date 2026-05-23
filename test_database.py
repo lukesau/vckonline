@@ -197,7 +197,9 @@ def test_database_connection():
         'select_base2_citizens',
         'select_base2_monsters',
         'select_random_domains',
-        'select_random_dukes'
+        'select_random_dukes',
+        'select_test1_domains',
+        'select_test2_domains'
     ]
     
     try:
@@ -221,6 +223,8 @@ def test_database_connection():
             print("   - select_base2_monsters_sp.sql")
             print("   - select_random_domains_sp.sql")
             print("   - select_random_dukes_sp.sql")
+            print("   - select_test1_domains_sp.sql")
+            print("   - select_test2_domains_sp.sql")
     except mariadb.Error as e:
         print(f"   ✗ Error checking procedures: {e}")
     
@@ -255,7 +259,9 @@ def test_database_connection():
         ('select_base2_citizens', 'Citizens'),
         ('select_base2_monsters', 'Monsters'),
         ('select_random_domains', 'Domains'),
-        ('select_random_dukes', 'Dukes')
+        ('select_random_dukes', 'Dukes'),
+        ('select_test1_domains', 'Domains'),
+        ('select_test2_domains', 'Domains')
     ]
     
     for proc_name, card_type in procedure_tests:

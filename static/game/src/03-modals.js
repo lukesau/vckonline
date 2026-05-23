@@ -1,0 +1,1102 @@
+// ── Player detail modal (tableau drill-down) ────────────────────────────
+function detailPill(label, value) {
+  return `<span class="player-detail-pill"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</span>`;
+}
+
+function tableauCardFullText(card) {
+  if (!card || typeof card !== 'object') return '';
+  const rawText = (card.text ?? '').toString().trim();
+  if (rawText) return rawText;
+
+  const parts = [];
+  pushHarvestHints(parts, card);
+  if (card.monster_id !== undefined && card.monster_id !== null) {
+    const vp = Number(card.vp_reward || 0);
+    const gr = Number(card.gold_reward || 0);
+    const sr = Number(card.strength_reward || 0);
+    const mr = Number(card.magic_reward || 0);
+    parts.push(`Reward: VP ${vp} · G ${gr} · S ${sr} · M ${mr}`);
+  }
+  const passive = (card.passive_effect ?? '').toString().trim();
+  const activation = (card.activation_effect ?? '').toString().trim();
+  if (passive) parts.push(`Passive: ${passive}`);
+  if (activation) parts.push(`Activation: ${activation}`);
+  const spOn = (card.special_payout_on_turn ?? '').toString().trim();
+  const spOff = (card.special_payout_off_turn ?? '').toString().trim();
+  if (spOn) parts.push(`Special (on turn): ${spOn}`);
+  if (spOff) parts.push(`Special (off turn): ${spOff}`);
+  const specialReward = (card.special_reward ?? '').toString().trim();
+  const specialCost = (card.special_cost ?? '').toString().trim();
+  if (specialReward) parts.push(`Special reward: ${specialReward}`);
+  if (specialCost) parts.push(`Special cost: ${specialCost}`);
+
+  if (card.duke_id !== undefined) {
+    const mults = [];
+    const add = (label, val) => {
+      if (val === undefined || val === null) return;
+      const n = Number(val);
+      if (!Number.isFinite(n) || n === 0) return;
+      mults.push(`${label}×${n}`);
+    };
+    const addResource = (label, val) => {
+      if (val === undefined || val === null) return;
+      const n = Number(val);
+      if (!Number.isFinite(n) || n === 0) return;
+      mults.push(`${label}×1/${n}`);
+    };
+    addResource('Gold', card.gold_multiplier);
+    addResource('Strength', card.strength_multiplier);
+    addResource('Magic', card.magic_multiplier);
+    add('Shadow', card.shadow_multiplier);
+    add('Holy', card.holy_multiplier);
+    add('Soldier', card.soldier_multiplier);
+    add('Worker', card.worker_multiplier);
+    add('Monster', card.monster_multiplier);
+    add('Citizen', card.citizen_multiplier);
+    add('Domain', card.domain_multiplier);
+    add('Boss', card.boss_multiplier);
+    add('Minion', card.minion_multiplier);
+    add('Beast', card.beast_multiplier);
+    add('Titan', card.titan_multiplier);
+    if (mults.length) parts.unshift(mults.join(' · '));
+  }
+  return parts.join('\n').trim();
+}
+
+function renderDetailCardItem(card, count = 1) {
+  if (!card || typeof card !== 'object') {
+    return `<div class="player-detail-item"><div class="player-detail-item-title">${escapeHtml(String(card))}</div></div>`;
+  }
+  const name = card.name || card.title || '(unnamed)';
+  const id = card.starter_id || card.citizen_id || card.monster_id || card.domain_id || card.duke_id || card.id || '';
+  const isCitizen = card.citizen_id !== undefined && card.citizen_id !== null;
+
+  const hints = [];
+  if (card.roll_match1 !== undefined || card.roll_match2 !== undefined) {
+    const rm1 = card.roll_match1 ?? '';
+    const rm2 = card.roll_match2 ?? '';
+    hints.push(`Roll: ${rm1}${rm2 !== '' ? '/' + rm2 : ''}`);
+  }
+  if (card.gold_cost !== undefined) hints.push(`Gold cost: ${card.gold_cost}`);
+  if (card.strength_cost !== undefined) hints.push(`Strength cost: ${card.strength_cost}`);
+  if (card.magic_cost !== undefined) hints.push(`Magic cost: ${card.magic_cost}`);
+  pushHarvestHints(hints, card);
+  if (isCitizen && card.is_flipped) hints.push('Flipped — no harvest payout / roll spend counts');
+
+  const { sn, hn, son, wn } = citizenRoleCounts(card);
+  const roleParts = [];
+  if (sn > 0) roleParts.push(`Shadow +${sn}`);
+  if (hn > 0) roleParts.push(`Holy +${hn}`);
+  if (son > 0) roleParts.push(`Soldier +${son}`);
+  if (wn > 0) roleParts.push(`Worker +${wn}`);
+  const isDomain = card.domain_id !== undefined && card.domain_id !== null;
+  const showRoleRow = (isCitizen || isDomain) && roleParts.length;
+  const roleBlock = showRoleRow
+    ? `<div class="player-detail-item-sub"><strong>Roles:</strong> ${escapeHtml(roleParts.join(' · '))}</div>`
+    : '';
+
+  const subtitle = hints.length ? `<div class="player-detail-item-sub">${escapeHtml(hints.join(' · '))}</div>` : '';
+  const fullText = tableauCardFullText(card);
+  const rulesText = fullText
+    ? `<div class="player-detail-item-sub" style="margin-top:6px;">${escapeHtml(fullText)}</div>`
+    : '';
+  const idText = id !== '' ? ` <span class="player-detail-mini">(#${escapeHtml(id)})</span>` : '';
+  const qty = Number(count) || 1;
+  const qtyText = qty > 1 ? ` <span class="player-detail-mini">×${qty}</span>` : '';
+  return `<div class="player-detail-item"><div class="player-detail-item-title">${escapeHtml(name)}${qtyText}${idText}</div>${subtitle}${roleBlock}${rulesText}</div>`;
+}
+
+function renderDetailCardList(title, cards) {
+  const arr = Array.isArray(cards) ? cards : [];
+  if (!arr.length) {
+    return `<div class="player-detail-card-block"><h3>${escapeHtml(title)}</h3><div class="player-detail-mini">none</div></div>`;
+  }
+  const grouped = groupCardsForTableau(arr);
+  if (!grouped) {
+    return `<div class="player-detail-card-block"><h3>${escapeHtml(title)} <span class="player-detail-mini">(${arr.length})</span></h3>${arr.map(c => renderDetailCardItem(c)).join('')}</div>`;
+  }
+  return `<div class="player-detail-card-block"><h3>${escapeHtml(title)} <span class="player-detail-mini">(${arr.length} cards, ${grouped.length} types)</span></h3>${grouped.map(x => renderDetailCardItem(x.card, x.count)).join('')}</div>`;
+}
+
+function renderPlayerDetailInner(state, playerId) {
+  const players = state.player_list || [];
+  const subject = players.find(p => idsMatch(p.player_id, playerId));
+  if (!subject) {
+    return `<p class="player-detail-mini">Player not found in this game.</p>`;
+  }
+  const ord = playerIndexInList(state, subject);
+
+  const dukes = Array.isArray(subject.owned_dukes) ? subject.owned_dukes : [];
+  const duke = dukes.length ? dukes[0] : null;
+  const dukeName = duke ? duke.name || 'Duke' : 'Hidden';
+  const dukeText = duke ? tableauCardFullText(duke) : '';
+  const dukeLine = `<div class="player-detail-mini" style="margin-bottom:12px;"><strong>Duke:</strong> ${escapeHtml(duke ? dukeName : '(hidden from opponents)')}${dukeText ? `<div style="margin-top:6px;white-space:pre-wrap;">${escapeHtml(dukeText)}</div>` : ''}</div>`;
+
+  const kv = `
+    <div class="player-detail-kv">
+      ${detailPill('Seat', ord >= 0 ? `${ord + 1} / ${players.length}` : '?')}
+      ${detailPill('Gold', subject.gold_score ?? 0)}
+      ${detailPill('Strength', subject.strength_score ?? 0)}
+      ${detailPill('Magic', subject.magic_score ?? 0)}
+      ${detailPill('Victory', subject.victory_score ?? 0)}
+      ${detailPill('Shadow', subject.shadow_count ?? 0)}
+      ${detailPill('Holy', subject.holy_count ?? 0)}
+      ${detailPill('Soldier', subject.soldier_count ?? 0)}
+      ${detailPill('Worker', subject.worker_count ?? 0)}
+      ${detailPill('Minion', subject.minion_count ?? 0)}
+      ${detailPill('Titan', subject.titan_count ?? 0)}
+      ${detailPill('Warden', subject.warden_count ?? 0)}
+      ${detailPill('Boss', subject.boss_count ?? 0)}
+      ${detailPill('Beast', subject.beast_count ?? 0)}
+    </div>
+  `;
+
+  return `
+    ${kv}
+    ${dukeLine}
+    <div class="player-detail-grid">
+      ${renderDetailCardList('Starters', subject.owned_starters)}
+      ${renderDetailCardList('Citizens', subject.owned_citizens)}
+      ${renderDetailCardList('Monsters', subject.owned_monsters)}
+      ${renderDetailCardList('Domains', subject.owned_domains)}
+    </div>
+  `;
+}
+
+function openPlayerDetailModal(playerId) {
+  const state = latestGameState;
+  const body = document.getElementById('player-detail-body');
+  const panel = document.getElementById('player-detail-modal');
+  const titleEl = document.getElementById('player-detail-title');
+  if (!body || !panel) return;
+  if (!state) return;
+  const players = state.player_list || [];
+  const subject = players.find(p => idsMatch(p.player_id, playerId));
+  if (titleEl) {
+    if (!subject) {
+      titleEl.textContent = 'Player';
+    } else {
+      const displayName = (subject.name || '').toString().trim() || subject.player_id || 'Player';
+      const poss = n => {
+        const s = (n ?? '').toString().trim();
+        if (!s) return 'Player';
+        return s.toLowerCase().endsWith('s') ? `${s}'` : `${s}'s`;
+      };
+      titleEl.textContent = idsMatch(playerId, PLAYER_ID) ? 'Your tableau (detail)' : `${poss(displayName)} tableau`;
+    }
+  }
+  body.innerHTML = renderPlayerDetailInner(state, playerId);
+  panel.classList.add('is-open');
+  panel.setAttribute('aria-hidden', 'false');
+}
+
+function closePlayerDetailModal() {
+  const panel = document.getElementById('player-detail-modal');
+  if (!panel) return;
+  panel.classList.remove('is-open');
+  panel.setAttribute('aria-hidden', 'true');
+}
+
+function initPlayerDetailModal() {
+  const panel = document.getElementById('player-detail-modal');
+  const closeBtn = document.getElementById('player-detail-close');
+  if (panel) {
+    panel.addEventListener('click', e => {
+      if (e.target === panel) closePlayerDetailModal();
+    });
+  }
+  if (closeBtn) closeBtn.addEventListener('click', () => closePlayerDetailModal());
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const ac = document.getElementById('action-confirm-modal');
+    if (ac && ac.classList.contains('is-open')) return;
+    closePlayerDetailModal();
+  });
+}
+
+// ── Game over overlay ─────────────────────────────────────────────────────
+let _gameOverDetailsPage = 0;
+
+function finalScoresSorted(state) {
+  return [...(state.final_scores || [])].sort(
+    (a, b) => (Number(a.rank) || 99) - (Number(b.rank) || 99)
+  );
+}
+
+function finalResultFromState(state) {
+  if (state.final_result && typeof state.final_result === 'object') {
+    return state.final_result;
+  }
+  const scores = finalScoresSorted(state);
+  if (!scores.length) return null;
+  const topVp = Number(scores[0].total_vp);
+  const vpTied = scores.filter(s => Number(s.total_vp) === topVp);
+  if (vpTied.length === 1) {
+    return { kind: 'win', headline: `${scores[0].name} wins!`, detail: null };
+  }
+  const minTableau = Math.min(...vpTied.map(s => Number(s.tableau_size) || 0));
+  const winners = vpTied.filter(s => Number(s.tableau_size) === minTableau);
+  if (winners.length === 1) {
+    const w = winners[0];
+    return {
+      kind: 'tiebreak',
+      headline: `${w.name} wins on tie-break!`,
+      detail: `Tied at ${topVp} VP; ${w.name} had the smaller tableau.`,
+    };
+  }
+  const names = winners.map(s => s.name).join(', ');
+  return {
+    kind: 'tie',
+    headline: 'Tie game!',
+    detail: `${names} tied at ${topVp} VP with ${minTableau} tableau cards each.`,
+  };
+}
+
+function dukeCardFromScore(s) {
+  const duke = s && s.duke;
+  if (!duke || typeof duke !== 'object') return null;
+  if (duke.card && typeof duke.card === 'object') return duke.card;
+  if (duke.duke_id != null) return duke;
+  return null;
+}
+
+function appendGameOverFooter(panel, state) {
+  const shutdown = state.shutdown || null;
+  let countdown = panel.querySelector('#game-shutdown-countdown');
+  if (!countdown) {
+    countdown = mk('game-shutdown-countdown');
+    countdown.id = 'game-shutdown-countdown';
+    panel.appendChild(countdown);
+  }
+  countdown.textContent = shutdown?.redirect_at
+    ? `Returning to lobby in ${fmtSecondsRemaining(shutdown.redirect_at)}s…`
+    : 'Returning to lobby soon…';
+
+  let actions = panel.querySelector('.game-shutdown-actions');
+  if (!actions) {
+    actions = mk('game-shutdown-actions');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'game-shutdown-btn';
+    btn.textContent = 'Go to lobby now';
+    btn.addEventListener('click', () => goToLobbyNow());
+    actions.appendChild(btn);
+    panel.appendChild(actions);
+  }
+}
+
+function fillGameOverSummaryBody(body, state) {
+  body.replaceChildren();
+  body.className = 'game-over-body game-over-body-summary';
+
+  const fr = finalResultFromState(state);
+  if (fr && fr.headline) {
+    const headline = mk('game-over-winner');
+    headline.textContent = fr.headline;
+    body.appendChild(headline);
+    if (fr.detail) {
+      const note = mk('game-over-result-note');
+      note.textContent = fr.detail;
+      body.appendChild(note);
+    }
+  }
+
+  const list = mk('game-over-standings');
+  finalScoresSorted(state).forEach(s => {
+    const row = mk('game-over-standing-row');
+    const rank = mk('rank');
+    rank.textContent = `#${s.rank}`;
+    row.appendChild(rank);
+    const name = mk('sname');
+    name.textContent = s.name;
+    row.appendChild(name);
+    const total = mk('total');
+    total.textContent = `${s.total_vp} VP`;
+    row.appendChild(total);
+    list.appendChild(row);
+  });
+  body.appendChild(list);
+
+  const actions = mk('game-over-summary-actions');
+  const detailsBtn = document.createElement('button');
+  detailsBtn.type = 'button';
+  detailsBtn.className = 'game-shutdown-btn game-over-details-btn';
+  detailsBtn.textContent = 'Scoring details';
+  detailsBtn.addEventListener('click', () => {
+    _gameOverDetailsPage = 0;
+    showGameOverDetailsView(state);
+  });
+  actions.appendChild(detailsBtn);
+  body.appendChild(actions);
+}
+
+function fillGameOverDetailsBody(body, state, pageIndex) {
+  body.replaceChildren();
+  body.className = 'game-over-body game-over-body-details';
+
+  const scores = finalScoresSorted(state);
+  const totalPages = scores.length;
+  const idx = Math.max(0, Math.min(pageIndex, Math.max(0, totalPages - 1)));
+  _gameOverDetailsPage = idx;
+  const s = scores[idx];
+  if (!s) return;
+
+  const header = mk('game-over-details-header');
+  const backBtn = document.createElement('button');
+  backBtn.type = 'button';
+  backBtn.className = 'game-over-back-btn';
+  backBtn.textContent = '← Summary';
+  backBtn.addEventListener('click', () => showGameOverSummaryView(state));
+  header.appendChild(backBtn);
+
+  const pageLbl = mk('game-over-details-page');
+  pageLbl.textContent = totalPages > 1 ? `${idx + 1} / ${totalPages}` : '';
+  header.appendChild(pageLbl);
+  body.appendChild(header);
+
+  const title = mk('game-over-details-player');
+  title.textContent = `#${s.rank} — ${s.name}`;
+  body.appendChild(title);
+
+  const dukeCard = dukeCardFromScore(s);
+  const dukeInfo = s.duke;
+  if (dukeInfo && dukeInfo.duke_id != null) {
+    const dukeBlock = mk('game-over-duke-block');
+    const strip = mk('score-duke-strip');
+    const img = document.createElement('img');
+    img.className = 'score-duke-thumb';
+    img.alt = '';
+    img.loading = 'lazy';
+    img.src = `/card-image/duke/${dukeInfo.duke_id}`;
+    strip.appendChild(img);
+    const dn = mk('score-duke-name');
+    dn.textContent = dukeInfo.name || 'Duke';
+    strip.appendChild(dn);
+    dukeBlock.appendChild(strip);
+    const dukeText = tableauCardFullText(dukeCard);
+    if (dukeText) {
+      const rules = mk('game-over-duke-text');
+      rules.textContent = dukeText;
+      dukeBlock.appendChild(rules);
+    }
+    body.appendChild(dukeBlock);
+  } else if (Number(s.duke_vp) > 0) {
+    const legacy = mk('score-duke-none');
+    legacy.textContent = 'Duke (card not in snapshot)';
+    body.appendChild(legacy);
+  } else {
+    const noDuke = mk('score-duke-none');
+    noDuke.textContent = 'No Duke';
+    body.appendChild(noDuke);
+  }
+
+  const lines = Array.isArray(s.duke_vp_breakdown) ? s.duke_vp_breakdown : [];
+  if (lines.length) {
+    const list = mk('duke-vp-breakdown');
+    lines.forEach(line => {
+      const li = mk('duke-vp-line');
+      const top = mk('duke-vp-line-top');
+      const lbl = mk('duke-vp-line-label');
+      lbl.textContent = line.label || '';
+      const val = mk('duke-vp-line-vp');
+      val.textContent = `+${line.vp} VP`;
+      top.appendChild(lbl);
+      top.appendChild(val);
+      li.appendChild(top);
+      if (line.detail) {
+        const det = mk('duke-vp-line-detail');
+        det.textContent = line.detail;
+        li.appendChild(det);
+      }
+      list.appendChild(li);
+    });
+    body.appendChild(list);
+  }
+
+  const summary = mk('score-vp-summary');
+  summary.textContent = `${s.base_vp} base + ${s.duke_vp} Duke = ${s.total_vp} VP`;
+  body.appendChild(summary);
+
+  if (Number(s.tableau_size) > 0 || s.tied_on_vp) {
+    const tb = mk('game-over-tableau-note');
+    tb.textContent = `Tableau: ${s.tableau_size ?? '?'} cards`;
+    body.appendChild(tb);
+  }
+
+  if (totalPages > 1) {
+    const pager = mk('game-over-details-pager');
+    const prev = document.createElement('button');
+    prev.type = 'button';
+    prev.className = 'game-shutdown-btn';
+    prev.textContent = 'Previous';
+    prev.disabled = idx <= 0;
+    prev.addEventListener('click', () => showGameOverDetailsView(state, idx - 1));
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.className = 'game-shutdown-btn';
+    next.textContent = 'Next';
+    next.disabled = idx >= totalPages - 1;
+    next.addEventListener('click', () => showGameOverDetailsView(state, idx + 1));
+    pager.appendChild(prev);
+    pager.appendChild(next);
+    body.appendChild(pager);
+  }
+}
+
+function showGameOverSummaryView(state) {
+  const overlay = document.getElementById('game-over-overlay');
+  if (!overlay) return;
+  const body = overlay.querySelector('.game-over-body');
+  if (!body) return;
+  overlay.dataset.view = 'summary';
+  fillGameOverSummaryBody(body, state);
+}
+
+function showGameOverDetailsView(state, pageIndex) {
+  const overlay = document.getElementById('game-over-overlay');
+  if (!overlay) return;
+  const body = overlay.querySelector('.game-over-body');
+  if (!body) return;
+  overlay.dataset.view = 'details';
+  const page = pageIndex != null ? pageIndex : _gameOverDetailsPage;
+  fillGameOverDetailsBody(body, state, page);
+}
+
+function renderGameOver(state) {
+  const existing = document.getElementById('game-over-overlay');
+  if (state.phase !== 'game_over' || !state.final_scores) {
+    if (existing) existing.remove();
+    return;
+  }
+  if (existing) return;
+
+  const overlay = mk('game-over-overlay');
+  overlay.id = 'game-over-overlay';
+  overlay.dataset.view = 'summary';
+
+  const panel = mk('game-over-panel');
+  const title = mk('game-over-title');
+  title.textContent = 'Game Over';
+  panel.appendChild(title);
+
+  const body = mk('game-over-body');
+  panel.appendChild(body);
+  fillGameOverSummaryBody(body, state);
+
+  appendGameOverFooter(panel, state);
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
+
+// ── Game shutdown / abandon overlay ────────────────────────────────────────
+let _shutdownUiTimer = null;
+
+function fmtSecondsRemaining(redirectAtEpochSeconds) {
+  const msLeft = Math.max(0, Number(redirectAtEpochSeconds || 0) * 1000 - Date.now());
+  return Math.ceil(msLeft / 1000);
+}
+
+function goToLobbyNow() {
+  redirectToLobby();
+}
+
+async function abandonGame() {
+  try {
+    await fetch(`/api/game/${encodeURIComponent(GAME_ID)}/abandon`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ player_id: PLAYER_ID }),
+    });
+  } catch (_) {
+    // Even if the request fails, don't auto-navigate; player can try again.
+  }
+}
+
+function renderGameShutdown(state) {
+  const shutdown = state?.shutdown || null;
+  const existing = document.getElementById('game-shutdown-overlay');
+
+  if (!shutdown) {
+    if (existing) existing.remove();
+    if (_shutdownUiTimer) {
+      clearInterval(_shutdownUiTimer);
+      _shutdownUiTimer = null;
+    }
+    return;
+  }
+
+  const redirectAt = shutdown.redirect_at;
+  const reason = String(shutdown.reason || '');
+  const initiatorName = shutdown?.initiated_by?.name ? String(shutdown.initiated_by.name) : '';
+
+  if (redirectAt && fmtSecondsRemaining(redirectAt) <= 0) {
+    goToLobbyNow();
+    return;
+  }
+
+  // If game over overlay exists, we reuse it and just keep countdown updated there.
+  if (state.phase === 'game_over' && state.final_scores) {
+    const c = document.getElementById('game-shutdown-countdown');
+    if (c && redirectAt) c.textContent = `Returning to lobby in ${fmtSecondsRemaining(redirectAt)}s…`;
+    return;
+  }
+
+  if (!existing) {
+    const overlay = mk('game-over-overlay');
+    overlay.id = 'game-shutdown-overlay';
+    const panel = mk('game-over-panel');
+    const title = mk('game-over-title');
+    title.textContent = 'Game Ending';
+    panel.appendChild(title);
+
+    const msg = mk('game-shutdown-msg');
+    if (reason === 'abandoned') {
+      msg.textContent = initiatorName
+        ? `${initiatorName} abandoned the game.`
+        : 'A player abandoned the game.';
+    } else {
+      msg.textContent = 'This game is ending.';
+    }
+    panel.appendChild(msg);
+
+    const countdown = mk('game-shutdown-countdown');
+    countdown.id = 'game-shutdown-countdown';
+    countdown.textContent = redirectAt
+      ? `Returning to lobby in ${fmtSecondsRemaining(redirectAt)}s…`
+      : 'Returning to lobby soon…';
+    panel.appendChild(countdown);
+
+    const actions = mk('game-shutdown-actions');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'game-shutdown-btn';
+    btn.textContent = 'Go to lobby now';
+    btn.addEventListener('click', () => goToLobbyNow());
+    actions.appendChild(btn);
+    panel.appendChild(actions);
+
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+  }
+
+  const countdown = document.getElementById('game-shutdown-countdown');
+  if (countdown && redirectAt) {
+    countdown.textContent = `Returning to lobby in ${fmtSecondsRemaining(redirectAt)}s…`;
+  }
+
+  if (!_shutdownUiTimer) {
+    _shutdownUiTimer = setInterval(() => {
+      if (!latestGameState?.shutdown) return;
+      const ra = latestGameState.shutdown.redirect_at;
+      if (ra && fmtSecondsRemaining(ra) <= 0) goToLobbyNow();
+      const c = document.getElementById('game-shutdown-countdown');
+      if (c && ra) c.textContent = `Returning to lobby in ${fmtSecondsRemaining(ra)}s…`;
+    }, 250);
+  }
+}
+
+// ── Card click modal ──────────────────────────────────────────────────────
+function makeInspectModalImageEl(card) {
+  const url = cardImageUrl(card);
+  if (!url) return null;
+  const img = document.createElement('img');
+  img.className = 'card-modal-img';
+  img.src = url;
+  return img;
+}
+
+function fillCardModalInspectInfo(infoEl, card) {
+  infoEl.innerHTML = '';
+  const heading = document.createElement('h2');
+  heading.className = 'modal-card-name';
+  if (cardObscuredFromViewer(card)) {
+    heading.textContent = isDomainStackFaceDown(card) ? 'Face-down domain' : 'Hidden card';
+  } else {
+    heading.textContent = card.name || '?';
+  }
+  infoEl.appendChild(heading);
+
+  if (cardObscuredFromViewer(card)) {
+    const note = document.createElement('p');
+    note.className = 'modal-card-text';
+    note.textContent = isDomainStackFaceDown(card)
+      ? 'The next domain in this pile stays face-down until the end of the turn of the player who built from here.'
+      : 'This card is not visible to you right now.';
+    infoEl.appendChild(note);
+  } else {
+    appendCardModalStatRows(infoEl, card);
+    if (card.text) {
+      const t = document.createElement('p');
+      t.className = 'modal-card-text';
+      t.textContent = card.text;
+      infoEl.appendChild(t);
+    }
+  }
+}
+
+function openCardStackInspectModal(cards, startIndex) {
+  if (document.getElementById('game-prompt-overlay')) return;
+  if (document.getElementById('card-modal-overlay')) return;
+  const arr = Array.isArray(cards) ? cards.filter(Boolean) : [];
+  if (arr.length < 2) {
+    if (arr.length === 1) openCardModal(arr[0]);
+    return;
+  }
+
+  let idx = Number(startIndex);
+  if (!Number.isFinite(idx)) idx = arr.length - 1;
+  idx = Math.max(0, Math.min(arr.length - 1, idx));
+
+  const overlay = document.createElement('div');
+  overlay.id = 'card-modal-overlay';
+  overlay.className = 'card-modal-overlay';
+
+  const modal = mk('card-modal card-modal--stack');
+  modal.addEventListener('click', e => e.stopPropagation());
+
+  const layout = mk('card-modal-stack-layout');
+  const visual = mk('card-modal-stack-visual');
+
+  const prevBtn = document.createElement('button');
+  prevBtn.type = 'button';
+  prevBtn.className = 'card-modal-nav card-modal-nav--prev';
+  prevBtn.setAttribute('aria-label', 'Toward top of stack (newer card)');
+  prevBtn.textContent = '\u2039';
+
+  const imgHost = mk('card-modal-stack-img-host');
+
+  const nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.className = 'card-modal-nav card-modal-nav--next';
+  nextBtn.setAttribute('aria-label', 'Deeper in stack (older card)');
+  nextBtn.textContent = '\u203a';
+
+  const posEl = mk('card-modal-stack-pos');
+  posEl.setAttribute('aria-live', 'polite');
+
+  const info = mk('card-modal-info');
+
+  visual.appendChild(prevBtn);
+  visual.appendChild(imgHost);
+  visual.appendChild(nextBtn);
+  layout.appendChild(visual);
+  layout.appendChild(posEl);
+  modal.appendChild(layout);
+  modal.appendChild(info);
+
+  const renderAt = i => {
+    idx = i;
+    const c = arr[idx];
+    imgHost.innerHTML = '';
+    const img = makeInspectModalImageEl(c);
+    if (img) imgHost.appendChild(img);
+    fillCardModalInspectInfo(info, c);
+    posEl.textContent = `${idx + 1} / ${arr.length}`;
+    prevBtn.disabled = idx >= arr.length - 1;
+    nextBtn.disabled = idx <= 0;
+  };
+
+  prevBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (idx < arr.length - 1) renderAt(idx + 1);
+  });
+  nextBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (idx > 0) renderAt(idx - 1);
+  });
+
+  const onStackKey = e => {
+    if (e.key === 'ArrowLeft' && idx < arr.length - 1) {
+      e.preventDefault();
+      renderAt(idx + 1);
+    } else if (e.key === 'ArrowRight' && idx > 0) {
+      e.preventDefault();
+      renderAt(idx - 1);
+    }
+  };
+  document.addEventListener('keydown', onStackKey);
+  overlay._stackArrowHandler = onStackKey;
+
+  renderAt(idx);
+
+  overlay.appendChild(modal);
+  mountCardInspectOverlay(overlay, modal);
+  document.body.appendChild(overlay);
+}
+
+document.addEventListener('click', e => {
+  const cardEl = e.target.closest('.card[data-card]');
+  if (!cardEl) return;
+
+  const stackHost = cardEl.closest('.tableau-card-stack[data-stack]');
+  if (stackHost && !cardEl.closest('.center-board')) {
+    let arr;
+    try {
+      arr = JSON.parse(stackHost.dataset.stack);
+    } catch (_) {
+      arr = null;
+    }
+    if (Array.isArray(arr) && arr.length > 1) {
+      openCardStackInspectModal(arr, arr.length - 1);
+      return;
+    }
+  }
+
+  const card = JSON.parse(cardEl.dataset.card);
+  if (isBoardMarketCard(card, cardEl)) {
+    openBoardMarketStackModal(card);
+    return;
+  }
+  openCardModal(card);
+});
+
+function openCardModal(card) {
+  if (document.getElementById('game-prompt-overlay')) return;
+  if (document.getElementById('card-modal-overlay')) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'card-modal-overlay';
+  overlay.className = 'card-modal-overlay';
+
+  const modal = mk('card-modal');
+  modal.addEventListener('click', e => e.stopPropagation());
+
+  const img = makeInspectModalImageEl(card);
+  if (img) modal.appendChild(img);
+
+  const info = mk('card-modal-info');
+  fillCardModalInspectInfo(info, card);
+  modal.appendChild(info);
+
+  overlay.appendChild(modal);
+  mountCardInspectOverlay(overlay, modal);
+  document.body.appendChild(overlay);
+}
+
+function buildCardStats(card) {
+  const rows = [];
+  const push = (label, value, cls, resource, leadingPlus) => {
+    if (value != null && value !== 0 && value !== '') {
+      rows.push({
+        label,
+        value,
+        cls: cls || '',
+        resource: resource || null,
+        leadingPlus: !!leadingPlus,
+      });
+    }
+  };
+
+  if      (card.monster_id  != null) push('Type', 'Monster', null, null, false);
+  else if (card.citizen_id  != null) push('Type', 'Citizen', null, null, false);
+  else if (card.domain_id   != null) push('Type', 'Domain', null, null, false);
+  else if (card.duke_id     != null) push('Type', 'Duke', null, null, false);
+  else if (card.starter_id  != null) push('Type', 'Starter', null, null, false);
+
+  if (card.gold_cost)       push('Gold cost',    card.gold_cost,       'modal-gold', 'gold', false);
+  if (card.strength_cost)   push('Str cost',     card.strength_cost,   'modal-str',  'strength', false);
+  if (card.magic_cost)      push('Mag cost',     card.magic_cost,      'modal-mag',  'magic', false);
+  if (card.vp_reward)      push('VP reward',    card.vp_reward,       'modal-vp',   'vp', false);
+  if (card.gold_reward)     push('Gold reward',  card.gold_reward,     'modal-gold', 'gold', true);
+  if (card.strength_reward) push('Str reward',   card.strength_reward, 'modal-str',  'strength', true);
+  if (card.magic_reward)    push('Mag reward',   card.magic_reward,    'modal-mag',  'magic', true);
+
+  if (card.domain_id != null) {
+    const req = [];
+    if (card.shadow_count)  req.push(`${card.shadow_count} Shadow`);
+    if (card.holy_count)    req.push(`${card.holy_count} Holy`);
+    if (card.soldier_count) req.push(`${card.soldier_count} Soldier`);
+    if (card.worker_count)  req.push(`${card.worker_count} Worker`);
+    if (req.length) push('Requires', req.join(', '));
+  }
+
+  if (card.starter_id != null) {
+    const m1 = card.roll_match1, m2 = card.roll_match2;
+    if (m1 && m2 && m1 !== m2) push('Rolls', `${m1}, ${m2}`);
+    else if (m1) push('Roll', String(m1));
+  }
+
+  if (card.is_flipped) push('Status', 'Flipped');
+
+  return rows;
+}
+
+let actionConfirmHandler = null;
+
+function closeActionConfirmModal() {
+  const backdrop = document.getElementById('action-confirm-modal');
+  if (!backdrop) return;
+  backdrop.classList.remove('is-open');
+  backdrop.setAttribute('aria-hidden', 'true');
+  actionConfirmHandler = null;
+  const ok = document.getElementById('action-confirm-ok');
+  const cancel = document.getElementById('action-confirm-cancel');
+  if (ok) ok.disabled = false;
+  if (cancel) cancel.disabled = false;
+}
+
+function openActionConfirmModal(opts) {
+  const backdrop = document.getElementById('action-confirm-modal');
+  const titleEl = document.getElementById('action-confirm-title');
+  const msgEl = document.getElementById('action-confirm-message');
+  const ok = document.getElementById('action-confirm-ok');
+  if (!backdrop || !titleEl || !msgEl || !ok) return;
+  if (backdrop.classList.contains('is-open')) return;
+  titleEl.textContent = (opts.title || 'Confirm').toString();
+  msgEl.textContent = (opts.message || '').toString();
+  ok.textContent = (opts.confirmLabel || 'Confirm').toString();
+  actionConfirmHandler = opts.onConfirm;
+  backdrop.classList.add('is-open');
+  backdrop.setAttribute('aria-hidden', 'false');
+  ok.focus();
+}
+
+function confirmAndPostGameAction(body, ui, afterSuccess) {
+  const title = ui && ui.title != null ? String(ui.title) : 'Confirm action';
+  const message = ui && ui.message != null ? String(ui.message) : '';
+  const confirmLabel = ui && ui.confirmLabel != null ? String(ui.confirmLabel) : 'Confirm';
+  openActionConfirmModal({
+    title,
+    message,
+    confirmLabel,
+    onConfirm: async () => {
+      const ok = await postGameAction(body);
+      if (ok && typeof afterSuccess === 'function') afterSuccess();
+    },
+  });
+}
+
+function initActionConfirmModal() {
+  const backdrop = document.getElementById('action-confirm-modal');
+  const ok = document.getElementById('action-confirm-ok');
+  const cancel = document.getElementById('action-confirm-cancel');
+  if (!backdrop || !ok || !cancel) return;
+
+  const runAndClose = async () => {
+    const fn = actionConfirmHandler;
+    if (!fn) return;
+    ok.disabled = true;
+    cancel.disabled = true;
+    closeActionConfirmModal();
+    try {
+      await fn();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  ok.addEventListener('click', () => {
+    void runAndClose();
+  });
+  cancel.addEventListener('click', () => closeActionConfirmModal());
+  backdrop.addEventListener('click', e => {
+    if (e.target === backdrop) closeActionConfirmModal();
+  });
+  document.addEventListener(
+    'keydown',
+    e => {
+      if (e.key !== 'Escape') return;
+      if (!backdrop.classList.contains('is-open')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeActionConfirmModal();
+    },
+    true,
+  );
+}
+
+function removePromptOverlay() {
+  const el = document.getElementById('game-prompt-overlay');
+  if (el && el._promptClickHandler) {
+    el.removeEventListener('click', el._promptClickHandler);
+    el._promptClickHandler = null;
+  }
+  if (el && el._promptEscHandler) {
+    document.removeEventListener('keydown', el._promptEscHandler);
+    el._promptEscHandler = null;
+  }
+  if (el && el._prevBodyOverflow !== undefined) {
+    document.body.style.overflow = el._prevBodyOverflow;
+    el._prevBodyOverflow = undefined;
+  }
+  el?.remove();
+}
+
+/** Dismisses the card image / market inspect overlay and clears its Escape listener. */
+function dismissCardInspectModal() {
+  const overlay = document.getElementById('card-modal-overlay');
+  if (overlay && overlay._stackArrowHandler) {
+    document.removeEventListener('keydown', overlay._stackArrowHandler);
+    overlay._stackArrowHandler = null;
+  }
+  if (!overlay) return;
+  if (overlay._cardModalEscHandler) {
+    document.removeEventListener('keydown', overlay._cardModalEscHandler);
+    overlay._cardModalEscHandler = null;
+  }
+  overlay.remove();
+}
+
+/** Shared close control for any panel using `.card-modal` (inspect, market, dismissible prompts). */
+function syncCardShellCloseButton(modal, visible, onClose) {
+  if (!modal) return;
+  const existing = modal.querySelector('.card-modal-close');
+  if (!visible) {
+    existing?.remove();
+    return;
+  }
+  if (!onClose) return;
+  let btn = existing;
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'card-modal-close';
+    btn.setAttribute('aria-label', 'Close');
+    btn.textContent = 'Close';
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const fn = btn._modalCloseFn;
+      if (fn) fn();
+    });
+    modal.appendChild(btn);
+  }
+  btn._modalCloseFn = onClose;
+}
+
+function mountCardInspectOverlay(overlay, modal) {
+  syncCardShellCloseButton(modal, true, dismissCardInspectModal);
+  const dismiss = () => dismissCardInspectModal();
+  overlay.addEventListener('click', dismiss);
+  const onKey = e => {
+    if (e.key === 'Escape') dismiss();
+  };
+  overlay._cardModalEscHandler = onKey;
+  document.addEventListener('keydown', onKey);
+}
+
+function openPromptOverlayShell(opts) {
+  const { title, subtitle, dismissible, bodyEl, footerEl } = opts;
+  const newTitle = (title || '').toString();
+
+  function configureDismissBehavior(overlay) {
+    const modal = overlay.querySelector('.card-modal');
+    // Clear prior handlers first.
+    if (overlay._promptClickHandler) {
+      overlay.removeEventListener('click', overlay._promptClickHandler);
+      overlay._promptClickHandler = null;
+    }
+    if (overlay._promptEscHandler) {
+      document.removeEventListener('keydown', overlay._promptEscHandler);
+      overlay._promptEscHandler = null;
+    }
+
+    syncCardShellCloseButton(
+      modal,
+      !!dismissible,
+      dismissible ? () => removePromptOverlay() : null,
+    );
+
+    if (!dismissible) return;
+
+    const dismiss = () => removePromptOverlay();
+    const onKey = e => {
+      if (e.key === 'Escape') dismiss();
+    };
+    overlay._promptClickHandler = dismiss;
+    overlay._promptEscHandler = onKey;
+    overlay.addEventListener('click', dismiss);
+    document.addEventListener('keydown', onKey);
+  }
+
+  // If a prompt overlay already exists, update it in-place.
+  const overlay = document.getElementById('game-prompt-overlay');
+  if (overlay) {
+    const modal = overlay.querySelector('.card-modal');
+    if (!modal) {
+      removePromptOverlay();
+      return openPromptOverlayShell(opts);
+    }
+
+    // Lock background scroll while overlay is present.
+    if (overlay._prevBodyOverflow === undefined) {
+      overlay._prevBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+    }
+
+    const head = modal.querySelector('.prompt-modal-head');
+    const titleEl = modal.querySelector('.prompt-modal-title');
+    if (titleEl) titleEl.textContent = newTitle;
+    if (head) {
+      let subEl = head.querySelector('.prompt-modal-subtitle');
+      if (subtitle) {
+        if (!subEl) {
+          subEl = mk('prompt-modal-subtitle');
+          head.appendChild(subEl);
+        }
+        subEl.textContent = subtitle;
+      } else if (subEl) {
+        subEl.remove();
+      }
+    }
+
+    // Preserve current scroll positions while we swap content.
+    const preservedModalScroll = modal.scrollTop;
+    const preservedList = modal.querySelector('.prompt-choice-list');
+    const preservedChoiceListScroll = preservedList ? preservedList.scrollTop : 0;
+
+    // Remove existing body/footer (keep head).
+    Array.from(modal.children).forEach(ch => {
+      if (ch.classList?.contains('prompt-modal-head')) return;
+      ch.remove();
+    });
+
+    if (bodyEl) modal.appendChild(bodyEl);
+    if (footerEl) {
+      const ft = mk('prompt-modal-footer');
+      ft.appendChild(footerEl);
+      modal.appendChild(ft);
+    }
+
+    configureDismissBehavior(overlay);
+
+    // Restore scroll without any overlay teardown/recreate flicker.
+    modal.scrollTop = preservedModalScroll;
+    const list = modal.querySelector('.prompt-choice-list');
+    if (list) list.scrollTop = preservedChoiceListScroll;
+    return;
+  }
+
+  // Otherwise create it fresh.
+  const newOverlay = document.createElement('div');
+  newOverlay.id = 'game-prompt-overlay';
+  newOverlay.className = 'card-modal-overlay game-prompt-overlay';
+  newOverlay._prevBodyOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+
+  const modal = mk('card-modal card-modal--prompt');
+  modal.addEventListener('click', e => e.stopPropagation());
+
+  const head = mk('prompt-modal-head');
+  const h = document.createElement('h2');
+  h.className = 'modal-card-name prompt-modal-title';
+  h.textContent = newTitle;
+  head.appendChild(h);
+  if (subtitle) {
+    const sub = mk('prompt-modal-subtitle');
+    sub.textContent = subtitle;
+    head.appendChild(sub);
+  }
+  modal.appendChild(head);
+
+  if (bodyEl) modal.appendChild(bodyEl);
+  if (footerEl) {
+    const ft = mk('prompt-modal-footer');
+    ft.appendChild(footerEl);
+    modal.appendChild(ft);
+  }
+
+  newOverlay.appendChild(modal);
+  configureDismissBehavior(newOverlay);
+  document.body.appendChild(newOverlay);
+}

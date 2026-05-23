@@ -163,6 +163,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Generated client bundle (built from static/game/src/*.js by build_game_js.py)
+static/game/game.js
 Footer
 © 2023 GitHub, Inc.
 Footer navigation

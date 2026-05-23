@@ -20,7 +20,14 @@ import shortuuid
 from game import Game, LobbyMember, GameMember, load_game_data, GameObjectEncoder
 import json
 
+import build_game_js
+
 _REPO_ROOT = Path(__file__).resolve().parent
+
+try:
+    build_game_js.build()
+except Exception as exc:
+    print(f"[server] WARNING: failed to rebuild static/game/game.js bundle: {exc}")
 _DEV_CLIENT_INDEX = _REPO_ROOT / "static" / "dev-client" / "index.html"
 _GAME_CLIENT_INDEX = _REPO_ROOT / "static" / "game" / "index.html"
 _COUNTER_INDEX = _REPO_ROOT / "static" / "counter" / "index.html"
@@ -327,7 +334,7 @@ async def set_ready(request: ReadyRequest):
                     game_gamers = [g for g in gamers if g.game_id == new_game_id]
                     game_state = load_game_data(
                         new_game_id,
-                        "base1",
+                        "current",
                         game_gamers,
                         debug_starting_resources=debug_starting_resources,
                     )

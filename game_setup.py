@@ -54,6 +54,14 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
             monster_query = "select_base2_monsters"
             citizen_query = "select_base2_citizens"
             domain_query = "select_random_domains"
+        case "test1":
+            monster_query = "select_base1_monsters"
+            citizen_query = "select_base1_citizens"
+            domain_query = "select_test1_domains"
+        case "test2" | "current":
+            monster_query = "select_base2_monsters"
+            citizen_query = "select_base2_citizens"
+            domain_query = "select_test2_domains"
     try:
         my_connect = mariadb.connect(
             user="vckonline", password="vckonline", host="127.0.0.1", database="vckonline", port=3306
@@ -124,10 +132,15 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
             results = [r for r in results if int(r["id_domains"]) not in skip_domains]
         domains_needed = 15  # 5 stacks x 3 cards
         if len(results) < domains_needed:
+            if skip_domains:
+                raise ValueError(
+                    "Not enough domains after applying banned_cards.json "
+                    f"(need {domains_needed}, have {len(results)} from {domain_query}). "
+                    "Remove ids from the \"domains\" list to unban, or widen the procedure's pool."
+                )
             raise ValueError(
-                "Not enough domains after applying banned_cards.json "
-                f"(need {domains_needed}, have {len(results)}). "
-                "Remove ids from the \"domains\" list to unban."
+                f"Not enough domains returned by {domain_query} "
+                f"(need {domains_needed}, have {len(results)})."
             )
         for row in results:
             my_domain = Domain(

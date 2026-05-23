@@ -2381,8 +2381,9 @@ class Game:
         bank_vp_note = ""
         if mode == "pay_to_player" and gain_k == "v" and gain_n > 0:
             bank_vp_note = f" (+{gain_n} VP from bank, not from target)"
+        source_label = item.get("source_label") or "end-of-action"
         self._log_game_event(
-            f"{self._player_label(active_pid)} end-of-action \"{item.get('domain_name')}\" vs "
+            f"{self._player_label(active_pid)} {source_label} \"{item.get('domain_name')}\" vs "
             f"{self._player_label(target_pid)}: active {before_a} -> {after_a}; target {before_v} -> {after_v}"
             f"{bank_vp_note}"
         )
@@ -2517,7 +2518,8 @@ class Game:
             return
         if low.startswith("manipulate_resources"):
             kv = _parse_domain_effect_kv(effect)
-            if (kv.get("mode") or "").strip().lower() == "self_convert":
+            mode = (kv.get("mode") or "").strip().lower()
+            if mode == "self_convert":
                 before = self._player_scores_line(player)
                 payout = self._prompt_or_apply_self_convert(effect, player, domain)
                 if isinstance(self.action_required, dict) and self.action_required.get("action"):
@@ -2537,6 +2539,9 @@ class Game:
                     self._log_game_event(
                         f"{self._player_label(player.player_id)} activated domain \"{getattr(domain, 'name', 'Domain')}\"; scores {before} -> {after}"
                     )
+                return
+            if mode in ("take_from_player", "pay_to_player"):
+                self._prompt_activation_manipulate_player(player, domain, kv)
                 return
         before = self._player_scores_line(player)
         _prior_action = (self.action_required or {}).get("action", "")
@@ -2569,6 +2574,52 @@ class Game:
             self._log_game_event(
                 f"{self._player_label(player.player_id)} activated domain \"{getattr(domain, 'name', 'Domain')}\"; scores {before} -> {after}"
             )
+
+    def _prompt_activation_manipulate_player(self, player, domain, kv):
+        """Immediate activation prompt for manipulate_resources mode=take_from_player or pay_to_player.
+
+        Reuses the `domain_manipulate_player` prompt + `_apply_manipulate_player_choice` apply path
+        from action.end passives, but marks `from_activation=True` so resolution resumes the
+        action phase via `_resume_after_domain_activation_follow_up` instead of draining the
+        action.end queue.
+        """
+        mode = (kv.get("mode") or "").strip().lower()
+        domain_name = getattr(domain, "name", "Domain")
+        gain_k, gain_n_from_kv = _parse_resource_kv(kv.get("gain", ""))
+        optional = str(kv.get("optional", "")).strip().lower() in ("true", "1", "yes")
+        vp_pay_may_decline = mode == "pay_to_player" and gain_k == "v" and gain_n_from_kv > 0
+        optional_effective = optional or vp_pay_may_decline
+        take_or_pay = "take" if mode == "take_from_player" else "pay"
+        parsed, _opt = self._manipulate_candidates_other_players(player.player_id, take_or_pay, kv)
+        if not parsed or not parsed.get("options"):
+            self._log_game_event(
+                f"{self._player_label(player.player_id)} could not use \"{domain_name}\" "
+                f"(no eligible players)."
+            )
+            return
+        if mode == "pay_to_player":
+            pk, pn = _parse_resource_kv(kv.get("pay", ""))
+            res_idx = {"g": 0, "s": 1, "m": 2, "v": 3}
+            if not pk or pn <= 0 or int(self._player_resource_tuple(player)[res_idx[pk]]) < pn:
+                self._log_game_event(
+                    f"{self._player_label(player.player_id)} could not use \"{domain_name}\" "
+                    f"(insufficient resources to pay)."
+                )
+                return
+        item = {"domain_name": domain_name, "mode": mode, "kv": kv, "source_label": "activated"}
+        self.action_required["id"] = player.player_id
+        self.action_required["action"] = "choose_player"
+        self.pending_required_choice = {
+            "kind": "domain_manipulate_player",
+            "player_id": player.player_id,
+            "item": item,
+            "options": parsed["options"],
+            "allow_skip": optional_effective,
+            "from_activation": True,
+        }
+        self._log_game_event(
+            f"{self._player_label(player.player_id)} triggered activation effect on \"{domain_name}\" and is choosing a player."
+        )
 
     def _filter_unavailable_choose_options(self, options):
         out = []
@@ -2984,13 +3035,16 @@ class Game:
 
             if prc0.get("kind") == "domain_manipulate_player" and str(current_required).strip() == "choose_player":
                 act = (action or "").strip().lower()
+                from_activation = bool(prc0.get("from_activation"))
                 if prc0.get("allow_skip") and act == "skip":
-                    if self.pending_action_end_queue:
+                    if not from_activation and self.pending_action_end_queue:
                         self.pending_action_end_queue.pop(0)
                     self.action_required["action"] = ""
                     self.action_required["id"] = self.game_id
                     self.pending_required_choice = None
-                    if not self._drain_action_end_manipulate_queue():
+                    if from_activation:
+                        self._resume_after_domain_activation_follow_up()
+                    elif not self._drain_action_end_manipulate_queue():
                         self.action_required["id"] = self.game_id
                         self.action_required["action"] = ""
                     return
@@ -3006,12 +3060,14 @@ class Game:
                 item = prc0.get("item") or {}
                 tid = opts[idx].get("player_id")
                 self._apply_manipulate_player_choice(player_id, tid, item)
-                if self.pending_action_end_queue:
+                if not from_activation and self.pending_action_end_queue:
                     self.pending_action_end_queue.pop(0)
                 self.action_required["action"] = ""
                 self.action_required["id"] = self.game_id
                 self.pending_required_choice = None
-                if not self._drain_action_end_manipulate_queue():
+                if from_activation:
+                    self._resume_after_domain_activation_follow_up()
+                elif not self._drain_action_end_manipulate_queue():
                     self.action_required["id"] = self.game_id
                     self.action_required["action"] = ""
                 return

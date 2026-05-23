@@ -69,6 +69,29 @@ The server will start on `http://localhost:8000`
 
 Visit `http://localhost:8000` for a simple HTML client to test the API.
 
+### Client bundle (`static/game/game.js`)
+
+The browser loads a single script from [`static/game/index.html`](../static/game/index.html). Source is split into ordered files under [`static/game/src/`](../static/game/src/):
+
+| File | Responsibility |
+|------|----------------|
+| `01-core.js` | URL/cookie ids, WebSocket `connect`, idle timer, `mk` / `fmtPhase` / `escapeHtml` |
+| `02-render-and-board.js` | Seats, tableau carousel, `render`, center board, card factory |
+| `03-modals.js` | Player detail, game over/shutdown, card inspect, action confirm, prompt overlay shell |
+| `04-market.js` | Board market hire/build/slay modals |
+| `05-prompts.js` | Required-choice and concurrent-action prompt renderers |
+| `06-lobby-and-boot.js` | Lobby UI/background and boot `init*` calls |
+
+`static/game/game.js` is a build artifact: it is gitignored, overwritten on every server start (via `build_game_js.build()` in [`server.py`](../server.py)), and must not be edited directly.
+
+To rebuild manually without restarting the server:
+
+```bash
+python3 build_game_js.py
+```
+
+The build runs `node --check` on the output if Node is installed; otherwise the syntax check is skipped silently.
+
 ## Development Notes
 
 - Games are stored in-memory (will be lost on server restart)

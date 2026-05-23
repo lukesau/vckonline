@@ -36,7 +36,7 @@ def col_name(col, backtick_cols):
 
 def dump_table(cur, table, id_col, backtick_cols, stamp):
     cur.execute(f"DESCRIBE {table}")
-    cols = [r[0] for r in cur.fetchall() if r[0] != id_col]
+    cols = [r[0] for r in cur.fetchall()]
 
     cur.execute(f"SELECT {', '.join(cols)} FROM {table} ORDER BY {id_col}")
     rows = cur.fetchall()
@@ -44,7 +44,7 @@ def dump_table(cur, table, id_col, backtick_cols, stamp):
     col_list = ",".join(col_name(c, backtick_cols) for c in cols)
     header = f"INSERT INTO vckonline.{table} ({col_list}) VALUES"
 
-    lines = []
+    lines = [f"TRUNCATE TABLE vckonline.{table};"]
     batch = []
     for i, row in enumerate(rows):
         batch.append("\t (" + ",".join(sql_val(v) for v in row) + ")")

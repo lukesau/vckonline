@@ -15,6 +15,8 @@ DROP PROCEDURE IF EXISTS select_base2_domains //
 DROP PROCEDURE IF EXISTS select_base_domains //
 DROP PROCEDURE IF EXISTS select_random_domains //
 DROP PROCEDURE IF EXISTS select_random_dukes //
+DROP PROCEDURE IF EXISTS select_test1_domains //
+DROP PROCEDURE IF EXISTS select_test2_domains //
 
 -- Base 1 Citizens
 CREATE PROCEDURE select_base1_citizens()
@@ -58,6 +60,29 @@ END //
 CREATE PROCEDURE select_random_dukes()
 BEGIN
     SELECT * FROM dukes ORDER BY RAND();
+END //
+
+-- Test 1 Domains: crystallized "first set" the engine was originally built around.
+-- Hand-picked pool of exactly 15 base-set domains, shuffled into stack order.
+-- Python still applies banned_cards.json on top, so any id banned there will
+-- be dropped and the format will fail to render if the remaining count < 15.
+CREATE PROCEDURE select_test1_domains()
+BEGIN
+    SELECT * FROM domains
+    WHERE id_domains IN (1,2,3,4,5,6,7,8,93,94,95,96,97,98,99)
+    ORDER BY RAND();
+END //
+
+-- Test 2 Domains: 15 random domains drawn from id_domains 9..24.
+-- Python applies banned_cards.json on top, so unfinished/banned ids in this
+-- range will be dropped. If that leaves fewer than 15 the preset will fail
+-- to render; either unban the relevant ids or widen this pool.
+CREATE PROCEDURE select_test2_domains()
+BEGIN
+    SELECT * FROM domains
+    WHERE id_domains BETWEEN 9 AND 24
+    ORDER BY RAND()
+    LIMIT 15;
 END //
 
 DELIMITER ;

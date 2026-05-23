@@ -32,6 +32,20 @@ The server/game code expects these procedures to exist:
 - `select_base2_citizens()`
 - `select_random_domains()`
 - `select_random_dukes()`
+- `select_test1_domains()` — hand-picked domain pool for the `test1` preset (crystallized "first set")
+- `select_test2_domains()` — random 15 of domain ids 9..24 for the `test2` / `current` preset
+
+The Python preset (passed to `load_game_data`) chooses which monster/citizen/domain procedures to call:
+
+| preset    | monsters                  | citizens                  | domains                  |
+| --------- | ------------------------- | ------------------------- | ------------------------ |
+| `base1`   | `select_base1_monsters`   | `select_base1_citizens`   | `select_random_domains`  |
+| `base2`   | `select_base2_monsters`   | `select_base2_citizens`   | `select_random_domains`  |
+| `test1`   | `select_base1_monsters`   | `select_base1_citizens`   | `select_test1_domains`   |
+| `test2`   | `select_base2_monsters`   | `select_base2_citizens`   | `select_test2_domains`   |
+| `current` | (alias of `test2`)        | (alias of `test2`)        | (alias of `test2`)       |
+
+`current` is just a Python-side alias; repointing it requires editing `game_setup.py` rather than SQL. The live server (`server.py`) starts games with the `current` preset. The `banned_cards.json` `domains` filter is applied to every preset (including `test1` / `test2` / `current`) — so if a procedure's pool overlaps the ban list heavily it may return fewer than the 15 domains required and the preset will fail to render.
 
 To install all procedures:
 
