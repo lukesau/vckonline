@@ -826,6 +826,9 @@ function makeStack(stack) {
 }
 
 // Group identical owned cards (same logic as dev-client tableau); citizens also key on is_flipped.
+// Citizens get a roll-based primary sort key (ascending by trigger value, highest
+// positive roll_match per card) so the tableau lays them out in dice-roll order.
+// For non-citizens the roll key ties out and behavior falls back to name/id.
 function groupCardsForTableau(cards) {
   const arr = Array.isArray(cards) ? cards : [];
   const map = new Map();
@@ -838,16 +841,36 @@ function groupCardsForTableau(cards) {
     const key = `${name}||${id}${flipSeg}`;
     const cur = map.get(key);
     if (cur) cur.count += 1;
-    else map.set(key, { card: c, count: 1, sortName: name.toLowerCase(), sortId: String(id) });
+    else map.set(key, {
+      card: c,
+      count: 1,
+      sortName: name.toLowerCase(),
+      sortId: String(id),
+      sortRoll: isCitizenKey ? bestCitizenRollSortValue(c) : Number.POSITIVE_INFINITY,
+    });
   });
   if (map.size === 0 && arr.length) return null;
   return Array.from(map.values()).sort((a, b) => {
+    if (a.sortRoll !== b.sortRoll) return a.sortRoll - b.sortRoll;
     if (a.sortName < b.sortName) return -1;
     if (a.sortName > b.sortName) return 1;
     if (a.sortId < b.sortId) return -1;
     if (a.sortId > b.sortId) return 1;
     return 0;
   });
+}
+
+// Highest positive dice-roll trigger value for a citizen. Citizens may trigger
+// on roll_match1 and/or roll_match2; pick the largest positive value so cards
+// with multiple triggers sort by their best (highest) trigger. Citizens with
+// no positive roll match fall to the end of the citizen group.
+function bestCitizenRollSortValue(card) {
+  let best = Number.NEGATIVE_INFINITY;
+  for (const v of [card && card.roll_match1, card && card.roll_match2]) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0 && n > best) best = n;
+  }
+  return best === Number.NEGATIVE_INFINITY ? Number.POSITIVE_INFINITY : best;
 }
 
 // One card image with optional ×N badge (matches center-board stacks).

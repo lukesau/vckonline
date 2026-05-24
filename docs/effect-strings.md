@@ -15,6 +15,8 @@ This document covers how effect strings work across the three card tables (citiz
 | Champion | `exchange g 1 s 4` | Pay 1g, gain 4s |
 | Paladin | `exchange s 1 m 3` | Pay 1s, gain 3m |
 | Butcher | `count owned_worker g 2` | Gain 2g per owned Worker citizen |
+| Thief (on-turn) | `steal g 3 m 3` | Choose an opponent, then steal 3g or 3m from them |
+| Thief (off-turn) | `choose g 2 m 2` | Pick one: +2g or +2m |
 
 ### Domains — `activation_effect`
 
@@ -104,6 +106,23 @@ No equivalent pattern in domains or monsters. Could be expressed as a compound b
 ```
 exchange s 1 g 2    # pay 1s, receive 2g
 ```
+
+### 4a. `steal` — only exists in citizens
+
+The thief-style verb. Lists one or more resource options the controller may
+steal from a single chosen opponent. The controller picks the opponent first,
+then (if multiple resource options are given) which resource to take.
+Stealing is capped at the victim's current pool, so a victim with fewer than
+`N` of the requested resource just loses what they have.
+
+```
+steal g 3        # steal up to 3g from a chosen opponent
+steal g 3 m 3    # steal up to 3g OR up to 3m from a chosen opponent
+```
+
+Steal effects fire in a dedicated pre-phase at the start of harvest before
+any normal citizen payouts — see "Harvest steal pre-phase" in
+`docs/game.md`.
 
 ### 5. `.` is doing three different jobs
 

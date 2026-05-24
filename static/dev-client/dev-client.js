@@ -574,7 +574,7 @@ let playerId = localStorage.getItem('playerId') || '';
                 if (reqAction === 'bonus_resource_choice') return true;
                 const trimmed = reqAction.trim();
                 if (trimmed.startsWith('choose ')) return true;
-                if (trimmed === 'choose_player' || trimmed === 'choose_monster_strength' || trimmed === 'domain_self_convert' || trimmed === 'harvest_optional_exchange') return true;
+                if (trimmed === 'choose_player' || trimmed === 'choose_monster_strength' || trimmed === 'choose_owned_card' || trimmed === 'domain_self_convert' || trimmed === 'harvest_optional_exchange') return true;
                 if (reqAction === 'standard_action' && (gameState.phase || '') === 'action') return true;
                 return false;
             }
@@ -729,6 +729,10 @@ let playerId = localStorage.getItem('playerId') || '';
                 return `<div class="item"><div class="item-title">${escapeHtml(name)}${qtyText}${idText}</div>${subtitle}${roleBlock}${rulesText}</div>`;
             }
 
+            // Citizens get a roll-based primary sort key (ascending by trigger value,
+            // highest positive roll_match per card) so the tableau lays them out in
+            // dice-roll order. For non-citizens the roll key ties out and behavior
+            // falls back to name/id.
             function groupCardsForTableau(cards) {
                 const arr = Array.isArray(cards) ? cards : [];
                 const map = new Map();
@@ -741,17 +745,37 @@ let playerId = localStorage.getItem('playerId') || '';
                     const key = `${name}||${id}${flipSeg}`;
                     const cur = map.get(key);
                     if (cur) cur.count += 1;
-                    else map.set(key, { card: c, count: 1, sortName: name.toLowerCase(), sortId: String(id) });
+                    else map.set(key, {
+                        card: c,
+                        count: 1,
+                        sortName: name.toLowerCase(),
+                        sortId: String(id),
+                        sortRoll: isCitizenKey ? bestCitizenRollSortValue(c) : Number.POSITIVE_INFINITY,
+                    });
                 });
                 // If we saw non-objects in the list, just fall back to rendering raw items.
                 if (map.size === 0 && arr.length) return null;
                 return Array.from(map.values()).sort((a, b) => {
+                    if (a.sortRoll !== b.sortRoll) return a.sortRoll - b.sortRoll;
                     if (a.sortName < b.sortName) return -1;
                     if (a.sortName > b.sortName) return 1;
                     if (a.sortId < b.sortId) return -1;
                     if (a.sortId > b.sortId) return 1;
                     return 0;
                 });
+            }
+
+            // Highest positive dice-roll trigger value for a citizen. Citizens may
+            // trigger on roll_match1 and/or roll_match2; pick the largest positive
+            // value so cards with multiple triggers sort by their best trigger.
+            // Citizens with no positive roll match fall to the end of the citizen group.
+            function bestCitizenRollSortValue(card) {
+                let best = Number.NEGATIVE_INFINITY;
+                for (const v of [card && card.roll_match1, card && card.roll_match2]) {
+                    const n = Number(v);
+                    if (Number.isFinite(n) && n > 0 && n > best) best = n;
+                }
+                return best === Number.NEGATIVE_INFINITY ? Number.POSITIVE_INFINITY : best;
             }
 
             function renderCardList(title, cards) {
@@ -1264,6 +1288,9 @@ let playerId = localStorage.getItem('playerId') || '';
                 if (reqAction === 'choose_monster_strength') {
                     return renderDomainChooseMonster(gameState);
                 }
+                if (reqAction === 'choose_owned_card') {
+                    return renderChooseOwnedCard(gameState);
+                }
 
                 // Generic "choose ..." prompt from special payouts (e.g. "choose g 1 m 1")
                 // Engine expects the response to be "choose 1"/"choose 2"/"choose 3".
@@ -1561,6 +1588,24 @@ let playerId = localStorage.getItem('playerId') || '';
                 }
             }
 
+            async function sendChooseOwnedCardIndex(n) {
+                if (!playerId || !currentGameId) return;
+                try {
+                    await fetch(`/api/game/${currentGameId}/action`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            player_id: playerId,
+                            action_type: 'act_on_required_action',
+                            action: `choose_owned_card ${Number(n)}`
+                        })
+                    });
+                    getGameState(false);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
             async function sendDomainManipulateSkip() {
                 if (!playerId || !currentGameId) return;
                 try {
@@ -1821,6 +1866,102 @@ let playerId = localStorage.getItem('playerId') || '';
                     <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
                         <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(dn)}: add +${delta} to a center monster strength cost</div>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">${btns}</div>
+                    </div>`;
+            }
+
+            // Resolve `pending_required_choice.kind` for a choose_owned_card prompt into
+            // user-facing copy. Mirrors `chooseOwnedCardCopy` in static/game/src/05-prompts.js;
+            // new consumers should be added in both places.
+            function chooseOwnedCardCopy(prc, gameState) {
+                const kind = (prc?.kind || '').toString();
+                const cardKind = (prc?.card_kind || '').toString().toLowerCase();
+                const noun = cardKind === 'monster' ? 'monster' : 'citizen';
+
+                const playerName = (pid) => {
+                    if (!pid) return 'that player';
+                    const list = Array.isArray(gameState?.player_list) ? gameState.player_list : [];
+                    const p = list.find(x => (x?.player_id || '') === pid);
+                    const nm = (p?.name ?? '').toString().trim();
+                    return nm || pid;
+                };
+
+                if (kind === 'domain_return_owned') {
+                    const dn = (prc?.domain_name || 'Domain').toString();
+                    const res = (prc?.resource || '').toString().toLowerCase();
+                    const amt = Number(prc?.amount) || 0;
+                    const rewardLine = amt > 0
+                        ? ` Reward: ${amt} ${labelForChoiceToken(res)}.`
+                        : '';
+                    return {
+                        title: `${dn}: return a ${noun}`,
+                        explain: `Return one of your owned ${noun}s to its stack.${rewardLine}`,
+                        waiting: (reqId) => `Waiting on ${reqId} to return a ${noun} for ${dn}.`,
+                        skipLabel: 'Decline',
+                    };
+                }
+                if (kind === 'discard_owned_card') {
+                    return {
+                        title: `Discard a ${noun}`,
+                        explain: `Choose one of your owned ${noun}s. It is removed from play permanently (sent to the discard pile) — not face-down like a flip.`,
+                        waiting: (reqId) => `Waiting on ${reqId} to discard a ${noun}.`,
+                        skipLabel: 'Skip',
+                    };
+                }
+                if (kind === 'discard_center_card') {
+                    return {
+                        title: `Discard a center-stack ${noun}`,
+                        explain: `Choose one of the available ${noun}s from the center stacks. It is removed from play permanently (sent to the discard pile).`,
+                        waiting: (reqId) => `Waiting on ${reqId} to discard a center-stack ${noun}.`,
+                        skipLabel: 'Skip',
+                    };
+                }
+                if (kind === 'monster_flip_citizen_targeted') {
+                    const targetName = playerName(prc?.target_player_id);
+                    return {
+                        title: `Flip a citizen on ${targetName}'s tableau`,
+                        explain: `Choose one of ${targetName}'s face-up citizens. It will be flipped face-down (no harvest payout, no role spend).`,
+                        waiting: (reqId) => `Waiting on ${reqId} to flip a citizen on ${targetName}'s tableau.`,
+                        skipLabel: 'Skip',
+                    };
+                }
+                return {
+                    title: `Choose one of your ${noun}s`,
+                    explain: `Choose one of your owned ${noun}s.`,
+                    waiting: (reqId) => `Waiting on ${reqId}.`,
+                    skipLabel: 'Skip',
+                };
+            }
+
+            function renderChooseOwnedCard(gameState) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+                const req = gameState?.action_required || {};
+                const reqId = (req?.id || '').toString();
+                const isYou = (playerId && reqId === playerId);
+                const prc = gameState?.pending_required_choice || null;
+                const opts = Array.isArray(prc?.options) ? prc.options : [];
+                const copy = chooseOwnedCardCopy(prc, gameState);
+                if (!isYou) {
+                    panel.innerHTML = `<div style="padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        ${escapeHtml(copy.waiting(reqId))}
+                    </div>`;
+                    return;
+                }
+                const skipBtn = prc?.allow_skip
+                    ? `<button type="button" onclick="sendDomainManipulateSkip()" style="margin-left:8px;">${escapeHtml(copy.skipLabel)}</button>`
+                    : '';
+                const btns = opts.length
+                    ? opts.map((o, idx) => {
+                        const nm = escapeHtml((o?.name || '?').toString());
+                        const flipped = o?.is_flipped ? ' (flipped)' : '';
+                        return `<button type="button" onclick="sendChooseOwnedCardIndex(${idx + 1})">${nm}${flipped}</button>`;
+                    }).join(' ')
+                    : '<span class="mini">No eligible cards.</span>';
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(copy.title)}</div>
+                        <div class="mini" style="margin-bottom:8px;color:#333;">${escapeHtml(copy.explain)}</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">${btns}${skipBtn}</div>
                     </div>`;
             }
 

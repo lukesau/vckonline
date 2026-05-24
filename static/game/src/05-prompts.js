@@ -108,6 +108,54 @@ function playerDisplayName(state, pid) {
   return nm || id || 'Player';
 }
 
+// Compact "current resources" strip for resource-affecting prompts. Listed in
+// turn order so the table reads top-to-bottom in seat order; the viewer's row
+// is highlighted so they can scan their own supply quickly. Other prompts
+// (duke select, flip citizen, monster strength bump) deliberately skip this.
+function makePromptResourcesPanel(state) {
+  const players = Array.isArray(state?.player_list) ? state.player_list : [];
+  const panel = mk('prompt-modal-resources');
+
+  const title = mk('prompt-modal-resources-title');
+  title.textContent = 'Resources';
+  panel.appendChild(title);
+
+  const list = mk('prompt-modal-resources-list');
+  players.forEach(p => {
+    const row = mk('prompt-modal-resources-row');
+    if (idsMatch(p.player_id, PLAYER_ID)) row.classList.add('is-you');
+
+    const nameWrap = mk('prompt-modal-resources-name');
+    const nm = document.createElement('span');
+    nm.className = 'prompt-modal-resources-name-text';
+    nm.textContent = (p.name || p.player_id || 'Player').toString();
+    nameWrap.appendChild(nm);
+    if (idsMatch(p.player_id, PLAYER_ID)) {
+      const tag = mk('prompt-modal-resources-you-tag');
+      tag.textContent = 'You';
+      nameWrap.appendChild(tag);
+    }
+    row.appendChild(nameWrap);
+
+    const pills = mk('prompt-modal-resources-pills');
+    pills.appendChild(makeResourceScorePill('gold', p.gold_score, 'Gold', TABLEAU_RESOURCE_ICONS.gold));
+    pills.appendChild(makeResourceScorePill('strength', p.strength_score, 'Strength', TABLEAU_RESOURCE_ICONS.strength));
+    pills.appendChild(makeResourceScorePill('magic', p.magic_score, 'Magic', TABLEAU_RESOURCE_ICONS.magic));
+    pills.appendChild(makeVpScorePill(p.victory_score));
+    row.appendChild(pills);
+
+    list.appendChild(row);
+  });
+  panel.appendChild(list);
+
+  return panel;
+}
+
+function appendPromptResourcesPanel(body, state) {
+  if (!body) return;
+  body.appendChild(makePromptResourcesPanel(state));
+}
+
 function pendingPlayerLabels(state, pending) {
   return (pending || []).map(pid => playerDisplayName(state, pid));
 }
@@ -606,6 +654,7 @@ function renderFinalizeRollPrompt(state) {
     const note = mk('prompt-modal-note');
     note.textContent = `Waiting on ${playerDisplayName(state, reqId)} to finalize the roll.`;
     body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
     openPromptOverlayShell({
       title: 'Finalize roll',
       dismissible: true,
@@ -651,6 +700,8 @@ function renderFinalizeRollPrompt(state) {
   hint.textContent = 'Choose a roll modifier or keep the rolled dice.';
   body.appendChild(hint);
 
+  appendPromptResourcesPanel(body, state);
+
   openPromptOverlayShell({
     title: 'Finalize roll',
     subtitle: null,
@@ -674,6 +725,7 @@ function renderDomainSelfConvertPrompt(state) {
     const note = mk('prompt-modal-note');
     note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — ${dn} optional trade.`;
     body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
     openPromptOverlayShell({
       title: `${dn}: trade`,
       dismissible: true,
@@ -686,6 +738,8 @@ function renderDomainSelfConvertPrompt(state) {
   const sub = mk('prompt-modal-note');
   sub.textContent = explain;
   body.appendChild(sub);
+
+  appendPromptResourcesPanel(body, state);
 
   const foot = promptActionsRow([
     promptButton('Confirm trade', () => confirmAndPostGameAction(
@@ -745,6 +799,7 @@ function renderHarvestOptionalExchangePrompt(state) {
     const note = mk('prompt-modal-note');
     note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — optional citizen harvest exchange.`;
     body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
     openPromptOverlayShell({
       title: 'Harvest exchange',
       dismissible: true,
@@ -757,6 +812,8 @@ function renderHarvestOptionalExchangePrompt(state) {
   const sub = mk('prompt-modal-note');
   sub.textContent = explain;
   body.appendChild(sub);
+
+  appendPromptResourcesPanel(body, state);
 
   const foot = promptActionsRow([
     promptButton('Take exchange', () => confirmAndPostGameAction(
@@ -792,6 +849,91 @@ function renderHarvestOptionalExchangePrompt(state) {
   });
 }
 
+function renderHarvestStealPrompt(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const stage = (prc?.stage || 'victim').toString();
+  const victimOptions = Array.isArray(prc?.victim_options) ? prc.victim_options : [];
+  const resourceOptions = Array.isArray(prc?.resource_options) ? prc.resource_options : [];
+  const victim = prc?.victim || null;
+
+  const body = mk('prompt-modal-body');
+  const chip = harvestTurnChip(state, reqId);
+  const headRow = mk('prompt-modal-inline');
+  const ht = mk('prompt-modal-note');
+  ht.textContent = isYou
+    ? (stage === 'resource' ? 'Steal: choose resource' : 'Steal: choose opponent')
+    : `Waiting on ${playerDisplayName(state, reqId)} — steal choice.`;
+  headRow.appendChild(ht);
+  if (chip) headRow.appendChild(chip);
+  body.appendChild(headRow);
+
+  if (!isYou) {
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({
+      title: 'Harvest steal',
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
+  if (stage === 'resource') {
+    const victimName = (victim?.victim_name || victim?.victim_id || 'opponent').toString();
+    const note = mk('prompt-modal-note');
+    note.textContent = `Choose what to steal from ${victimName}.`;
+    body.appendChild(note);
+    resourceOptions.forEach((o, idx) => {
+      const amount = Number(o?.amount);
+      const amountText = Number.isFinite(amount) ? amount : o?.amount;
+      const resLabel = labelForChoiceToken(o?.resource);
+      const label = `Steal ${amountText} ${resLabel}`;
+      foot.appendChild(promptButton(label, () => confirmAndPostGameAction(
+        {
+          player_id: PLAYER_ID,
+          action_type: 'act_on_required_action',
+          action: `steal_resource ${idx + 1}`,
+        },
+        {
+          title: 'Steal resource?',
+          message: `${label} from ${victimName}.`,
+        },
+      )));
+    });
+  } else {
+    const note = mk('prompt-modal-note');
+    note.textContent = 'Choose an opponent to steal from.';
+    body.appendChild(note);
+    victimOptions.forEach((o, idx) => {
+      const victimName = (o?.victim_name || o?.victim_id || 'opponent').toString();
+      foot.appendChild(promptButton(victimName, () => confirmAndPostGameAction(
+        {
+          player_id: PLAYER_ID,
+          action_type: 'act_on_required_action',
+          action: `steal_victim ${idx + 1}`,
+        },
+        {
+          title: 'Choose opponent?',
+          message: `Steal from ${victimName}.`,
+        },
+      )));
+    });
+  }
+
+  appendPromptResourcesPanel(body, state);
+
+  openPromptOverlayShell({
+    title: 'Harvest steal',
+    dismissible: false,
+    bodyEl: body,
+    footerEl: foot,
+  });
+}
+
 function renderDomainChoosePlayer(state) {
   const req = state?.action_required || {};
   const reqId = (req?.id || '').toString();
@@ -808,6 +950,7 @@ function renderDomainChoosePlayer(state) {
     const note = mk('prompt-modal-note');
     note.textContent = `Waiting on ${playerDisplayName(state, reqId)} to choose a player for ${dn}.`;
     body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
     openPromptOverlayShell({
       title: `${dn}`,
       dismissible: true,
@@ -820,6 +963,8 @@ function renderDomainChoosePlayer(state) {
   const sub = mk('prompt-modal-note');
   sub.textContent = explain;
   body.appendChild(sub);
+
+  appendPromptResourcesPanel(body, state);
 
   const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
   opts.forEach((o, idx) => {
@@ -912,6 +1057,171 @@ function renderDomainChooseMonster(state) {
   });
 }
 
+// Maps `pending_required_choice.kind` (paired with action_required="choose_owned_card")
+// to user-facing copy. New consumers register their kind here so the renderer can show
+// the right title/explainer instead of a generic "Choose one of your cards" fallback.
+function chooseOwnedCardCopy(prc, state) {
+  const kind = (prc?.kind || '').toString();
+  const cardKind = (prc?.card_kind || '').toString().toLowerCase();
+  const noun = cardKind === 'monster' ? 'monster' : 'citizen';
+
+  if (kind === 'domain_return_owned') {
+    const dn = (prc?.domain_name || 'Domain').toString();
+    const res = (prc?.resource || '').toString().toLowerCase();
+    const amt = Number(prc?.amount) || 0;
+    const rewardLine = amt > 0
+      ? ` Reward: ${amt} ${labelForChoiceToken(res)}.`
+      : '';
+    return {
+      title: `${dn}: return a ${noun}`,
+      explain: `Return one of your owned ${noun}s to its stack.${rewardLine}`,
+      waiting: (label) => `Waiting on ${label} to return a ${noun} for ${dn}.`,
+      confirmTitle: `Return ${noun}?`,
+      confirmMessage: (nm) => `Return ${noun} "${nm}" to its board stack.`,
+      skipLabel: 'Decline (skip activation)',
+      skipMessage: `Decline the activation effect on ${dn}.`,
+      tableauOwner: 'self',
+    };
+  }
+
+  if (kind === 'discard_owned_card') {
+    return {
+      title: `Discard a ${noun}`,
+      explain: `Choose one of your owned ${noun}s. It is removed from play permanently (sent to the discard pile) — not face-down like a flip.`,
+      waiting: (label) => `Waiting on ${label} to discard a ${noun}.`,
+      confirmTitle: `Discard ${noun}?`,
+      confirmMessage: (nm) => `Permanently discard ${noun} "${nm}" to the discard pile.`,
+      skipLabel: 'Skip (optional)',
+      skipMessage: `Skip discarding a ${noun}.`,
+      tableauOwner: 'self',
+    };
+  }
+
+  if (kind === 'discard_center_card') {
+    return {
+      title: `Discard a center-stack ${noun}`,
+      explain: `Choose one of the available ${noun}s from the center stacks. It is removed from play permanently (sent to the discard pile).`,
+      waiting: (label) => `Waiting on ${label} to discard a center-stack ${noun}.`,
+      confirmTitle: `Discard center-stack ${noun}?`,
+      confirmMessage: (nm) => `Permanently discard center-stack ${noun} "${nm}" to the discard pile.`,
+      skipLabel: 'Skip (optional)',
+      skipMessage: `Skip discarding a center-stack ${noun}.`,
+      tableauOwner: 'center',
+    };
+  }
+
+  if (kind === 'monster_flip_citizen_targeted') {
+    const targetName = prc?.target_player_id
+      ? playerDisplayName(state, prc.target_player_id)
+      : 'that player';
+    return {
+      title: `Flip a citizen on ${targetName}'s tableau`,
+      explain: `Choose one of ${targetName}'s face-up citizens. It will be flipped face-down (no harvest payout, no role spend) until something restores it.`,
+      waiting: (label) => `Waiting on ${label} to flip a citizen on ${targetName}'s tableau.`,
+      confirmTitle: 'Flip citizen?',
+      confirmMessage: (nm) => `Flip "${nm}" face-down on ${targetName}'s tableau.`,
+      skipLabel: 'Skip',
+      skipMessage: 'Decline to flip a citizen.',
+      tableauOwner: 'target',
+    };
+  }
+
+  return {
+    title: `Choose one of your ${noun}s`,
+    explain: `Choose one of your owned ${noun}s.`,
+    waiting: (label) => `Waiting on ${label}.`,
+    confirmTitle: 'Confirm?',
+    confirmMessage: (nm) => `Choose ${noun} "${nm}".`,
+    skipLabel: 'Skip',
+    skipMessage: 'Skip.',
+    tableauOwner: 'self',
+  };
+}
+
+function chooseOwnedCardButtonLabel(opt) {
+  const nm = (opt?.name || '?').toString();
+  return opt?.is_flipped ? `${nm} (flipped)` : nm;
+}
+
+function renderChooseOwnedCard(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const opts = Array.isArray(prc?.options) ? prc.options : [];
+  const copy = chooseOwnedCardCopy(prc, state);
+  // Only domain_return_owned (and its reward) directly pays resources. Other
+  // owned-card prompts (discard, monster-flip targeting) only nudge future
+  // harvests, so we skip the supply strip there.
+  const affectsResources = (prc?.kind || '').toString() === 'domain_return_owned';
+
+  const body = mk('prompt-modal-body');
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = copy.waiting(playerDisplayName(state, reqId));
+    body.appendChild(note);
+    if (affectsResources) appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({
+      title: copy.title,
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const sub = mk('prompt-modal-note');
+  sub.textContent = copy.explain;
+  body.appendChild(sub);
+
+  if (!opts.length) {
+    const empty = mk('prompt-modal-note');
+    empty.textContent = 'No eligible cards.';
+    body.appendChild(empty);
+  }
+
+  if (affectsResources) appendPromptResourcesPanel(body, state);
+
+  const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
+  opts.forEach((o, idx) => {
+    const nm = (o?.name || '?').toString();
+    const label = chooseOwnedCardButtonLabel(o);
+    foot.appendChild(promptButton(label, () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: `choose_owned_card ${idx + 1}`,
+      },
+      {
+        title: copy.confirmTitle,
+        message: copy.confirmMessage(nm),
+      },
+    )));
+  });
+
+  if (prc?.allow_skip) {
+    foot.appendChild(promptButton(copy.skipLabel, () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: 'skip',
+      },
+      {
+        title: copy.skipLabel,
+        message: copy.skipMessage,
+        confirmLabel: 'Skip',
+      },
+    ), true));
+  }
+
+  openPromptOverlayShell({
+    title: copy.title,
+    dismissible: false,
+    bodyEl: body,
+    footerEl: foot,
+  });
+}
+
 function chooseOptionButtonLabel(opt, idx) {
   const token = (opt?.token || '').toString();
   const label = labelForChoiceToken(token);
@@ -966,6 +1276,7 @@ function renderChoosePrompt(state, chooseCmd) {
       ? `Waiting on required choice: ${chooseCmd}`
       : `Waiting on ${playerDisplayName(state, reqId)} — ${chooseCmd}`;
     body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
     openPromptOverlayShell({
       title: 'Choose one',
       dismissible: !isYou || !options.length,
@@ -990,6 +1301,8 @@ function renderChoosePrompt(state, chooseCmd) {
       },
     )));
   });
+
+  appendPromptResourcesPanel(body, state);
 
   openPromptOverlayShell({
     title: 'Choose one',
@@ -1023,6 +1336,7 @@ function renderManualHarvestPrompt(state) {
         ? 'No harvest slots (try reconnecting).'
         : '';
     if (note.textContent) body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
     openPromptOverlayShell({
       title: 'Harvest',
       dismissible: true,
@@ -1037,6 +1351,8 @@ function renderManualHarvestPrompt(state) {
     thief.textContent = 'If you have the Thief, harvest that citizen before other citizens.';
     body.appendChild(thief);
   }
+
+  appendPromptResourcesPanel(body, state);
 
   const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
   slots.forEach(s => {
@@ -1083,6 +1399,7 @@ function renderBonusResourcePrompt(state) {
   body.appendChild(headRow);
 
   if (!isYou) {
+    appendPromptResourcesPanel(body, state);
     openPromptOverlayShell({
       title: 'Harvest bonus',
       dismissible: true,
@@ -1091,6 +1408,8 @@ function renderBonusResourcePrompt(state) {
     });
     return;
   }
+
+  appendPromptResourcesPanel(body, state);
 
   const foot = promptActionsRow([
     promptButton('+1 Gold', () => confirmAndPostGameAction(
@@ -1200,6 +1519,11 @@ function renderPromptModal(state) {
     return;
   }
 
+  if (reqAction === 'choose_owned_card') {
+    renderChooseOwnedCard(state);
+    return;
+  }
+
   if (typeof reqAction === 'string' && reqAction.trim().startsWith('choose ')) {
     renderChoosePrompt(state, reqAction);
     return;
@@ -1207,6 +1531,11 @@ function renderPromptModal(state) {
 
   if (reqAction === 'harvest_optional_exchange') {
     renderHarvestOptionalExchangePrompt(state);
+    return;
+  }
+
+  if (reqAction === 'harvest_steal') {
+    renderHarvestStealPrompt(state);
     return;
   }
 

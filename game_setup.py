@@ -54,11 +54,11 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
             monster_query = "select_base2_monsters"
             citizen_query = "select_base2_citizens"
             domain_query = "select_random_domains"
-        case "test1":
+        case "test1" | "current":
             monster_query = "select_base1_monsters"
             citizen_query = "select_base1_citizens"
             domain_query = "select_test1_domains"
-        case "test2" | "current":
+        case "test2":
             monster_query = "select_base2_monsters"
             citizen_query = "select_base2_citizens"
             domain_query = "select_test2_domains"
@@ -239,9 +239,14 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
             player.owned_starters.append(starter_stack[1])
             for _ in range(2):
                 player.owned_dukes.append(duke_stack.pop())
-        # deal monsters onto the board
+        # deal monsters onto the board.
+        # is_extra monsters only ship with the 5-player stack; at smaller player
+        # counts each area drops its is_extra card so the stacks are one shorter.
+        include_extra_monsters = len(player_list_from_lobby) == 5
         grouped_monsters = {}
         for monster in monster_stack:
+            if not include_extra_monsters and bool(getattr(monster, "is_extra", False)):
+                continue
             area = monster.area
             if area in grouped_monsters:
                 grouped_monsters[area].append(monster)
@@ -251,6 +256,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
             monsters.sort(key=lambda item: item.order, reverse=True)
         areas = list(grouped_monsters.keys())
         chosen_areas = random.sample(areas, 5)
+        monster_stack_areas = list(chosen_areas)
         for i, area in enumerate(chosen_areas):
             monsters = grouped_monsters[area]
             monster_grid[i].extend(monsters)
@@ -296,13 +302,17 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
             "pending_required_choice": None,
             "player_list": player_list,
             "monster_grid": monster_grid,
+            "monster_stack_areas": monster_stack_areas,
             "citizen_grid": citizen_grid,
             "domain_grid": domain_grid,
             "die_one": die_one,
             "die_two": die_two,
             "die_sum": die_sum,
+            "roll_events": [],
             "exhausted_count": exhausted_count,
             "exhausted_stack": exhausted_stack,
+            "discard_pile": [],
+            "pending_payout_continuation": None,
             "end_game_triggered": False,
             "final_scores": None,
             "final_result": None,

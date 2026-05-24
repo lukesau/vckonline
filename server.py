@@ -31,6 +31,11 @@ except Exception as exc:
 _DEV_CLIENT_INDEX = _REPO_ROOT / "static" / "dev-client" / "index.html"
 _GAME_CLIENT_INDEX = _REPO_ROOT / "static" / "game" / "index.html"
 _COUNTER_INDEX = _REPO_ROOT / "static" / "counter" / "index.html"
+_WIKI_INDEX = _REPO_ROOT / "static" / "wiki" / "index.html"
+
+# Cached wiki payload. Card data is static between server restarts; lazy-load on
+# first request and reuse forever (override with ?refresh=1).
+_wiki_cards_cache = None
 
 # Card image directories — keyed by the singular type name used in filenames
 _CARD_IMAGE_DIRS: Dict[str, Path] = {
@@ -789,6 +794,32 @@ async def debug_client():
 @app.get("/counter")
 async def counter_client():
     return FileResponse(_COUNTER_INDEX, media_type="text/html")
+
+
+@app.get("/wiki")
+async def wiki_client():
+    return FileResponse(_WIKI_INDEX, media_type="text/html")
+
+
+@app.get("/api/wiki/cards")
+async def wiki_cards(refresh: bool = False):
+    """Return every row of every card table, grouped by type.
+
+    The result is cached in-memory for the life of the server process.
+    Pass `?refresh=1` to force a reload (useful while editing rows in the
+    DB without restarting the server).
+    """
+    global _wiki_cards_cache
+    if _wiki_cards_cache is None or refresh:
+        try:
+            from wiki_data import load_all_cards_for_wiki
+            _wiki_cards_cache = load_all_cards_for_wiki()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Failed to load card data from database: {exc}",
+            )
+    return _wiki_cards_cache
 
 
 if __name__ == "__main__":

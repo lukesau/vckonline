@@ -220,6 +220,7 @@ class Game:
         self.game_id = game_state['game_id']
         self.player_list = game_state['player_list']
         self.monster_grid = game_state['monster_grid']
+        self.monster_stack_areas = list(game_state.get('monster_stack_areas') or [])
         self.citizen_grid = game_state['citizen_grid']
         self.domain_grid = game_state['domain_grid']
         # Finalized dice (used for all game logic checks, harvest matching, etc.).
@@ -231,8 +232,22 @@ class Game:
         self.rolled_die_one = game_state.get('rolled_die_one', self.die_one)
         self.rolled_die_two = game_state.get('rolled_die_two', self.die_two)
         self.rolled_die_sum = game_state.get('rolled_die_sum', self.die_sum)
+        # Tokens describing notable things about the most recent finalized roll
+        # (e.g. "doubles"). Computed from the NATURAL rolled dice in finalize_roll,
+        # then read by `roll.on_event ...` passives and any later-phase card that
+        # cares about what got rolled this turn. Persists until the next finalize_roll.
+        self.roll_events = list(game_state.get('roll_events') or [])
         self.exhausted_count = game_state['exhausted_count']
         self.exhausted_stack = list(game_state.get('exhausted_stack') or [])
+        # Single global discard pile shared across all players. Cards land here
+        # when something explicitly "discards" them (truly out of play -- distinct
+        # from flipped citizens, which stay on a tableau face-down). Entries are
+        # the original card objects (Citizen, Monster, ...), in discard order.
+        self.discard_pile = list(game_state.get('discard_pile') or [])
+        # When a compound special-payout (`A + B + ...`) opens a blocking prompt
+        # for leg N, legs N+1.. are stashed here so they fire after the prompt
+        # resolves. None when nothing is pending.
+        self.pending_payout_continuation = game_state.get('pending_payout_continuation')
         self.end_game_triggered = game_state.get('end_game_triggered', False)
         self.final_scores = game_state.get('final_scores', None)
         self.final_result = game_state.get('final_result', None)
@@ -322,9 +337,11 @@ class Game:
                 self.action_required.get("action") == "bonus_resource_choice"
                 or aa == "manual_harvest"
                 or aa == "harvest_optional_exchange"
+                or aa == "harvest_steal"
                 or aa.startswith("choose ")
                 or aa.startswith("choose_player")
                 or aa.startswith("choose_monster")
+                or aa.startswith("choose_owned")
                 or aa == "domain_self_convert"
             ):
                 return False
@@ -651,9 +668,10 @@ class Game:
                 "bonus_resource_choice",
                 "manual_harvest",
                 "harvest_optional_exchange",
+                "harvest_steal",
             ) or aa.startswith("choose ") or aa.startswith("choose_player") or aa.startswith(
                 "choose_monster"
-            ) or aa == "domain_self_convert":
+            ) or aa.startswith("choose_owned") or aa == "domain_self_convert":
                 return False
 
         if player_id != self.current_player_id():
@@ -801,6 +819,13 @@ class Game:
         self.die_two = fd2
         self.die_sum = fd1 + fd2
 
+        # Compute roll-event tokens from the NATURAL dice (pre-modification) so that
+        # roll-modifying passives (Palace of the Dawn, Foxgrove, ...) can never
+        # manufacture or erase an "event" like doubles. Anything that wants to know
+        # "what just happened on the dice" should read self.roll_events.
+        self.roll_events = self._compute_roll_events(rd1, rd2)
+        self._apply_roll_on_event_passives()
+
         self.pending_roll = None
         # Move into harvest exactly like the old post-roll transition.
         self.phase = "harvest"
@@ -920,6 +945,14 @@ class Game:
             return False
 
     def _iter_roll_set_one_die_effects(self, player):
+        """Yield owned-domain `roll.set_one_die` passive specs for the player.
+
+        Recognized KV options:
+          target=N       absolute set to N (1..6)
+          subtract=N     relative: new value = old - N
+          add=N          relative: new value = old + N
+          cost=g:N | cost=g_per_owned_role:<role>    optional; omitted = free
+        """
         for d in list(getattr(player, "owned_domains", []) or []):
             if self._domain_recurring_passive_on_build_turn_cooldown(d):
                 continue
@@ -937,19 +970,41 @@ class Game:
                     continue
                 k, v = p.split("=", 1)
                 kv[(k or "").strip().lower()] = (v or "").strip()
+            spec = self._parse_roll_set_one_die_kv(kv)
+            if not spec:
+                continue
+            spec["domain_name"] = getattr(d, "name", "Domain")
+            yield spec
+
+    def _parse_roll_set_one_die_kv(self, kv):
+        cost_spec = kv.get("cost", "")
+        target_s = kv.get("target", "")
+        if target_s:
             try:
-                target = int(kv.get("target", ""))
+                target = int(target_s)
             except (TypeError, ValueError):
-                continue
+                return None
             if target < 1 or target > 6:
+                return None
+            return {"mode": "target", "target": target, "cost_spec": cost_spec}
+        for mode_key in ("subtract", "add"):
+            v = kv.get(mode_key, "")
+            if not v:
                 continue
-            cost_spec = kv.get("cost", "")
-            if not cost_spec:
-                continue
-            yield {"domain_name": getattr(d, "name", "Domain"), "target": target, "cost_spec": cost_spec}
+            try:
+                delta = int(v)
+            except (TypeError, ValueError):
+                return None
+            if delta <= 0:
+                return None
+            return {"mode": mode_key, "delta": delta, "cost_spec": cost_spec}
+        return None
 
     def _resolve_roll_effect_cost(self, player, cost_spec):
         spec = (cost_spec or "").strip().lower()
+        # Empty cost = free
+        if not spec:
+            return {"gold": 0}
         # g:N
         if spec.startswith("g:"):
             try:
@@ -975,11 +1030,24 @@ class Game:
         if changed1 == changed2:
             return False
         new_value = fd1 if changed1 else fd2
+        old_value = rd1 if changed1 else rd2
         for effect in self._iter_roll_set_one_die_effects(player):
-            if int(effect.get("target", 0) or 0) != int(new_value):
+            mode = effect.get("mode")
+            if mode == "target":
+                if int(effect.get("target", 0) or 0) != int(new_value):
+                    continue
+            elif mode == "subtract":
+                if int(new_value) != int(old_value) - int(effect.get("delta", 0) or 0):
+                    continue
+            elif mode == "add":
+                if int(new_value) != int(old_value) + int(effect.get("delta", 0) or 0):
+                    continue
+            else:
+                continue
+            if int(new_value) < 1 or int(new_value) > 6:
                 continue
             cost = self._resolve_roll_effect_cost(player, effect.get("cost_spec"))
-            if not cost:
+            if cost is None:
                 continue
             g = int(cost.get("gold", 0) or 0)
             if int(getattr(player, "gold_score", 0) or 0) < g:
@@ -988,12 +1056,91 @@ class Game:
             if g:
                 player.gold_score = int(player.gold_score) - g
             after = self._player_scores_line(player)
-            self._log_game_event(
-                f"{self._player_label(player.player_id)} used {effect.get('domain_name')} "
-                f"(pay {g} gold) during roll: scores {before} -> {after}"
-            )
+            if g:
+                self._log_game_event(
+                    f"{self._player_label(player.player_id)} used {effect.get('domain_name')} "
+                    f"(pay {g} gold) during roll: die {old_value} -> {new_value}; scores {before} -> {after}"
+                )
+            else:
+                self._log_game_event(
+                    f"{self._player_label(player.player_id)} used {effect.get('domain_name')} "
+                    f"during roll: die {old_value} -> {new_value}"
+                )
             return True
         return False
+
+    def _compute_roll_events(self, rolled_die_one, rolled_die_two):
+        """Return the list of event tokens for the given natural dice.
+
+        Centralizes "what happened on the dice this roll" so that any listener
+        (roll-phase passives now, harvest/action effects later) can ask the same
+        question without re-deriving things like "were the dice doubles?".
+
+        Currently emitted tokens:
+          doubles    -- both natural dice were equal (1..6)
+
+        Future tokens (e.g. "sum.N", "die.N", "snake_eyes") can be added here.
+        """
+        events = []
+        try:
+            d1 = int(rolled_die_one or 0)
+            d2 = int(rolled_die_two or 0)
+        except (TypeError, ValueError):
+            return events
+        if 1 <= d1 <= 6 and 1 <= d2 <= 6 and d1 == d2:
+            events.append("doubles")
+        return events
+
+    def _apply_roll_on_event_passives(self):
+        """Fire owned-domain `roll.on_event <event> <resource> <amount>` passives across all players.
+
+        Grammar: `roll.on_event <event-token> <g|s|m|v> <int>`. Currently supported
+        event tokens are whatever `_compute_roll_events` emits (e.g. "doubles").
+
+        Reads `self.roll_events`, which is populated in `finalize_roll` from the
+        NATURAL rolled dice. That keeps roll-modifier passives (Palace, Foxgrove)
+        from being able to manufacture or erase a trigger, regardless of which
+        listener is asking.
+        """
+        events = set(getattr(self, "roll_events", None) or [])
+        if not events:
+            return
+        for p in list(getattr(self, "player_list", []) or []):
+            for d in list(getattr(p, "owned_domains", []) or []):
+                if self._domain_recurring_passive_on_build_turn_cooldown(d):
+                    continue
+                raw = (getattr(d, "passive_effect", None) or "").strip()
+                if not raw:
+                    continue
+                parts = raw.split()
+                if not parts or parts[0].lower() != "roll.on_event":
+                    continue
+                if len(parts) < 4:
+                    continue
+                event = parts[1].lower()
+                res = parts[2].lower()
+                try:
+                    amount = int(parts[3])
+                except (TypeError, ValueError):
+                    continue
+                if res not in ("g", "s", "m", "v") or amount <= 0:
+                    continue
+                if event not in events:
+                    continue
+                before = self._player_scores_line(p)
+                if res == "g":
+                    p.gold_score = int(p.gold_score) + amount
+                elif res == "s":
+                    p.strength_score = int(p.strength_score) + amount
+                elif res == "m":
+                    p.magic_score = int(p.magic_score) + amount
+                elif res == "v":
+                    p.victory_score = int(getattr(p, "victory_score", 0)) + amount
+                after = self._player_scores_line(p)
+                self._log_game_event(
+                    f"{self._player_label(p.player_id)} \"{getattr(d, 'name', 'Domain')}\" triggered "
+                    f"({event}); scores {before} -> {after}"
+                )
 
     def _player_by_id(self, player_id):
         for p in self.player_list:
@@ -1246,6 +1393,8 @@ class Game:
             return True
         if str(aa).startswith("choose ") or str(aa).startswith("choose_player") or str(aa).startswith("choose_monster"):
             return True
+        if str(aa).startswith("choose_owned"):
+            return True
         if str(aa) == "domain_self_convert":
             return True
         return False
@@ -1479,24 +1628,259 @@ class Game:
         opponents = [p for p in self.player_list if p.player_id != player_id]
         if not opponents:
             return [0, 0, 0, 0]
+        victim_options = []
+        for opp in opponents:
+            opp_name = getattr(opp, "name", None) or f"Player {opp.player_id}"
+            victim_options.append({
+                "victim_id": opp.player_id,
+                "victim_name": opp_name,
+            })
+        resource_options = [
+            {"resource": res, "amount": amt}
+            for res, amt in resource_opts
+        ]
+        # Keep flat legacy options in state for older clients, but the current UI
+        # resolves steal as victim first, then resource when there is a choice.
         options = []
-        for res, amt in resource_opts:
-            for opp in opponents:
-                opp_name = getattr(opp, "name", None) or f"Player {opp.player_id}"
+        for victim_opt in victim_options:
+            for resource_opt in resource_options:
                 options.append({
                     "kind": "steal",
-                    "victim_id": opp.player_id,
-                    "victim_name": opp_name,
-                    "resource": res,
-                    "amount": amt,
+                    "victim_id": victim_opt["victim_id"],
+                    "victim_name": victim_opt["victim_name"],
+                    "resource": resource_opt["resource"],
+                    "amount": resource_opt["amount"],
                 })
         self.pending_required_choice = {
             "kind": "harvest_steal",
+            "stage": "victim",
             "player_id": player_id,
+            "victim_options": victim_options,
+            "resource_options": resource_options,
             "options": options,
         }
         self.action_required["id"] = player_id
         self.action_required["action"] = "harvest_steal"
+        return [0, 0, 0, 0]
+
+    def _apply_harvest_steal_choice(self, player_id, victim_id, resource, amount):
+        thief = self._player_by_id(player_id)
+        victim = self._player_by_id(victim_id)
+        if not thief or not victim:
+            return False
+        res_s = (resource or "g").strip().lower()
+        want_s = int(amount or 0)
+        score_map = {"g": "gold_score", "s": "strength_score", "m": "magic_score", "v": "victory_score"}
+        attr_s = score_map.get(res_s)
+        if not attr_s or want_s <= 0:
+            return False
+        have_s = int(getattr(victim, attr_s, 0) or 0)
+        actual_s = min(want_s, have_s)
+        before_thief = self._player_scores_line(thief)
+        before_victim = self._player_scores_line(victim)
+        setattr(victim, attr_s, have_s - actual_s)
+        setattr(thief, attr_s, int(getattr(thief, attr_s, 0) or 0) + actual_s)
+        dg = actual_s if res_s == "g" else 0
+        ds = actual_s if res_s == "s" else 0
+        dm = actual_s if res_s == "m" else 0
+        dv = actual_s if res_s == "v" else 0
+        self._bump_harvest_delta(thief, dg, ds, dm, dv)
+        after_thief = self._player_scores_line(thief)
+        after_victim = self._player_scores_line(victim)
+        self._log_game_event(
+            f"{self._player_label(player_id)} stole {actual_s}{res_s} from "
+            f"{self._player_label(victim_id)}; "
+            f"thief {before_thief} -> {after_thief}, "
+            f"victim {before_victim} -> {after_victim}"
+        )
+        return True
+
+    def _execute_discard_center_payout(self, command, player_id):
+        """Parse `discard_center <kind> [optional]` and prompt for a center-stack card.
+
+        Gnoll Bonewitch-style discard removes an accessible card from the board,
+        not from a player's tableau. The removed card lands in the global discard pile.
+        """
+        parts = (command or "").strip().split()
+        if not parts or parts[0].lower() != "discard_center":
+            return [-9999, 0, 0, 0]
+        if len(parts) < 2:
+            return [-9999, 0, 0, 0]
+        kind = parts[1].lower()
+        optional = any(p.lower() == "optional" for p in parts[2:])
+        if kind not in ("citizen",):
+            return [-9999, 0, 0, 0]
+        options = []
+        for i, stack in enumerate(list(getattr(self, "citizen_grid", []) or [])):
+            if not stack:
+                continue
+            top = stack[-1]
+            if not getattr(top, "is_accessible", False):
+                continue
+            options.append({
+                "token": "citizen.center",
+                "idx": i,
+                "name": getattr(top, "name", "?"),
+                "citizen_id": int(getattr(top, "citizen_id", -1)),
+                "gold_cost": int(getattr(top, "gold_cost", 0) or 0),
+            })
+        if not options:
+            self._log_game_event(
+                f"{self._player_label(player_id)} had no center-stack {kind} to discard; effect skipped."
+            )
+            return [0, 0, 0, 0]
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "choose_owned_card"
+        self.pending_required_choice = {
+            "kind": "discard_center_card",
+            "player_id": player_id,
+            "card_kind": kind,
+            "options": options,
+            "allow_skip": optional,
+        }
+        self._log_game_event(
+            f"{self._player_label(player_id)} is choosing a center-stack {kind} to discard."
+        )
+        return [0, 0, 0, 0]
+
+    def _discard_center_citizen(self, stack_idx):
+        """Remove the accessible top citizen from a board stack and push it to the discard pile."""
+        stacks = list(getattr(self, "citizen_grid", []) or [])
+        if stack_idx < 0 or stack_idx >= len(stacks):
+            return None
+        stack = stacks[stack_idx]
+        if not stack:
+            return None
+        citizen = stack[-1]
+        if not getattr(citizen, "is_accessible", False):
+            return None
+        discarded = stack.pop(-1)
+        self._citizen_set_flipped(discarded, False)
+        self.discard_pile.append(discarded)
+        self._finalize_citizen_stack_after_claiming_top(stack)
+        return discarded
+
+    def _execute_discard_owned_payout(self, command, player_id):
+        """Parse `discard_owned <kind> [optional]` and open a self-target prompt.
+
+        Grammar (positional, mirrors `return_owned` and `take_owned`):
+          kind:     citizen   (future: monster, ...)
+          optional: literal "optional" flag when the actor may decline
+
+        "Discard" is a permanent removal: the chosen card leaves the player's
+        tableau and lands on the global `self.discard_pile`. Distinct from
+        `_citizen_set_flipped` (face-down but still on the tableau and recoverable).
+
+        Returns [0,0,0,0] -- the discard itself grants no resources; any companion
+        gains live in a sibling compound leg (e.g. `... + choose <citizens>`),
+        which is chained automatically via `_set_payout_continuation`.
+        """
+        parts = (command or "").strip().split()
+        if not parts or parts[0].lower() != "discard_owned":
+            return [-9999, 0, 0, 0]
+        if len(parts) < 2:
+            return [-9999, 0, 0, 0]
+        kind = parts[1].lower()
+        optional = any(p.lower() == "optional" for p in parts[2:])
+        if kind not in ("citizen",):
+            return [-9999, 0, 0, 0]
+        player = self._player_by_id(player_id)
+        if not player:
+            return [-9999, 0, 0, 0]
+        attr = "owned_citizens"
+        options = []
+        for i, c in enumerate(list(getattr(player, attr, []) or [])):
+            options.append({
+                "token": "citizen.owned",
+                "idx": i,
+                "name": getattr(c, "name", "?"),
+                "citizen_id": int(getattr(c, "citizen_id", -1)),
+                "is_flipped": bool(getattr(c, "is_flipped", False)),
+            })
+        if not options:
+            self._log_game_event(
+                f"{self._player_label(player_id)} had no {kind} to discard; effect skipped."
+            )
+            return [0, 0, 0, 0]
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "choose_owned_card"
+        self.pending_required_choice = {
+            "kind": "discard_owned_card",
+            "player_id": player_id,
+            "card_kind": kind,
+            "options": options,
+            "allow_skip": optional,
+        }
+        self._log_game_event(
+            f"{self._player_label(player_id)} is choosing a {kind} to discard."
+        )
+        return [0, 0, 0, 0]
+
+    def _discard_owned_citizen(self, player, src_idx):
+        """Remove a citizen from `player.owned_citizens[src_idx]` and push to the global discard pile.
+
+        Returns the discarded citizen (for logging), or None on bad index.
+        Caller is responsible for logging the higher-level "via <card>" context.
+        """
+        owned = list(getattr(player, "owned_citizens", []) or [])
+        if src_idx < 0 or src_idx >= len(owned):
+            return None
+        citizen = owned[src_idx]
+        if getattr(citizen, "is_flipped", False):
+            self._citizen_set_flipped(citizen, False)
+        del player.owned_citizens[src_idx]
+        self.discard_pile.append(citizen)
+        return citizen
+
+    def _execute_flip_citizen_payout(self, command, player_id):
+        """Parse `flip_citizen <variant> [optional]` and open the appropriate prompt.
+
+        Variants:
+          targeted   -- acting player picks one player, then one of that player's
+                        unflipped tableau citizens, and flips it face-down.
+                        Two-stage prompt: choose_player -> choose_owned_card.
+
+        Trailing literal `optional` flag lets the actor skip at either stage.
+
+        Always returns [0,0,0,0] -- the base monster rewards (vp/gold/etc.) are
+        applied by the slay flow on top of zero, and the flip is a follow-up choice.
+        If no eligible target exists the effect is silently lost (logged).
+        """
+        parts = (command or "").strip().split()
+        if not parts or parts[0].lower() != "flip_citizen":
+            return [-9999, 0, 0, 0]
+        variant = (parts[1].lower() if len(parts) >= 2 else "")
+        optional = any(p.lower() == "optional" for p in parts[2:])
+        if variant != "targeted":
+            return [-9999, 0, 0, 0]
+        options = []
+        for p in self.player_list:
+            owned = list(getattr(p, "owned_citizens", []) or [])
+            if not any(not getattr(c, "is_flipped", False) for c in owned):
+                continue
+            options.append({
+                "token": "player",
+                "player_id": p.player_id,
+                "name": getattr(p, "name", "?"),
+                "self": p.player_id == player_id,
+            })
+        if not options:
+            self._log_game_event(
+                f"{self._player_label(player_id)} could not flip a citizen (no eligible tableau)."
+            )
+            return [0, 0, 0, 0]
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "choose_player"
+        self.pending_required_choice = {
+            "kind": "monster_flip_citizen_targeted",
+            "player_id": player_id,
+            "stage": "player",
+            "options": options,
+            "allow_skip": optional,
+        }
+        self._log_game_event(
+            f"{self._player_label(player_id)} is choosing a player to flip a citizen from."
+        )
         return [0, 0, 0, 0]
 
     def _execute_compound_payout(
@@ -1513,6 +1897,11 @@ class Game:
         Non-choice commands are executed immediately and return [result].
         Choice commands set action_required and return [0,0,0,0].
         balance_hint: optional dict g,s,m,v carried across segments so exchange affordability sees prior legs.
+
+        If a leg opens a blocking prompt, any later legs are stashed via
+        `_set_payout_continuation` so they resume after the prompt resolves. The
+        prompt handler is responsible for calling `_resume_payout_continuation`
+        once it has applied the choice and cleared `action_required`.
         """
         parts = [p.strip() for p in (compound_command or "").split(" + ")]
         if not parts:
@@ -1526,7 +1915,7 @@ class Game:
         bal = dict(balance_hint) if balance_hint is not None else _player_resource_balances(player)
         if not bal:
             return [-9999, 0, 0, 0]
-        for cmd in parts:
+        for i, cmd in enumerate(parts):
             if not cmd:
                 continue
             payout = self.execute_special_payout(
@@ -1539,6 +1928,9 @@ class Game:
             new_action = (self.action_required or {}).get("action", "")
             new_concurrent = getattr(self, "concurrent_action", None)
             if (new_action and new_action != prior_action) or (new_concurrent is not prior_concurrent):
+                remaining = [p for p in parts[i + 1:] if p]
+                if remaining:
+                    self._set_payout_continuation(player_id, remaining, balance_hint=bal)
                 return total_payout
             if isinstance(payout, list) and len(payout) >= 4:
                 if payout[0] == -9999:
@@ -1558,6 +1950,109 @@ class Game:
                 total_payout[2] += payout[2]
                 total_payout[3] += payout[3]
         return total_payout
+
+    def _tokenize_payout(self, s):
+        """Whitespace-split a payout command, respecting double-quoted multi-word tokens.
+
+        Used by `count area "<multi word area>" <res> <mult>` and any future verb
+        whose positional args may contain spaces (e.g. citizen-name filters that
+        embed a space-bearing card name).
+
+        Example:
+          `count area "Undead Samurai" m 1` -> ['count', 'area', 'Undead Samurai', 'm', '1']
+          `count area Gnolls g 1`           -> ['count', 'area', 'Gnolls', 'g', '1']
+        Quotes are stripped from yielded tokens. Backslash escapes are not supported
+        (payout strings never need them); an unterminated quote captures the rest
+        of the input.
+        """
+        s = s or ""
+        out = []
+        i = 0
+        n = len(s)
+        while i < n:
+            while i < n and s[i].isspace():
+                i += 1
+            if i >= n:
+                break
+            if s[i] == '"':
+                j = s.find('"', i + 1)
+                if j == -1:
+                    out.append(s[i + 1:])
+                    return out
+                out.append(s[i + 1:j])
+                i = j + 1
+                continue
+            j = i
+            while j < n and not s[j].isspace():
+                j += 1
+            out.append(s[i:j])
+            i = j
+        return out
+
+    def _emit_payout_token(self, tok):
+        """Inverse of `_tokenize_payout` for a single token: quote it if it contains whitespace.
+
+        Used by `_normalize_choose_command` so re-emitted normalized strings stay
+        round-trip-safe (e.g. an area "Undead Samurai" comes back out as the
+        quoted form, not as two bare tokens).
+        """
+        t = "" if tok is None else str(tok)
+        if not t:
+            return '""'
+        if any(ch.isspace() for ch in t):
+            return f'"{t}"'
+        return t
+
+    def _set_payout_continuation(self, player_id, parts, balance_hint=None):
+        """Stash remaining compound-payout legs (post-prompt). Cleared by `_resume_payout_continuation`."""
+        if not parts:
+            self.pending_payout_continuation = None
+            return
+        self.pending_payout_continuation = {
+            "player_id": player_id,
+            "parts": list(parts),
+            "balance_hint": dict(balance_hint) if balance_hint else None,
+        }
+
+    def _resume_payout_continuation(self):
+        """Drain whatever compound legs were stashed when a prompt opened.
+
+        Called by prompt handlers after they clear `action_required` and
+        `pending_required_choice`. Any leg that itself opens another prompt
+        will re-stash whatever still remains, so chains of 3+ blocking legs
+        work without special-casing.
+
+        Immediate (non-blocking) payouts from the remaining legs are applied to
+        the player's score here, mirroring what `slay_monster` / the activation
+        flow would have done if the legs had executed inline.
+        """
+        cont = getattr(self, "pending_payout_continuation", None)
+        if not cont:
+            return
+        self.pending_payout_continuation = None
+        player_id = cont.get("player_id")
+        parts = [p for p in (cont.get("parts") or []) if p]
+        if not parts or not player_id:
+            return
+        balance_hint = cont.get("balance_hint")
+        if len(parts) == 1:
+            payout = self.execute_special_payout(parts[0], player_id, balance_hint=balance_hint)
+        else:
+            payout = self._execute_compound_payout(" + ".join(parts), player_id, balance_hint=balance_hint)
+        if not (isinstance(payout, list) and len(payout) >= 4):
+            return
+        if payout[0] == -9999:
+            return
+        if payout[0] == 0 and payout[1] == 0 and payout[2] == 0 and payout[3] == 0:
+            return
+        player = self._player_by_id(player_id)
+        if not player:
+            return
+        player.gold_score = int(player.gold_score) + payout[0]
+        player.strength_score = int(player.strength_score) + payout[1]
+        player.magic_score = int(player.magic_score) + payout[2]
+        player.victory_score = int(getattr(player, "victory_score", 0)) + payout[3]
+        self._bump_harvest_delta(player, payout[0], payout[1], payout[2], payout[3])
 
     def execute_special_payout(
         self,
@@ -1587,8 +2082,14 @@ class Game:
                 balance_hint=balance_hint,
                 suppress_exchange_optional_prompt=suppress_exchange_optional_prompt,
             )
+        if low.startswith("flip_citizen"):
+            return self._execute_flip_citizen_payout(raw, player_id)
+        if low.startswith("discard_center"):
+            return self._execute_discard_center_payout(raw, player_id)
+        if low.startswith("discard_owned"):
+            return self._execute_discard_owned_payout(raw, player_id)
         payout = [0, 0, 0, 0]  # gp, sp, mp, vp, todo: citizen, monster, domain
-        split_command = (command or "").split()
+        split_command = self._tokenize_payout(command or "")
         if not split_command:
             payout[0] = -9999
             return payout
@@ -1691,7 +2192,9 @@ class Game:
                                     case _:
                                         payout[0] = -9999
                     case "area":
-                        area_count = self.owned_monster_attributes(player_id)[third_word]
+                        area_count = int(
+                            (self.owned_monster_attributes(player_id) or {}).get(third_word, 0) or 0
+                        )
                         match fourth_word:
                             case 'g':
                                 payout[0] = area_count * int(split_command[4])
@@ -1791,6 +2294,7 @@ class Game:
         - "choose g 3 <citizens where name==Knight>"
         - "choose <citizens where gold_cost<=2>"
         - "choose <count area Forest g 2> <citizens + v 1>"
+        - "choose <count area \"Undead Samurai\" m 1>"   # multi-word area, double-quoted
         Returns:
         - (normalized_command: str, options: list[dict{token, amount}])
         """
@@ -1843,7 +2347,8 @@ class Game:
             if o["token"] in ("g", "s", "m", "v"):
                 norm_parts.append(f"{o['token']} {o['amount']}")
             elif o["token"] == "count_area":
-                norm_parts.append(f"<count area {o.get('area')} {o.get('resource')} {o.get('mult')}>")
+                area_tok = self._emit_payout_token(o.get('area'))
+                norm_parts.append(f"<count area {area_tok} {o.get('resource')} {o.get('mult')}>")
             elif o["token"] == "citizens_where":
                 spec = o.get("spec", {})
                 extras = o.get("extras") or []
@@ -1872,7 +2377,7 @@ class Game:
         s = (inner or "").strip()
         if not s:
             return None
-        parts = s.split()
+        parts = self._tokenize_payout(s)
         if len(parts) >= 5 and parts[0].lower() == "count" and parts[1].lower() == "area":
             area = parts[2]
             resource = parts[3].lower()
@@ -1882,7 +2387,7 @@ class Game:
                 return None
             if mult <= 0 or resource not in ("g", "s", "m", "v"):
                 return None
-            if area not in Constants.areas:
+            if area not in self._active_areas():
                 return None
             return {"token": "count_area", "area": area, "resource": resource, "mult": mult, "amount": 1}
         return self._parse_citizens_inner_option(s)
@@ -2220,19 +2725,47 @@ class Game:
             )
         return True
 
-    def _apply_action_start_domain_passives(self, player):
-        """Fire any owned-domain passives keyed to 'action.start' for the active player."""
-        if not player:
+    def _apply_action_event_gain_passives(self, player, event_name):
+        """Fire owned-domain `action.<event_name> manipulate_resources mode=gain gain=...` passives.
+
+        Generic dispatcher for action-phase triggers: `start`, `end`, `hire`, `slay`,
+        and any future verb. Only mode=gain is handled here -- player-targeted modes
+        (take_from_player, pay_to_player) route through the action.end queue/prompt
+        machinery and are intentionally ignored at the per-event call sites.
+
+        The caller is responsible for invoking this only when the firing player is the
+        active player; we still guard on `self.phase == "action"` so card text that says
+        "During your Action Phase, ..." stays honest if a slay/hire ever leaks into
+        another phase (e.g. via a granted action triggered from harvest).
+        """
+        if not player or not event_name:
             return
+        if getattr(self, "phase", None) != "action":
+            return
+        prefix = f"action.{str(event_name).lower()}"
         for d in list(getattr(player, "owned_domains", []) or []):
             if self._domain_recurring_passive_on_build_turn_cooldown(d):
                 continue
-            kv = self._parse_manipulate_action_start(getattr(d, "passive_effect", None) or "")
+            raw = (getattr(d, "passive_effect", None) or "").strip()
+            if not raw:
+                continue
+            parts = raw.split()
+            if not parts or parts[0].lower() != prefix:
+                continue
+            rest = raw[len(parts[0]):].strip()
+            if not rest.lower().startswith("manipulate_resources"):
+                continue
+            kv = _parse_domain_effect_kv(rest)
             if not kv:
                 continue
             mode = (kv.get("mode") or "").strip().lower()
-            if mode == "gain":
-                self._apply_manipulate_gain(player, kv, source_label=getattr(d, "name", "Domain"))
+            if mode != "gain":
+                continue
+            self._apply_manipulate_gain(player, kv, source_label=getattr(d, "name", "Domain"))
+
+    def _apply_action_start_domain_passives(self, player):
+        """Fire any owned-domain passives keyed to 'action.start' for the active player."""
+        self._apply_action_event_gain_passives(player, "start")
 
     def _collect_action_end_manipulate_queue(self, active_player):
         out = []
@@ -2516,6 +3049,16 @@ class Game:
         if low.startswith("action.modify_monster_strength"):
             self._prompt_domain_monster_strength_boost(player, domain, effect)
             return
+        if low.startswith("return_owned"):
+            parsed = self._parse_return_owned_effect(effect)
+            if parsed:
+                self._prompt_return_owned_card(player, domain, parsed)
+            return
+        if low.startswith("take_owned"):
+            parsed = self._parse_take_owned_effect(effect)
+            if parsed:
+                self._prompt_take_owned_card(player, domain, parsed)
+            return
         if low.startswith("manipulate_resources"):
             kv = _parse_domain_effect_kv(effect)
             mode = (kv.get("mode") or "").strip().lower()
@@ -2620,6 +3163,213 @@ class Game:
         self._log_game_event(
             f"{self._player_label(player.player_id)} triggered activation effect on \"{domain_name}\" and is choosing a player."
         )
+
+    def _parse_return_owned_effect(self, effect):
+        """Parse `return_owned <kind> <resource> <amount> [optional]`.
+
+        Returns dict with kind ("monster"|"citizen"), resource (g|s|m|v), amount (int),
+        and optional (bool); or None if the string is malformed.
+        """
+        parts = (effect or "").strip().split()
+        if len(parts) < 4 or parts[0].lower() != "return_owned":
+            return None
+        kind = parts[1].lower()
+        if kind not in ("monster", "citizen"):
+            return None
+        resource = parts[2].lower()
+        if resource not in ("g", "s", "m", "v"):
+            return None
+        try:
+            amount = int(parts[3])
+        except (TypeError, ValueError):
+            return None
+        optional = len(parts) >= 5 and parts[4].lower() == "optional"
+        return {"kind": kind, "resource": resource, "amount": amount, "optional": optional}
+
+    def _prompt_return_owned_card(self, player, domain, parsed):
+        """Open a `choose_owned_card` prompt for Watcher/Nest-style activations.
+
+        parsed: {kind: "monster"|"citizen", resource: g/s/m/v, amount: int, optional: bool}
+        """
+        kind = parsed["kind"]
+        optional = bool(parsed.get("optional"))
+        domain_name = getattr(domain, "name", "Domain")
+        options = []
+        if kind == "monster":
+            owned = list(getattr(player, "owned_monsters", []) or [])
+            for i, m in enumerate(owned):
+                options.append({
+                    "token": "monster.owned",
+                    "idx": i,
+                    "name": getattr(m, "name", "?"),
+                    "monster_id": int(getattr(m, "monster_id", -1)),
+                    "area": getattr(m, "area", ""),
+                })
+        else:
+            owned = list(getattr(player, "owned_citizens", []) or [])
+            for i, c in enumerate(owned):
+                options.append({
+                    "token": "citizen.owned",
+                    "idx": i,
+                    "name": getattr(c, "name", "?"),
+                    "citizen_id": int(getattr(c, "citizen_id", -1)),
+                })
+        if not options:
+            self._log_game_event(
+                f"{self._player_label(player.player_id)} could not use \"{domain_name}\" "
+                f"(no owned {kind}s to return)."
+            )
+            return
+        self.action_required["id"] = player.player_id
+        self.action_required["action"] = "choose_owned_card"
+        self.pending_required_choice = {
+            "kind": "domain_return_owned",
+            "player_id": player.player_id,
+            "domain_name": domain_name,
+            "card_kind": kind,
+            "resource": parsed["resource"],
+            "amount": int(parsed["amount"]),
+            "allow_skip": optional,
+            "options": options,
+        }
+        self._log_game_event(
+            f"{self._player_label(player.player_id)} triggered activation effect on \"{domain_name}\" and is choosing a {kind} to return."
+        )
+
+    def _parse_take_owned_effect(self, effect):
+        """Parse `take_owned <kind> <pick> [optional]`.
+
+        Symmetric inverse of `return_owned`: instead of returning one of your own
+        cards to its board stack for a reward, you transfer one of someone else's
+        owned cards to yourself.
+
+        Args:
+          kind:     "monster" (future: "citizen")
+          pick:     "random"  (future: "choose" -- let the activating player pick the specific card)
+          optional: literal "optional" flag (when present, activator may decline)
+
+        Returns dict {kind, pick, optional} or None if malformed.
+        """
+        parts = (effect or "").strip().split()
+        if len(parts) < 3 or parts[0].lower() != "take_owned":
+            return None
+        kind = parts[1].lower()
+        if kind not in ("monster", "citizen"):
+            return None
+        pick = parts[2].lower()
+        if pick not in ("random",):
+            return None
+        optional = len(parts) >= 4 and parts[3].lower() == "optional"
+        return {"kind": kind, "pick": pick, "optional": optional}
+
+    def _prompt_take_owned_card(self, player, domain, parsed):
+        """Open a `choose_player` prompt for Purloiner's-Perch-style activations.
+
+        Reuses the same prompt verb used by `domain_manipulate_player` so client and
+        blocking-check code don't need a new action token. The discriminator lives
+        in `pending_required_choice.kind = "domain_take_owned"`.
+
+        Eligibility: only other players with at least one owned card of the right
+        kind are listed. If nobody is eligible the effect is silently lost (we've
+        already paid the activation in the build flow); we log it so the player can
+        see why nothing happened.
+        """
+        kind = parsed["kind"]
+        pick = parsed.get("pick", "random")
+        optional = bool(parsed.get("optional"))
+        domain_name = getattr(domain, "name", "Domain")
+        active_pid = player.player_id
+        attr = "owned_monsters" if kind == "monster" else "owned_citizens"
+        options = []
+        for p in self.player_list:
+            if p.player_id == active_pid:
+                continue
+            if not list(getattr(p, attr, []) or []):
+                continue
+            options.append({
+                "token": "player",
+                "player_id": p.player_id,
+                "name": getattr(p, "name", "?"),
+            })
+        if not options:
+            self._log_game_event(
+                f"{self._player_label(active_pid)} could not use \"{domain_name}\" "
+                f"(no other player owns a {kind})."
+            )
+            return
+        self.action_required["id"] = active_pid
+        self.action_required["action"] = "choose_player"
+        self.pending_required_choice = {
+            "kind": "domain_take_owned",
+            "player_id": active_pid,
+            "domain_name": domain_name,
+            "card_kind": kind,
+            "pick": pick,
+            "allow_skip": optional,
+            "options": options,
+            "from_activation": True,
+        }
+        self._log_game_event(
+            f"{self._player_label(active_pid)} triggered activation effect on \"{domain_name}\" "
+            f"and is choosing a player to steal a {kind} from."
+        )
+
+    def _monster_stack_index_for_area(self, area):
+        """Return the monster_grid stack index assigned to `area` at game setup, or None."""
+        if not area:
+            return None
+        mapping = list(getattr(self, "monster_stack_areas", []) or [])
+        for i, a in enumerate(mapping):
+            if a == area:
+                return i
+        return None
+
+    def _unexhaust_stack_top_if_present(self, stack):
+        """If stack's top card is an Exhausted token, pop it back to the pool. Returns True if popped."""
+        if not stack:
+            return False
+        top = stack[-1]
+        if getattr(top, "name", "") != "Exhausted":
+            return False
+        stack.pop(-1)
+        self.exhausted_stack.append(top)
+        self.exhausted_count = max(0, int(self.exhausted_count) - 1)
+        return True
+
+    def _return_monster_to_stack(self, monster):
+        """Place a previously-owned monster back on its area stack. Handles un-exhausting if needed."""
+        stack_idx = self._monster_stack_index_for_area(getattr(monster, "area", None))
+        if stack_idx is None:
+            return False
+        stack = self.monster_grid[stack_idx]
+        self._unexhaust_stack_top_if_present(stack)
+        if stack:
+            stack[-1].toggle_accessibility(False)
+        monster.toggle_visibility(True)
+        monster.toggle_accessibility(True)
+        stack.append(monster)
+        return True
+
+    def _return_citizen_to_stack(self, citizen):
+        """Place a previously-owned citizen back on its roll-keyed stack. Handles un-exhausting if needed."""
+        try:
+            rm1 = int(getattr(citizen, "roll_match1", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        if rm1 == 11:
+            stack_idx = 9
+        elif 1 <= rm1 <= 9:
+            stack_idx = rm1 - 1
+        else:
+            return False
+        stack = self.citizen_grid[stack_idx]
+        self._unexhaust_stack_top_if_present(stack)
+        if stack:
+            stack[-1].toggle_accessibility(False)
+        # Citizens always come back face-up on the board (face-down only applies to owned tableau cards).
+        self._citizen_set_flipped(citizen, False)
+        stack.append(citizen)
+        return True
 
     def _filter_unavailable_choose_options(self, options):
         out = []
@@ -2789,17 +3539,29 @@ class Game:
             return f"gain 1 {name} citizen{suffix}"
         return f"{token} {opt.get('amount')}"
 
+    def _active_areas(self):
+        """Areas in play this game (the 5 chosen at setup), with Constants.areas as a
+        fallback for legacy game state that predates `monster_stack_areas`.
+
+        Used by anything that needs to enumerate or validate areas: count-area payouts,
+        owned_monster_attributes buckets, etc. Lets expansion areas (Gnolls, Undead
+        Samurai, ...) participate in `count area X` grammar without hardcoding them.
+        """
+        out = list(getattr(self, "monster_stack_areas", None) or [])
+        return out if out else list(Constants.areas)
+
     def owned_monster_attributes(self, player_id):
-        return_dict = {attr: 0 for attr in Constants.areas + Constants.types}
+        active_areas = self._active_areas()
+        return_dict = {attr: 0 for attr in active_areas + Constants.types}
         for player in self.player_list:
             if player.player_id == player_id:
                 for monster in player.owned_monsters:
-                    for area in Constants.areas:
-                        if monster.area == area:
-                            return_dict[area] += 1
-                    for monster_type in Constants.types:
-                        if monster.monster_type == monster_type:
-                            return_dict[monster_type] += 1
+                    area = getattr(monster, "area", None)
+                    if area in return_dict:
+                        return_dict[area] += 1
+                    m_type = getattr(monster, "monster_type", None)
+                    if m_type in return_dict:
+                        return_dict[m_type] += 1
 
         return return_dict
 
@@ -2936,48 +3698,82 @@ class Game:
                 prc_s = getattr(self, "pending_required_choice", None) or {}
                 if prc_s.get("kind") != "harvest_steal" or prc_s.get("player_id") != player_id:
                     return
-                opts_s = list(prc_s.get("options") or [])
+                victim_opts_s = list(prc_s.get("victim_options") or [])
+                resource_opts_s = list(prc_s.get("resource_options") or [])
                 act_s = (action or "").strip().lower()
-                if not act_s.startswith("steal "):
-                    return
-                try:
-                    idx_s = int(act_s.split()[1]) - 1
-                except (IndexError, ValueError):
-                    return
-                if idx_s < 0 or idx_s >= len(opts_s):
-                    return
-                opt_s = opts_s[idx_s]
-                thief = self._player_by_id(player_id)
-                victim = self._player_by_id(opt_s.get("victim_id"))
-                self.pending_required_choice = None
-                self.action_required["action"] = ""
-                self.action_required["id"] = self.game_id
-                if thief and victim:
-                    res_s = opt_s.get("resource", "g")
-                    want_s = int(opt_s.get("amount", 0))
-                    score_map = {"g": "gold_score", "s": "strength_score", "m": "magic_score", "v": "victory_score"}
-                    attr_s = score_map.get(res_s)
-                    if attr_s:
-                        have_s = int(getattr(victim, attr_s, 0) or 0)
-                        actual_s = min(want_s, have_s)
-                        before_thief = self._player_scores_line(thief)
-                        before_victim = self._player_scores_line(victim)
-                        setattr(victim, attr_s, have_s - actual_s)
-                        setattr(thief, attr_s, int(getattr(thief, attr_s, 0) or 0) + actual_s)
-                        dg = actual_s if res_s == "g" else 0
-                        ds = actual_s if res_s == "s" else 0
-                        dm = actual_s if res_s == "m" else 0
-                        dv = actual_s if res_s == "v" else 0
-                        self._bump_harvest_delta(thief, dg, ds, dm, dv)
-                        after_thief = self._player_scores_line(thief)
-                        after_victim = self._player_scores_line(victim)
-                        self._log_game_event(
-                            f"{self._player_label(player_id)} stole {actual_s}{res_s} from "
-                            f"{self._player_label(opt_s.get('victim_id'))}; "
-                            f"thief {before_thief} -> {after_thief}, "
-                            f"victim {before_victim} -> {after_victim}"
+                stage_s = (prc_s.get("stage") or "victim").strip().lower()
+                if stage_s == "victim" and act_s.startswith("steal_victim "):
+                    try:
+                        idx_s = int(act_s.split()[1]) - 1
+                    except (IndexError, ValueError):
+                        return
+                    if idx_s < 0 or idx_s >= len(victim_opts_s):
+                        return
+                    victim_opt_s = victim_opts_s[idx_s]
+                    if len(resource_opts_s) == 1:
+                        res_opt_s = resource_opts_s[0]
+                        self.pending_required_choice = None
+                        self.action_required["action"] = ""
+                        self.action_required["id"] = self.game_id
+                        self._apply_harvest_steal_choice(
+                            player_id,
+                            victim_opt_s.get("victim_id"),
+                            res_opt_s.get("resource"),
+                            res_opt_s.get("amount"),
                         )
-                self._maybe_resume_harvest_prompt()
+                        self._maybe_resume_harvest_prompt()
+                        return
+                    self.pending_required_choice = {
+                        "kind": "harvest_steal",
+                        "stage": "resource",
+                        "player_id": player_id,
+                        "victim": victim_opt_s,
+                        "resource_options": resource_opts_s,
+                    }
+                    self.action_required["action"] = "harvest_steal"
+                    self.action_required["id"] = player_id
+                    return
+                if stage_s == "resource" and act_s.startswith("steal_resource "):
+                    try:
+                        idx_s = int(act_s.split()[1]) - 1
+                    except (IndexError, ValueError):
+                        return
+                    if idx_s < 0 or idx_s >= len(resource_opts_s):
+                        return
+                    victim_opt_s = prc_s.get("victim") or {}
+                    res_opt_s = resource_opts_s[idx_s]
+                    self.pending_required_choice = None
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self._apply_harvest_steal_choice(
+                        player_id,
+                        victim_opt_s.get("victim_id"),
+                        res_opt_s.get("resource"),
+                        res_opt_s.get("amount"),
+                    )
+                    self._maybe_resume_harvest_prompt()
+                    return
+                # Backward compatibility for the old flat "steal N" client action.
+                opts_s = list(prc_s.get("options") or [])
+                if act_s.startswith("steal "):
+                    try:
+                        idx_s = int(act_s.split()[1]) - 1
+                    except (IndexError, ValueError):
+                        return
+                    if idx_s < 0 or idx_s >= len(opts_s):
+                        return
+                    opt_s = opts_s[idx_s]
+                    self.pending_required_choice = None
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self._apply_harvest_steal_choice(
+                        player_id,
+                        opt_s.get("victim_id"),
+                        opt_s.get("resource"),
+                        opt_s.get("amount"),
+                    )
+                    self._maybe_resume_harvest_prompt()
+                    return
                 return
 
             prc0 = getattr(self, "pending_required_choice", None) or {}
@@ -3072,6 +3868,361 @@ class Game:
                     self.action_required["action"] = ""
                 return
 
+            if prc0.get("kind") == "monster_flip_citizen_targeted" and str(current_required).strip() == "choose_player":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                if prc0.get("allow_skip") and act == "skip":
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} declined to flip a citizen."
+                    )
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    return
+                if not act.startswith("choose_player "):
+                    return
+                opts = list(prc0.get("options") or [])
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if sel < 0 or sel >= len(opts):
+                    return
+                target_pid = opts[sel].get("player_id")
+                target = self._player_by_id(target_pid)
+                if not target:
+                    return
+                citizen_opts = []
+                for i, c in enumerate(list(getattr(target, "owned_citizens", []) or [])):
+                    if getattr(c, "is_flipped", False):
+                        continue
+                    citizen_opts.append({
+                        "token": "citizen.owned",
+                        "idx": i,
+                        "name": getattr(c, "name", "?"),
+                        "citizen_id": int(getattr(c, "citizen_id", -1)),
+                    })
+                if not citizen_opts:
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} could not flip a citizen from "
+                        f"{self._player_label(target_pid)} (no eligible citizens); effect lost."
+                    )
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    return
+                self.pending_required_choice = {
+                    "kind": "monster_flip_citizen_targeted",
+                    "player_id": player_id,
+                    "stage": "citizen",
+                    "target_player_id": target_pid,
+                    "options": citizen_opts,
+                    "allow_skip": bool(prc0.get("allow_skip")),
+                }
+                self.action_required["id"] = player_id
+                self.action_required["action"] = "choose_owned_card"
+                self._log_game_event(
+                    f"{self._player_label(player_id)} chose {self._player_label(target_pid)} "
+                    f"and is now picking a citizen to flip."
+                )
+                return
+
+            if prc0.get("kind") == "monster_flip_citizen_targeted" and str(current_required).strip() == "choose_owned_card":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                if prc0.get("allow_skip") and act == "skip":
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} declined to flip a citizen."
+                    )
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    return
+                if not act.startswith("choose_owned_card "):
+                    return
+                opts = list(prc0.get("options") or [])
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if sel < 0 or sel >= len(opts):
+                    return
+                target_pid = prc0.get("target_player_id")
+                target = self._player_by_id(target_pid)
+                if not target:
+                    return
+                src_idx = int(opts[sel].get("idx", -1))
+                owned = list(getattr(target, "owned_citizens", []) or [])
+                if src_idx < 0 or src_idx >= len(owned):
+                    return
+                citizen = owned[src_idx]
+                if getattr(citizen, "is_flipped", False):
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    return
+                self._citizen_set_flipped(citizen, True)
+                self._log_game_event(
+                    f"{self._player_label(player_id)} flipped citizen "
+                    f"\"{getattr(citizen, 'name', '?')}\" face-down on "
+                    f"{self._player_label(target_pid)}'s tableau."
+                )
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self.pending_required_choice = None
+                return
+
+            if prc0.get("kind") == "domain_take_owned" and str(current_required).strip() == "choose_player":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                domain_name = prc0.get("domain_name", "Domain")
+                if prc0.get("allow_skip") and act == "skip":
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} declined activation effect on \"{domain_name}\"."
+                    )
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    self._resume_after_domain_activation_follow_up()
+                    return
+                if not act.startswith("choose_player "):
+                    return
+                opts = list(prc0.get("options") or [])
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if sel < 0 or sel >= len(opts):
+                    return
+                target_pid = opts[sel].get("player_id")
+                target = self._player_by_id(target_pid)
+                active = self._player_by_id(player_id)
+                if not target or not active:
+                    return
+                card_kind = prc0.get("card_kind")
+                pick = (prc0.get("pick") or "random").lower()
+                attr = "owned_monsters" if card_kind == "monster" else "owned_citizens"
+                owned = list(getattr(target, attr, []) or [])
+                if not owned:
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} could not steal a {card_kind} from "
+                        f"{self._player_label(target_pid)} via \"{domain_name}\" "
+                        f"(no {card_kind}s to take); activation effect lost."
+                    )
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    self._resume_after_domain_activation_follow_up()
+                    return
+                if pick == "random":
+                    src_idx = random.randrange(len(owned))
+                else:
+                    src_idx = 0
+                card = owned[src_idx]
+                card_label = getattr(card, "name", "?")
+                del getattr(target, attr)[src_idx]
+                getattr(active, attr).append(card)
+                if card_kind == "monster":
+                    target.owned_monster_attributes = self.owned_monster_attributes(target_pid)
+                    active.owned_monster_attributes = self.owned_monster_attributes(player_id)
+                self._log_game_event(
+                    f"{self._player_label(player_id)} stole {card_kind} \"{card_label}\" from "
+                    f"{self._player_label(target_pid)} via \"{domain_name}\"."
+                )
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self.pending_required_choice = None
+                self._resume_after_domain_activation_follow_up()
+                return
+
+            if prc0.get("kind") == "discard_owned_card" and str(current_required).strip() == "choose_owned_card":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                card_kind = prc0.get("card_kind")
+                if prc0.get("allow_skip") and act == "skip":
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} declined to discard a {card_kind}."
+                    )
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    self._resume_payout_continuation()
+                    return
+                if not act.startswith("choose_owned_card "):
+                    return
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                opts = list(prc0.get("options") or [])
+                if sel < 0 or sel >= len(opts):
+                    return
+                src_idx = int(opts[sel].get("idx", -1))
+                card_label = opts[sel].get("name", "?")
+                player = self._player_by_id(player_id)
+                if not player:
+                    return
+                if card_kind == "citizen":
+                    discarded = self._discard_owned_citizen(player, src_idx)
+                else:
+                    discarded = None
+                if not discarded:
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    self._resume_payout_continuation()
+                    return
+                self._log_game_event(
+                    f"{self._player_label(player_id)} discarded {card_kind} "
+                    f"\"{card_label}\" to the discard pile."
+                )
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self.pending_required_choice = None
+                self._resume_payout_continuation()
+                return
+
+            if prc0.get("kind") == "discard_center_card" and str(current_required).strip() == "choose_owned_card":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                card_kind = prc0.get("card_kind")
+                if prc0.get("allow_skip") and act == "skip":
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} declined to discard a center-stack {card_kind}."
+                    )
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    self._resume_payout_continuation()
+                    return
+                if not act.startswith("choose_owned_card "):
+                    return
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                opts = list(prc0.get("options") or [])
+                if sel < 0 or sel >= len(opts):
+                    return
+                stack_idx = int(opts[sel].get("idx", -1))
+                card_label = opts[sel].get("name", "?")
+                if card_kind == "citizen":
+                    discarded = self._discard_center_citizen(stack_idx)
+                else:
+                    discarded = None
+                if not discarded:
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    self._resume_payout_continuation()
+                    return
+                self._log_game_event(
+                    f"{self._player_label(player_id)} discarded center-stack {card_kind} "
+                    f"\"{card_label}\" to the discard pile."
+                )
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self.pending_required_choice = None
+                self._resume_payout_continuation()
+                return
+
+            if prc0.get("kind") == "domain_return_owned" and str(current_required).strip() == "choose_owned_card":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                domain_name = prc0.get("domain_name", "Domain")
+                if prc0.get("allow_skip") and act == "skip":
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} declined activation effect on \"{domain_name}\"."
+                    )
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    self._resume_after_domain_activation_follow_up()
+                    return
+                if not act.startswith("choose_owned_card "):
+                    return
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                opts = list(prc0.get("options") or [])
+                if sel < 0 or sel >= len(opts):
+                    return
+                target = self._player_by_id(player_id)
+                if not target:
+                    return
+                opt = opts[sel]
+                card_kind = prc0.get("card_kind")
+                src_idx = int(opt.get("idx", -1))
+                card_label = opt.get("name", "?")
+                if card_kind == "monster":
+                    owned = list(getattr(target, "owned_monsters", []) or [])
+                    if src_idx < 0 or src_idx >= len(owned):
+                        return
+                    monster = owned[src_idx]
+                    if not self._return_monster_to_stack(monster):
+                        self._log_game_event(
+                            f"{self._player_label(player_id)} could not return monster \"{card_label}\" "
+                            f"(unknown area mapping); activation effect lost."
+                        )
+                        self.action_required["action"] = ""
+                        self.action_required["id"] = self.game_id
+                        self.pending_required_choice = None
+                        self._resume_after_domain_activation_follow_up()
+                        return
+                    del target.owned_monsters[src_idx]
+                    target.owned_monster_attributes = self.owned_monster_attributes(player_id)
+                elif card_kind == "citizen":
+                    owned = list(getattr(target, "owned_citizens", []) or [])
+                    if src_idx < 0 or src_idx >= len(owned):
+                        return
+                    citizen = owned[src_idx]
+                    if not self._return_citizen_to_stack(citizen):
+                        self._log_game_event(
+                            f"{self._player_label(player_id)} could not return citizen \"{card_label}\" "
+                            f"(invalid roll mapping); activation effect lost."
+                        )
+                        self.action_required["action"] = ""
+                        self.action_required["id"] = self.game_id
+                        self.pending_required_choice = None
+                        self._resume_after_domain_activation_follow_up()
+                        return
+                    del target.owned_citizens[src_idx]
+                else:
+                    return
+                res = (prc0.get("resource") or "").strip().lower()
+                amount = int(prc0.get("amount", 0) or 0)
+                before = self._player_scores_line(target)
+                if amount > 0:
+                    if res == "g":
+                        target.gold_score = int(target.gold_score) + amount
+                        self._bump_harvest_delta(target, amount, 0, 0, 0)
+                    elif res == "s":
+                        target.strength_score = int(target.strength_score) + amount
+                        self._bump_harvest_delta(target, 0, amount, 0, 0)
+                    elif res == "m":
+                        target.magic_score = int(target.magic_score) + amount
+                        self._bump_harvest_delta(target, 0, 0, amount, 0)
+                    elif res == "v":
+                        target.victory_score = int(getattr(target, "victory_score", 0)) + amount
+                        self._bump_harvest_delta(target, 0, 0, 0, amount)
+                after = self._player_scores_line(target)
+                self._log_game_event(
+                    f"{self._player_label(player_id)} returned {card_kind} \"{card_label}\" via "
+                    f"\"{domain_name}\"; scores {before} -> {after}"
+                )
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self.pending_required_choice = None
+                self._resume_after_domain_activation_follow_up()
+                return
+
             # Resolve a blocking "choose ..." special payout prompt.
             if str(current_required).strip().lower().startswith("choose "):
                 prc = getattr(self, "pending_required_choice", None) or {}
@@ -3109,11 +4260,15 @@ class Game:
                     f"{self._player_label(player_id)} chose ({idx + 1}/{len(options)}) from \"{normalized}\": "
                     f"{self._describe_choose_option(opt)}; scores {before} -> {after}"
                 )
-                # Clear the prompt, then resume harvest automation if applicable.
+                # Clear the prompt, then chain any remaining compound legs, and finally
+                # resume harvest automation if applicable. If the continuation itself
+                # opens a new prompt, harvest resume will see action_required set and
+                # back off naturally.
                 self.action_required["action"] = ""
                 self.action_required["id"] = self.game_id
                 if getattr(self, "pending_required_choice", None):
                     self.pending_required_choice = None
+                self._resume_payout_continuation()
                 self._maybe_resume_harvest_prompt()
                 return
 
@@ -3270,6 +4425,7 @@ class Game:
             self._log_game_event(
                 f"{self._player_label(player_id)} hired citizen \"{top.name}\" ({pay}); scores {before} -> {after}"
             )
+            self._apply_action_event_gain_passives(player, "hire")
             return
 
         raise ValueError("Citizen not available to hire.")
@@ -3329,6 +4485,7 @@ class Game:
             self._log_game_event(
                 f"{self._player_label(player_id)} slew monster \"{monster_to_add.name}\" ({pay}); scores {before} -> {after}"
             )
+            self._apply_action_event_gain_passives(player, "slay")
             return
 
         raise ValueError("Monster not available to slay.")

@@ -66,6 +66,31 @@ Some special payouts set `action_required` and start a background thread that wa
 
 This is a dev-oriented approach; it allows the REST API to supply a follow-up choice via `act_on_required_action` while the game engine waits.
 
+### Harvest steal pre-phase
+
+Citizens with a `steal ...` special payout (currently Thief, but the engine
+treats `steal` as a generic verb so future cards can use it) resolve in a
+dedicated pre-phase at the very start of harvest, before any normal citizen
+or starter payouts fire. The active player resolves all of their pending
+steals first, then each other player in normal harvest turn order (active
+player first, then around the board).
+
+Each individual steal opens a `harvest_steal` prompt with two stages on
+`pending_required_choice`:
+
+- `stage: "victim"` — `victim_options` lists every opponent. The controller
+  responds with `act_on_required_action` action `steal_victim <N>` (1-indexed).
+- `stage: "resource"` — only when the steal verb listed more than one
+  resource option. `resource_options` lists each `{resource, amount}` pair
+  and the controller responds with `steal_resource <N>` (1-indexed). When
+  the steal verb only lists one resource, the engine skips this stage and
+  applies the steal immediately after the victim is chosen.
+
+While a `harvest_steal` prompt is pending, `advance_tick()` blocks just like
+it does for `manual_harvest` / `harvest_optional_exchange`. After the steal
+resolves, the engine resumes the harvest pre-phase scan and only moves on
+to regular harvest payouts once every player's steals have resolved.
+
 ## Concurrent actions (non-ordered prompts)
 
 Some prompts are not turn-based: every participating player should be able to
