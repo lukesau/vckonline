@@ -15,7 +15,6 @@
         <img class="wiki-brand-logo" src="/images/valeria_logo.png" alt="">
         <div class="wiki-brand-text">
           <span class="wiki-brand-title">VCK Card Wiki</span>
-          <span class="wiki-brand-subtitle">Database explorer · every row, every expansion</span>
         </div>
       </a>
       <div class="wiki-header-actions">
@@ -33,9 +32,16 @@
         autocomplete="off"
         spellcheck="false"
       />
-      <div class="wiki-filters" id="wiki-filters"></div>
       <button type="button" id="wiki-refresh" class="wiki-refresh" title="Reload from database">Refresh</button>
     </div>
+    <details class="wiki-filters-wrap" id="wiki-filters-wrap">
+      <summary class="wiki-filters-summary">
+        <span class="wiki-filters-summary-label">Filters</span>
+        <span class="wiki-filters-count" id="wiki-filters-count" aria-hidden="true"></span>
+        <span class="wiki-filters-chevron" aria-hidden="true"></span>
+      </summary>
+      <div class="wiki-filters" id="wiki-filters"></div>
+    </details>
     <div class="wiki-status" id="wiki-status">Loading card data...</div>
   </header>
 

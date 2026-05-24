@@ -43,12 +43,19 @@
     empty:   document.getElementById("wiki-empty"),
     search:  document.getElementById("wiki-search"),
     filters: document.getElementById("wiki-filters"),
+    filtersWrap: document.getElementById("wiki-filters-wrap"),
+    filtersCount: document.getElementById("wiki-filters-count"),
     refresh: document.getElementById("wiki-refresh"),
     status:  document.getElementById("wiki-status"),
     modal:   document.getElementById("wiki-modal"),
     modalBody: document.getElementById("wiki-modal-body"),
     modalClose: document.getElementById("wiki-modal-close"),
   };
+
+  // Default the filter panel open on wide viewports and closed on narrow ones.
+  // The user can still toggle freely; we only set the initial state.
+  const FILTER_BREAKPOINT_PX = 720;
+  el.filtersWrap.open = window.innerWidth > FILTER_BREAKPOINT_PX;
 
   // ── tiny dom helpers ──────────────────────────────────────────────────
   const h = (tag, attrs = {}, ...children) => {
@@ -135,6 +142,7 @@
     const type = state.activeType;
     const cards = state.raw.cards[type] || [];
     const groups = buildFilterGroupsFor(type, cards);
+    el.filtersWrap.hidden = groups.length === 0;
     for (const group of groups) {
       const groupEl = h("div", { class: "wiki-filter-group" },
         h("span", { class: "wiki-filter-label" }, group.label));
@@ -156,6 +164,19 @@
         groupEl.appendChild(chip);
       }
       el.filters.appendChild(groupEl);
+    }
+    updateActiveFilterCount();
+  }
+
+  function updateActiveFilterCount() {
+    const type = state.activeType;
+    const active = Object.keys(state.filters[type] || {}).length;
+    if (active > 0) {
+      el.filtersCount.textContent = String(active);
+      el.filtersCount.classList.add("has-active");
+    } else {
+      el.filtersCount.textContent = "";
+      el.filtersCount.classList.remove("has-active");
     }
   }
 
