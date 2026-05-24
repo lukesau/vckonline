@@ -103,9 +103,10 @@
       renderTabs();
       renderFilters();
       render();
-      const total = TYPE_ORDER.reduce((acc, t) => acc + (state.raw.counts[t] || 0), 0);
-      el.status.textContent = `Loaded ${total} cards from the database.`;
+      el.status.textContent = "";
+      el.status.hidden = true;
     } catch (err) {
+      el.status.hidden = false;
       el.status.classList.add("error");
       el.status.textContent = `Failed to load card data: ${err.message}. Is the DB tunnel up?`;
       el.grid.innerHTML = "";
