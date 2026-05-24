@@ -139,16 +139,9 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
 }
 .wiki-tab.active .wiki-tab-count { color: var(--accent-soft); }
 
-.wiki-controls {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-  padding-bottom: 12px;
-}
 .wiki-search {
-  flex: 1 1 280px;
-  min-width: 200px;
+  display: block;
+  width: 100%;
   background: var(--bg-elevated);
   color: var(--text);
   border: 1px solid var(--border);
@@ -215,13 +208,18 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   transform: rotate(180deg);
 }
 
+.wiki-filters-body {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .wiki-filters {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  padding: 0 12px 12px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
 }
 .wiki-filter-group {
   display: flex;
@@ -255,18 +253,6 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   border-color: var(--accent);
   font-weight: 600;
 }
-
-.wiki-refresh {
-  background: var(--bg-elevated);
-  color: var(--text);
-  border: 1px solid var(--border);
-  padding: 8px 14px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  font-family: inherit;
-}
-.wiki-refresh:hover { border-color: var(--accent-soft); color: var(--accent); }
 
 .wiki-status {
   font-size: 12px;

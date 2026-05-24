@@ -45,7 +45,6 @@
     filters: document.getElementById("wiki-filters"),
     filtersWrap: document.getElementById("wiki-filters-wrap"),
     filtersCount: document.getElementById("wiki-filters-count"),
-    refresh: document.getElementById("wiki-refresh"),
     status:  document.getElementById("wiki-status"),
     modal:   document.getElementById("wiki-modal"),
     modalBody: document.getElementById("wiki-modal-body"),
@@ -79,7 +78,6 @@
 
   // ── boot ──────────────────────────────────────────────────────────────
   loadData();
-  el.refresh.addEventListener("click", () => loadData({ refresh: true }));
   el.search.addEventListener("input", (e) => {
     state.search = e.target.value.trim().toLowerCase();
     render();
@@ -142,7 +140,7 @@
     const type = state.activeType;
     const cards = state.raw.cards[type] || [];
     const groups = buildFilterGroupsFor(type, cards);
-    el.filtersWrap.hidden = groups.length === 0;
+    el.filters.hidden = groups.length === 0;
     for (const group of groups) {
       const groupEl = h("div", { class: "wiki-filter-group" },
         h("span", { class: "wiki-filter-label" }, group.label));
