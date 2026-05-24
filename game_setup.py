@@ -54,11 +54,11 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
             monster_query = "select_base2_monsters"
             citizen_query = "select_base2_citizens"
             domain_query = "select_random_domains"
-        case "test1" | "current":
+        case "test1":
             monster_query = "select_base1_monsters"
             citizen_query = "select_base1_citizens"
             domain_query = "select_test1_domains"
-        case "test2":
+        case "test2" | "current":
             monster_query = "select_base2_monsters"
             citizen_query = "select_base2_citizens"
             domain_query = "select_test2_domains"

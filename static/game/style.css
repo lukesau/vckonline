@@ -162,7 +162,12 @@ html, body {
   overflow-y: hidden;
   overscroll-behavior-y: none;
   scroll-snap-type: x mandatory;
-  scroll-behavior: smooth;
+  /* Do NOT set scroll-behavior: smooth here. The carousel is rebuilt on every
+     game state update; with smooth scrolling the post-render restoration to the
+     previously-viewed slide (scrollTableauCarouselToSlide with behavior 'auto')
+     animates on every refresh, which is jarring for non-seat-1 players. The
+     dot-click handler passes behavior: 'smooth' explicitly when the user
+     actually drives the carousel. */
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   cursor: grab;

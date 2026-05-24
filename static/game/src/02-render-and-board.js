@@ -434,7 +434,10 @@ function renderTableauCarousel(state, bottomEl) {
   const runCarouselLayoutMeasure = () => {
     const slide = viewport.children[targetIdx];
     if (!slide) return;
-    scrollTableauCarouselToSlide(viewport, slide, 'auto');
+    // 'instant' (not 'auto') so a refresh / game state update never animates the
+    // carousel back to the previously-viewed slide. Only user-driven scrolls
+    // (dot click) should animate.
+    scrollTableauCarouselToSlide(viewport, slide, 'instant');
     const pl = players[targetIdx];
     if (pl && pl.player_id != null) tableauCarouselActiveId = pl.player_id;
     syncDots(targetIdx);
