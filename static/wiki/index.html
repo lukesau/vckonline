@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="/images/valeria_logo.png" type="image/png">
+  <title>VCK Wiki — Card Database</title>
+  <meta name="description" content="Browse every card in the Valeria Card Kingdoms Online database. Citizens, monsters, domains, dukes, and starters with full stats and effects.">
+  <link rel="stylesheet" href="/static/wiki/style.css">
+</head>
+<body>
+  <header class="wiki-header">
+    <div class="wiki-header-inner">
+      <a class="wiki-brand" href="/wiki">
+        <img class="wiki-brand-logo" src="/images/valeria_logo.png" alt="">
+        <div class="wiki-brand-text">
+          <span class="wiki-brand-title">VCK Card Wiki</span>
+          <span class="wiki-brand-subtitle">Database explorer · every row, every expansion</span>
+        </div>
+      </a>
+      <div class="wiki-header-actions">
+        <a class="wiki-headlink" href="/">Play</a>
+        <a class="wiki-headlink" href="/counter">Counter</a>
+      </div>
+    </div>
+    <nav class="wiki-tabs" id="wiki-tabs"></nav>
+    <div class="wiki-controls">
+      <input
+        id="wiki-search"
+        class="wiki-search"
+        type="search"
+        placeholder="Search by name, effect text, expansion..."
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <div class="wiki-filters" id="wiki-filters"></div>
+      <button type="button" id="wiki-refresh" class="wiki-refresh" title="Reload from database">Refresh</button>
+    </div>
+    <div class="wiki-status" id="wiki-status">Loading card data...</div>
+  </header>
+
+  <main class="wiki-main">
+    <div id="wiki-grid" class="wiki-grid" aria-live="polite"></div>
+    <p id="wiki-empty" class="wiki-empty" hidden>No cards match your filters.</p>
+  </main>
+
+  <div id="wiki-modal" class="wiki-modal-backdrop" aria-hidden="true">
+    <div class="wiki-modal" role="dialog" aria-modal="true" aria-labelledby="wiki-modal-title">
+      <button type="button" class="wiki-modal-close" id="wiki-modal-close" aria-label="Close">&times;</button>
+      <div class="wiki-modal-body" id="wiki-modal-body"></div>
+    </div>
+  </div>
+
+  <footer class="wiki-footer">
+    <span>Read-only view of the <code>vckonline</code> MariaDB tables.</span>
+    <span>Banned cards show a <span class="wiki-banned-badge">Banned</span> badge but are still displayed.</span>
+  </footer>
+
+  <script src="/static/wiki/wiki.js"></script>
+</body>
+</html>

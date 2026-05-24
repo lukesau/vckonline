@@ -1,35 +1,3 @@
-
-Skip to content
-Pull requests
-Issues
-Codespaces
-Marketplace
-Explore
-@lukesau
-lukesau /
-vckonline
-Public
-
-Cannot fork because you own this repository and are not a member of any organizations.
-
-Code
-Issues
-Pull requests
-Actions
-Projects
-Wiki
-Security
-Insights
-
-    Settings
-
-vckonline/.gitignore
-@lukesau
-lukesau Initial commit
-Latest commit 80a562f Apr 12, 2023
-History
-1 contributor
-129 lines (105 sloc) 1.76 KB
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -166,21 +134,3 @@ dmypy.json
 
 # Generated client bundle (built from static/game/src/*.js by build_game_js.py)
 static/game/game.js
-Footer
-© 2023 GitHub, Inc.
-Footer navigation
-
-    Terms
-    Privacy
-    Security
-    Status
-    Docs
-    Contact GitHub
-    Pricing
-    API
-    Training
-    Blog
-    About
-
-vckonline/.gitignore at main · lukesau/vckonline 
-
