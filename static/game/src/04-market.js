@@ -49,7 +49,10 @@ function ownedNameCount(player, name) {
   const citizens = Array.isArray(player?.owned_citizens) ? player.owned_citizens : [];
   let n = 0;
   starters.forEach(c => { if ((c?.name ?? '').toString() === target) n += 1; });
-  citizens.forEach(c => { if ((c?.name ?? '').toString() === target) n += 1; });
+  citizens.forEach(c => {
+    if (c?.is_flipped) return;
+    if ((c?.name ?? '').toString() === target) n += 1;
+  });
   return n;
 }
 

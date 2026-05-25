@@ -4521,8 +4521,9 @@ class Game:
         """
         Hire the top/accessible citizen from a stack.
 
-        Gold cost scales by +1 for each already-owned card with the same name,
-        counting both owned citizens and starting cards.
+        Gold cost scales by +1 for each already-owned face-up card with the same
+        name, counting owned citizens and starting cards. Flipped citizens stay
+        known on the tableau, but do not count for duplicate citizen costs.
 
         Payment is (gold, magic, strength); only gold and magic may be used (strength must be 0).
         """
@@ -4547,6 +4548,8 @@ class Game:
             has_emerald = self._player_has_action_effect_flag(player, "action.emeraldstronghold")
             if not has_emerald:
                 for c in getattr(player, "owned_citizens", []) or []:
+                    if getattr(c, "is_flipped", False):
+                        continue
                     if getattr(c, "name", None) == top.name:
                         owned_same_name += 1
                 for s in getattr(player, "owned_starters", []) or []:
