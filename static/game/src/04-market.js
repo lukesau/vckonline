@@ -133,7 +133,11 @@ function formatHarvestGSM(card, onTurn) {
   const gv = Number(card[g]) || 0;
   const sv = Number(card[s]) || 0;
   const mv = Number(card[m]) || 0;
-  return `G ${gv}, S ${sv}, M ${mv}`;
+  const parts = [];
+  if (gv !== 0) parts.push(`G ${gv}`);
+  if (sv !== 0) parts.push(`S ${sv}`);
+  if (mv !== 0) parts.push(`M ${mv}`);
+  return parts.join(', ');
 }
 
 function pushHarvestHints(hints, card) {
@@ -143,10 +147,10 @@ function pushHarvestHints(hints, card) {
   const onStr = formatHarvestGSM(card, true);
   const offStr = formatHarvestGSM(card, false);
   if (onStr === offStr) {
-    hints.push(`Harvest: ${onStr} (on & off turn)`);
+    if (onStr) hints.push(`Harvest: ${onStr} (on & off turn)`);
   } else {
-    hints.push(`Harvest (on turn): ${onStr}`);
-    hints.push(`Harvest (off turn): ${offStr}`);
+    if (onStr) hints.push(`Harvest (on turn): ${onStr}`);
+    if (offStr) hints.push(`Harvest (off turn): ${offStr}`);
   }
 }
 
@@ -397,8 +401,9 @@ function openBoardMarketStackModal(initialTopCard) {
       heading.className = 'modal-card-name';
       heading.textContent = top.name || '?';
       info.appendChild(heading);
-      appendMarketFaceUpInspectBody(info, top);
-      appendMarketActionUI(info, top, evaluateMarketCardContext(top, state));
+      const topCtx = evaluateMarketCardContext(top, state);
+      appendMarketFaceUpInspectBody(info, top, topCtx);
+      appendMarketActionUI(info, top, topCtx);
       return;
     }
 
@@ -754,7 +759,7 @@ function appendMarketActionUI(infoEl, card, ctx) {
 }
 
 /** Inline resource value with an explicit sign prefix (e.g. "-3 × icon" or "+1 × icon"). */
-function makeSignedModalResource(kind, val, cls, prefix) {
+function makeSignedModalResource(kind, val, cls, prefix, tipOverride) {
   const wrap = document.createElement('span');
   wrap.className = cls
     ? `modal-stat-value ${cls} modal-resource-inline`
@@ -768,14 +773,56 @@ function makeSignedModalResource(kind, val, cls, prefix) {
   const iconKey = kind === 'vp' ? 'victory' : kind;
   img.src = TABLEAU_RESOURCE_ICONS[iconKey];
   const names = { gold: 'Gold', strength: 'Strength', magic: 'Magic', vp: 'Victory Points' };
-  const tip = `${prefix}${val} ${names[kind] || ''}`.trim();
+  const tip = (tipOverride && String(tipOverride).trim()) || `${prefix}${val} ${names[kind] || ''}`.trim();
   wrap.title = tip;
   wrap.setAttribute('aria-label', tip);
   wrap.appendChild(img);
   return wrap;
 }
 
-function appendMarketCompactStatLine(infoEl, card) {
+/**
+ * Compute the *true* purchase cost for `card` (after duplicate surcharges and active
+ * passive discounts), preferring values already computed by `evaluateMarketCardContext`
+ * when a usable acting player is in view. Falls back to the printed face values
+ * (`gold_cost`, `strength_cost`, `magic_cost`) when no context is available — e.g.
+ * inspect-only views or non-action phases where no buyer is implied.
+ *
+ * Returns the costs plus an optional one-line breakdown tooltip explaining any delta
+ * from face value (e.g. "base 3g + 2 duplicate(s)" or "base 4g − 1 (Pratchett's Plateau)").
+ */
+function effectiveMarketCardCosts(card, ctx) {
+  const out = {
+    gold: Number(card.gold_cost || 0),
+    strength: Number(card.strength_cost || 0),
+    magic: Number(card.magic_cost || 0),
+    goldTip: '',
+    strengthTip: '',
+    magicTip: '',
+  };
+  if (!ctx || !ctx.actingPlayer || ctx.blockReason) return out;
+  if (card.citizen_id != null) {
+    const base = Number(ctx.baseCost || 0);
+    const sur = Number(ctx.surcharge || 0);
+    out.gold = Number(ctx.scaledCost || 0) || out.gold;
+    if (sur > 0) {
+      out.goldTip = `base ${base}g + ${sur} duplicate${sur === 1 ? '' : 's'} = ${out.gold}g`;
+    } else if (ctx.emeraldActive) {
+      out.goldTip = `base ${base}g (Emerald Stronghold waives duplicate surcharge)`;
+    }
+  } else if (card.domain_id != null) {
+    const base = Number(ctx.baseCost || 0);
+    out.gold = Number(ctx.effectiveGold || 0);
+    if (ctx.pratchettActive && base !== out.gold) {
+      out.goldTip = `base ${base}g − 1 (Pratchett's Plateau) = ${out.gold}g`;
+    }
+  } else if (card.monster_id != null && ctx.top) {
+    out.strength = Number(ctx.top.strength_cost || 0);
+    out.magic = Number(ctx.top.magic_cost || 0);
+  }
+  return out;
+}
+
+function appendMarketCompactStatLine(infoEl, card, ctx) {
   const row = mk('market-stat-inline');
 
   const items = [];
@@ -793,9 +840,10 @@ function appendMarketCompactStatLine(infoEl, card) {
     items.push(el);
   }
 
-  if (card.gold_cost)     items.push(makeSignedModalResource('gold', card.gold_cost, 'modal-gold', '-'));
-  if (card.strength_cost) items.push(makeSignedModalResource('strength', card.strength_cost, 'modal-str', '-'));
-  if (card.magic_cost)    items.push(makeSignedModalResource('magic', card.magic_cost, 'modal-mag', '-'));
+  const costs = effectiveMarketCardCosts(card, ctx);
+  if (costs.gold)     items.push(makeSignedModalResource('gold', costs.gold, 'modal-gold', '-', costs.goldTip));
+  if (costs.strength) items.push(makeSignedModalResource('strength', costs.strength, 'modal-str', '-', costs.strengthTip));
+  if (costs.magic)    items.push(makeSignedModalResource('magic', costs.magic, 'modal-mag', '-', costs.magicTip));
 
   if (card.vp_reward)       items.push(makeSignedModalResource('vp', card.vp_reward, 'modal-vp', '+'));
   if (card.gold_reward)     items.push(makeSignedModalResource('gold', card.gold_reward, 'modal-gold', '+'));
@@ -854,8 +902,8 @@ function appendMarketCompactStatLine(infoEl, card) {
 }
 
 /** Stats, roles, text, and detailed rules for a face-up market card (domain / citizen / monster). */
-function appendMarketFaceUpInspectBody(infoEl, card) {
-  appendMarketCompactStatLine(infoEl, card);
+function appendMarketFaceUpInspectBody(infoEl, card, ctx) {
+  appendMarketCompactStatLine(infoEl, card, ctx);
 
   if (card.text) {
     const t = document.createElement('p');
@@ -917,8 +965,9 @@ function openMarketCardModal(card) {
     note.textContent = 'This card is not visible to you right now.';
     info.appendChild(note);
   } else {
-    appendMarketFaceUpInspectBody(info, card);
-    appendMarketActionUI(info, card, evaluateMarketCardContext(card, latestGameState));
+    const cardCtx = evaluateMarketCardContext(card, latestGameState);
+    appendMarketFaceUpInspectBody(info, card, cardCtx);
+    appendMarketActionUI(info, card, cardCtx);
   }
 
   modal.appendChild(info);

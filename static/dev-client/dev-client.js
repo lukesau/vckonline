@@ -665,7 +665,11 @@ let playerId = localStorage.getItem('playerId') || '';
                 const gv = Number(card[g]) || 0;
                 const sv = Number(card[s]) || 0;
                 const mv = Number(card[m]) || 0;
-                return `G ${gv}, S ${sv}, M ${mv}`;
+                const parts = [];
+                if (gv !== 0) parts.push(`G ${gv}`);
+                if (sv !== 0) parts.push(`S ${sv}`);
+                if (mv !== 0) parts.push(`M ${mv}`);
+                return parts.join(', ');
             }
 
             function pushHarvestHints(hints, card) {
@@ -675,10 +679,10 @@ let playerId = localStorage.getItem('playerId') || '';
                 const onStr = formatHarvestGSM(card, true);
                 const offStr = formatHarvestGSM(card, false);
                 if (onStr === offStr) {
-                    hints.push(`Harvest: ${onStr} (on & off turn)`);
+                    if (onStr) hints.push(`Harvest: ${onStr} (on & off turn)`);
                 } else {
-                    hints.push(`Harvest (on turn): ${onStr}`);
-                    hints.push(`Harvest (off turn): ${offStr}`);
+                    if (onStr) hints.push(`Harvest (on turn): ${onStr}`);
+                    if (offStr) hints.push(`Harvest (off turn): ${offStr}`);
                 }
             }
 
