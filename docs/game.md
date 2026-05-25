@@ -91,6 +91,23 @@ it does for `manual_harvest` / `harvest_optional_exchange`. After the steal
 resolves, the engine resumes the harvest pre-phase scan and only moves on
 to regular harvest payouts once every player's steals have resolved.
 
+### Deferred may-slay-a-Monster prompts
+
+Bare-verb `slay` payouts (see `docs/effect-strings.md`) opened by citizen
+harvest payouts do **not** prompt mid-harvest. They append entries to
+`pending_harvest_slays`, and `_harvest_run_automation_until_blocked` calls
+`_drain_pending_harvest_slays` *after* every player's regular and special
+payouts complete, but *before* `_harvest_complete_finalize`. This guarantees
+the slay's monster reward (and any chained `special_reward`) resolves last,
+after every other payout for every player.
+
+Each drained entry opens the same two-stage `immediate_slay` prompt the
+domain activation uses (`choose_monster_slay` → `slay_monster_payment`),
+distinguished by `pending_required_choice.resume_kind = "harvest_pending_slay"`
+so the post-resolve hook resumes the queue drain instead of the action-phase
+follow-up. Silent batch harvest (`harvest_phase()`) skips and clears any
+queued entries since there is no UI to prompt against.
+
 ## Concurrent actions (non-ordered prompts)
 
 Some prompts are not turn-based: every participating player should be able to

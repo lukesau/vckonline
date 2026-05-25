@@ -38,9 +38,6 @@ class Player:
             "action_phase": [],
         }
         self.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0}
-        self.free_slay_actions = 0
-        self.free_hire_actions = 0
-        self.free_build_actions = 0
 
     @classmethod
     def from_dict(cls, data):
@@ -59,9 +56,6 @@ class Player:
         player.is_first = data["is_first"]
         player.effects = data["effects"]
         player.harvest_delta = data.get("harvest_delta", {"gold": 0, "strength": 0, "magic": 0, "victory": 0})
-        player.free_slay_actions = int(data.get("free_slay_actions", 0) or 0)
-        player.free_hire_actions = int(data.get("free_hire_actions", 0) or 0)
-        player.free_build_actions = int(data.get("free_build_actions", 0) or 0)
         roles = player.calc_roles()
         player.shadow_count = roles["shadow_count"]
         player.holy_count = roles["holy_count"]

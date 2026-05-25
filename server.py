@@ -229,7 +229,7 @@ class ResourcePayment(BaseModel):
 
 class GameActionRequest(BaseModel):
     player_id: str
-    action_type: str  # "hire_citizen", "build_domain", "slay_monster", "take_resource", "pass_bonus_actions", "act_on_required_action", "submit_concurrent_action"
+    action_type: str  # "hire_citizen", "build_domain", "slay_monster", "take_resource", "act_on_required_action", "submit_concurrent_action"
     # Action parameters (varies by action type)
     citizen_id: Optional[int] = None
     domain_id: Optional[int] = None
@@ -619,10 +619,6 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 _rollback_consumed_action(game)
                 raise
             game.finish_turn_if_no_actions_remaining()
-
-        elif request.action_type == "pass_bonus_actions":
-            if not game.pass_bonus_actions(request.player_id):
-                raise HTTPException(status_code=400, detail="No bonus actions to pass (or not your turn).")
 
         elif request.action_type == "act_on_required_action":
             if request.action is None:

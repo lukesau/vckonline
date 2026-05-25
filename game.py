@@ -270,6 +270,11 @@ class Game:
         self.harvest_player_idx = game_state.get('harvest_player_idx', 0)
         self.harvest_consumed = game_state.get('harvest_consumed') or {}
         self._harvest_steal_phase_done = game_state.get('_harvest_steal_phase_done', False)
+        # Pending "may slay a Monster" prompts queued by citizen harvest payouts.
+        # Drained at the end of harvest (after every other harvest payout including
+        # special payouts) so the prompt + slay reward always resolves last.
+        # Each entry: {"player_id": ..., "source_label": ...}.
+        self.pending_harvest_slays = list(game_state.get('pending_harvest_slays') or [])
         self.last_active_time = 0
         self.game_log = list(game_state.get('game_log') or [])
         self.pending_action_end_queue = list(game_state.get("pending_action_end_queue") or [])
@@ -338,6 +343,8 @@ class Game:
                 or aa == "manual_harvest"
                 or aa == "harvest_optional_exchange"
                 or aa == "harvest_steal"
+                or aa == "choose_monster_slay"
+                or aa == "slay_monster_payment"
                 or aa.startswith("choose ")
                 or aa.startswith("choose_player")
                 or aa.startswith("choose_monster")
@@ -393,7 +400,6 @@ class Game:
                     self.end_game_triggered = True
                     self._log_game_event(f"End-game condition met ({reason}); finishing this round.")
             self._reveal_hidden_domain_stack_tops()
-            self._reset_free_actions_for_all_players()
             self.turn_index = (self.turn_index + 1) % max(1, len(self.player_list))
             self.turn_number = int(self.turn_number) + 1
             if self.end_game_triggered and self.player_list[self.turn_index].is_first:
@@ -471,7 +477,6 @@ class Game:
                     self.end_game_triggered = True
                     self._log_game_event(f"End-game condition met ({reason}); finishing this round.")
             self._reveal_hidden_domain_stack_tops()
-            self._reset_free_actions_for_all_players()
             self.turn_index = (self.turn_index + 1) % max(1, len(self.player_list))
             self.turn_number = int(self.turn_number) + 1
             if self.end_game_triggered and self.player_list[self.turn_index].is_first:
@@ -500,78 +505,8 @@ class Game:
         return True
 
     # ----------------------------------------------------------------------
-    # Free / bonus actions
-    #
-    # A player may accrue "free" (a.k.a. bonus) actions during a turn from
-    # domain/citizen effects (e.g. Eye of Asteraten activation: "s 5 + grant_action slay").
-    # These persist only for the turn they were granted and stack with each other.
-    # When the player performs a matching action (slay/hire/build) we prefer to
-    # spend a free action over a regular one. When their regular actions are
-    # spent but a free action remains, the engine surfaces a "bonus_action_offer"
-    # required-action so the client can offer "use bonus / pass turn".
+    # Standard action consumption
     # ----------------------------------------------------------------------
-
-    _FREE_ACTION_ATTR_BY_KIND = {
-        "slay": "free_slay_actions",
-        "hire": "free_hire_actions",
-        "build": "free_build_actions",
-    }
-
-    _FREE_ACTION_KIND_BY_ACTION_TYPE = {
-        "slay_monster": "slay",
-        "hire_citizen": "hire",
-        "build_domain": "build",
-    }
-
-    def _free_kind_for_action_type(self, action_type):
-        if not action_type:
-            return None
-        return self._FREE_ACTION_KIND_BY_ACTION_TYPE.get(str(action_type).strip().lower())
-
-    def _free_action_attr(self, kind):
-        return self._FREE_ACTION_ATTR_BY_KIND.get((kind or "").strip().lower())
-
-    def _get_free_action_count(self, player, kind):
-        attr = self._free_action_attr(kind)
-        if not attr or not player:
-            return 0
-        return int(getattr(player, attr, 0) or 0)
-
-    def _set_free_action_count(self, player, kind, value):
-        attr = self._free_action_attr(kind)
-        if not attr or not player:
-            return
-        setattr(player, attr, max(0, int(value)))
-
-    def _player_has_any_free_actions(self, player):
-        if not player:
-            return False
-        return any(
-            int(getattr(player, attr, 0) or 0) > 0
-            for attr in self._FREE_ACTION_ATTR_BY_KIND.values()
-        )
-
-    def _grant_free_action(self, player, kind, amount=1):
-        if not player or amount <= 0:
-            return False
-        if not self._free_action_attr(kind):
-            return False
-        self._set_free_action_count(player, kind, self._get_free_action_count(player, kind) + int(amount))
-        return True
-
-    def _reset_free_actions_for_all_players(self):
-        for p in list(getattr(self, "player_list", []) or []):
-            for attr in self._FREE_ACTION_ATTR_BY_KIND.values():
-                setattr(p, attr, 0)
-
-    def _bonus_action_offer_state(self, player):
-        return {
-            "id": player.player_id,
-            "action": "bonus_action_offer",
-            "free_slay_actions": int(getattr(player, "free_slay_actions", 0) or 0),
-            "free_hire_actions": int(getattr(player, "free_hire_actions", 0) or 0),
-            "free_build_actions": int(getattr(player, "free_build_actions", 0) or 0),
-        }
 
     def _refresh_action_phase_required(self, player_id):
         """
@@ -583,62 +518,19 @@ class Game:
         if not isinstance(ar, dict):
             return
         aa = str(ar.get("action", "") or "")
-        if aa not in ("", "standard_action", "bonus_action_offer"):
-            return
-        player = self._player_by_id(player_id)
-        if not player:
-            return
-        if int(getattr(self, "actions_remaining", 0) or 0) > 0:
-            ar.clear()
-            ar["id"] = player_id
-            ar["action"] = "standard_action"
-            return
-        if self._player_has_any_free_actions(player):
-            ar.clear()
-            ar.update(self._bonus_action_offer_state(player))
+        if aa not in ("", "standard_action"):
             return
         ar.clear()
         ar["id"] = player_id
         ar["action"] = "standard_action"
 
-    def _execute_grant_action_payout(self, raw, player_id):
-        """Compound / activation payout fragment: grant a free (bonus) action for this turn."""
-        parts = (raw or "").split()
-        if len(parts) < 2:
-            return [-9999, 0, 0, 0]
-        kind = parts[1].strip().lower()
-        if not self._free_action_attr(kind):
-            return [-9999, 0, 0, 0]
-        amount = 1
-        if len(parts) >= 3:
-            try:
-                amount = int(parts[2])
-            except (TypeError, ValueError):
-                amount = 1
-        if amount <= 0:
-            return [0, 0, 0, 0]
-        player = self._player_by_id(player_id)
-        if not player:
-            return [-9999, 0, 0, 0]
-        self._grant_free_action(player, kind, amount)
-        plural = "s" if amount != 1 else ""
-        self._log_game_event(
-            f"{self._player_label(player_id)} gained {amount} bonus {kind} action{plural} this turn."
-        )
-        return [0, 0, 0, 0]
-
     def consume_player_action(self, player_id, action_type=None):
         """
-        Consume one action for the active player. Prefers spending a matching
-        free (bonus) action over a regular one.
+        Consume one regular action for the active player.
 
         When this drops actions_remaining to 0, the turn is not advanced here:
         the caller must apply the hire/build/slay/take first, then call
         finish_turn_if_no_actions_remaining() so logs and engine state stay ordered.
-
-        `action_type` should be the request action_type (e.g. "slay_monster",
-        "hire_citizen", "build_domain", "take_resource"). It is used to decide
-        whether a matching free counter is available.
         """
         if self.phase == "action_end_pending":
             return False
@@ -652,26 +544,24 @@ class Game:
                 if self.phase == 'action':
                     break
 
-        free_kind = self._free_kind_for_action_type(action_type)
-        player = self._player_by_id(player_id)
-        free_count = self._get_free_action_count(player, free_kind) if (player and free_kind) else 0
-
-        # If we're blocked on a required choice, only allow consumption when
-        # the prompt is our own bonus_action_offer AND the requested action
-        # type matches a free counter that's still > 0.
+        # Block while waiting on any active per-player prompt that isn't the
+        # idle "standard_action" placeholder. This includes the new immediate
+        # slay prompts (choose_monster_slay / slay_monster_payment), as well as
+        # the existing choose_* / harvest_* / domain_self_convert prompts.
         if self.action_required and self.action_required.get("id") and self.action_required.get("id") != self.game_id:
             aa = str(self.action_required.get("action", "") or "")
-            if aa == "bonus_action_offer":
-                if not (free_kind and free_count > 0):
-                    return False
-            elif self.action_required.get("action") in (
+            blocking = aa in (
                 "bonus_resource_choice",
                 "manual_harvest",
                 "harvest_optional_exchange",
                 "harvest_steal",
+                "domain_self_convert",
+                "choose_monster_slay",
+                "slay_monster_payment",
             ) or aa.startswith("choose ") or aa.startswith("choose_player") or aa.startswith(
                 "choose_monster"
-            ) or aa.startswith("choose_owned") or aa == "domain_self_convert":
+            ) or aa.startswith("choose_owned")
+            if blocking:
                 return False
 
         if player_id != self.current_player_id():
@@ -680,15 +570,11 @@ class Game:
         if self.actions_remaining is None:
             self.actions_remaining = 2
         regulars = int(self.actions_remaining)
-        if regulars <= 0 and free_count <= 0:
+        if regulars <= 0:
             return False
 
-        if free_kind and free_count > 0:
-            self._set_free_action_count(player, free_kind, free_count - 1)
-            self._last_consumed_action_marker = ("free", free_kind)
-        else:
-            self.actions_remaining = regulars - 1
-            self._last_consumed_action_marker = ("regular", None)
+        self.actions_remaining = regulars - 1
+        self._last_consumed_action_marker = ("regular", None)
 
         self.tick_id += 1
         self._refresh_action_phase_required(player_id)
@@ -701,36 +587,18 @@ class Game:
             self.actions_remaining = int(getattr(self, "actions_remaining", 0)) + 1
             self.tick_id = int(getattr(self, "tick_id", 0)) - 1
             return
-        kind_a, kind_b = marker
+        kind_a, _kind_b = marker
         if kind_a == "regular":
             self.actions_remaining = int(getattr(self, "actions_remaining", 0)) + 1
-        elif kind_a == "free" and kind_b:
-            player = self._player_by_id(self.current_player_id())
-            if player:
-                cur = self._get_free_action_count(player, kind_b)
-                self._set_free_action_count(player, kind_b, cur + 1)
         self.tick_id = int(getattr(self, "tick_id", 0)) - 1
         self._last_consumed_action_marker = None
         self._refresh_action_phase_required(self.current_player_id())
 
     def finish_turn_if_no_actions_remaining(self):
-        """After a successful standard action, advance roll/harvest if the turn was just spent.
-
-        If the active player has unspent free (bonus) actions, the turn does
-        not end yet: instead, surface a "bonus_action_offer" required-action so
-        the client can offer "use bonus / pass turn".
-        """
+        """After a successful standard action, advance roll/harvest if the turn was just spent."""
         if getattr(self, "phase", None) != "action" or int(getattr(self, "actions_remaining", 0) or 0) != 0:
             return
         if self.is_blocked_on_concurrent_action():
-            return
-        player = self._player_by_id(self.current_player_id())
-        if player and self._player_has_any_free_actions(player):
-            ar = self.action_required if isinstance(self.action_required, dict) else None
-            aa = str((ar or {}).get("action", "") or "")
-            if ar is not None and aa in ("", "standard_action"):
-                ar.clear()
-                ar.update(self._bonus_action_offer_state(player))
             return
         ar = getattr(self, "action_required", None) or {}
         aid = ar.get("id")
@@ -740,37 +608,6 @@ class Game:
         if self._start_action_end_domain_sequence(self.current_player_id()):
             return
         self.advance_tick()
-
-    def pass_bonus_actions(self, player_id):
-        """
-        Player declines to spend any remaining bonus actions. Zero the
-        counters and advance the turn as usual.
-        """
-        if getattr(self, "phase", None) != "action":
-            return False
-        if player_id != self.current_player_id():
-            return False
-        player = self._player_by_id(player_id)
-        if not player:
-            return False
-        had_free = self._player_has_any_free_actions(player)
-        in_offer = False
-        if isinstance(self.action_required, dict):
-            in_offer = str(self.action_required.get("action", "") or "") == "bonus_action_offer"
-        if not had_free and not in_offer:
-            return False
-        for attr in self._FREE_ACTION_ATTR_BY_KIND.values():
-            setattr(player, attr, 0)
-        if isinstance(self.action_required, dict) and in_offer:
-            self.action_required.clear()
-            self.action_required["id"] = player_id
-            self.action_required["action"] = "standard_action"
-        self.tick_id += 1
-        self._log_game_event(
-            f"{self._player_label(player_id)} declined remaining bonus action(s)."
-        )
-        self.finish_turn_if_no_actions_remaining()
-        return True
 
     def roll_phase(self):
         # Roll the RNG dice first (display value).
@@ -1225,6 +1062,10 @@ class Game:
         before_scores = self._player_scores_line(player)
         card_name = getattr(starter_or_citizen, "name", "?")
         turn_lbl = "on-turn" if on_turn else "off-turn"
+        # Tag any bare-verb `slay` payouts produced by this harvest activation with
+        # the source card's name (used by the deferred-slay prompt at end of harvest).
+        # Cleared in the outer `finally` below so the tag never leaks across cards.
+        self._immediate_slay_source_label = card_name
         def _special_cmd(obj, which):
             """
             Some DB rows historically relied on a boolean has_special_payout_* flag.
@@ -1307,6 +1148,7 @@ class Game:
                     player.victory_score = int(player.victory_score) + payout[3]
                     self._bump_harvest_delta(player, payout[0], payout[1], payout[2], payout[3])
         finally:
+            self._immediate_slay_source_label = None
             after_scores = self._player_scores_line(player)
             if before_scores != after_scores:
                 self._log_game_event(
@@ -1389,7 +1231,14 @@ class Game:
         if not aid or aid == self.game_id:
             return False
         aa = self.action_required.get("action") or ""
-        if aa in ("bonus_resource_choice", "manual_harvest", "harvest_optional_exchange", "harvest_steal"):
+        if aa in (
+            "bonus_resource_choice",
+            "manual_harvest",
+            "harvest_optional_exchange",
+            "harvest_steal",
+            "choose_monster_slay",
+            "slay_monster_payment",
+        ):
             return True
         if str(aa).startswith("choose ") or str(aa).startswith("choose_player") or str(aa).startswith("choose_monster"):
             return True
@@ -1405,6 +1254,10 @@ class Game:
         self.harvest_player_idx = 0
         self.harvest_consumed = {}
         self._harvest_steal_phase_done = False
+        # Pending may-slay prompts contributed gains directly (via slay_monster), so
+        # by the time we reach this finalize step they should be drained. Defensive
+        # clear so a malformed entry can't pin the harvest open across phases.
+        self.pending_harvest_slays = []
         self.pending_harvest_choices = []
         for p in self.player_list:
             d = getattr(p, "harvest_delta", {}) or {}
@@ -1455,7 +1308,13 @@ class Game:
                 return
             order = getattr(self, "harvest_player_order", None) or []
             if self.harvest_player_idx >= len(order):
-                self._harvest_complete_finalize()
+                # All players' regular payouts (including specials) are complete.
+                # Drain any deferred may-slay prompts queued by citizen payouts; the
+                # drain itself opens the next prompt or finalizes harvest when empty.
+                if self.pending_harvest_slays:
+                    self._drain_pending_harvest_slays()
+                else:
+                    self._harvest_complete_finalize()
                 return
             pid = order[self.harvest_player_idx]
             player = self._player_by_id(pid)
@@ -1570,6 +1429,16 @@ class Game:
                         consumed.append(slot["slot_key"])
         finally:
             self._silent_harvest_batch = False
+        # Silent batch harvest can't open prompts; drop any deferred slay opportunities
+        # that citizens may have queued. Interactive harvest drains them via
+        # `_harvest_run_automation_until_blocked` -> `_drain_pending_harvest_slays`.
+        if self.pending_harvest_slays:
+            for entry in self.pending_harvest_slays:
+                self._log_game_event(
+                    f"{self._player_label(entry.get('player_id'))} skipped slay "
+                    f"prompt from \"{entry.get('source_label', 'Effect')}\" (silent harvest)."
+                )
+            self.pending_harvest_slays = []
         for player in self.player_list:
             print(f"Player {player.name}: {player.gold_score} G, {player.strength_score} S, {player.magic_score} M,"
                   f" {player.victory_score} VP, Monsters: {len(player.owned_monsters)}, "
@@ -2067,8 +1936,8 @@ class Game:
         low = raw.lower()
         if low.startswith("manipulate_resources"):
             return self._execute_manipulate_resources_payout(raw, player_id)
-        if low.startswith("grant_action"):
-            return self._execute_grant_action_payout(raw, player_id)
+        if low == "slay":
+            return self._execute_slay_payout(player_id)
         if low.startswith("steal"):
             return self._execute_steal_payout(raw, player_id)
         if low == "concurrent_flip_one_citizen":
@@ -2568,6 +2437,152 @@ class Game:
         player.victory_score = int(getattr(player, "victory_score", 0)) + payout[3]
         self._bump_harvest_delta(player, payout[0], payout[1], payout[2], payout[3])
 
+    # ----------------------------------------------------------------------
+    # Immediate "may slay a Monster" prompt
+    #
+    # A bare-verb `slay` payout in a card effect string means: the controlling
+    # player may immediately slay one accessible monster (paying its normal
+    # strength/magic cost). It replaces the older `grant_action slay` mechanic
+    # of accruing a free-slay action token to spend later.
+    #
+    # The prompt has two stages on `pending_required_choice`:
+    #   - stage "pick_monster": present every accessible monster top + a Pass.
+    #     `action_required.action = "choose_monster_slay"`.
+    #   - stage "pay_for_slay": after a monster is picked, collect the slay
+    #     payment (gold not allowed, strength/magic per `_validate_monster_slay_payment`).
+    #     `action_required.action = "slay_monster_payment"`.
+    #
+    # `resume_kind` distinguishes follow-up resolution:
+    #   - "domain_activation": resume via `_resume_after_domain_activation_follow_up`.
+    #   - "harvest_pending_slay": resume the deferred-slay drain at end of harvest.
+    # ----------------------------------------------------------------------
+
+    def _immediate_slay_monster_options(self):
+        """Return option dicts for every accessible monster top across the grid."""
+        options = []
+        for stack in self.monster_grid:
+            if not stack:
+                continue
+            top = stack[-1]
+            if not getattr(top, "is_accessible", False):
+                continue
+            mid = int(getattr(top, "monster_id", -1))
+            if mid < 0:
+                continue
+            options.append({
+                "monster_id": mid,
+                "name": getattr(top, "name", "?"),
+                "area": getattr(top, "area", ""),
+                "strength_cost": int(getattr(top, "strength_cost", 0) or 0),
+                "magic_cost": int(getattr(top, "magic_cost", 0) or 0),
+            })
+        return options
+
+    def _open_immediate_slay_prompt(self, player_id, source_label, resume_kind="domain_activation"):
+        """Open the pick_monster stage of the may-slay prompt.
+
+        If no monster is accessible the prompt is skipped (and the appropriate
+        resume kind fires immediately) so the activating player isn't stuck
+        on a no-op blocker.
+        """
+        source_label = (source_label or "Effect").strip() or "Effect"
+        options = self._immediate_slay_monster_options()
+        if not options:
+            self._log_game_event(
+                f"{self._player_label(player_id)} could not use \"{source_label}\" "
+                f"(no accessible monsters to slay)."
+            )
+            self._resume_after_immediate_slay(resume_kind)
+            return
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "choose_monster_slay"
+        self.pending_required_choice = {
+            "kind": "immediate_slay",
+            "stage": "pick_monster",
+            "player_id": player_id,
+            "source_label": source_label,
+            "resume_kind": resume_kind,
+            "options": options,
+            "allow_skip": True,
+        }
+        self._log_game_event(
+            f"{self._player_label(player_id)} may slay a monster (\"{source_label}\")."
+        )
+
+    def _enter_slay_payment_stage(self, prc, chosen):
+        """Transition the may-slay prompt from pick_monster to pay_for_slay."""
+        player_id = prc.get("player_id")
+        self.pending_required_choice = {
+            "kind": "immediate_slay",
+            "stage": "pay_for_slay",
+            "player_id": player_id,
+            "source_label": prc.get("source_label", "Effect"),
+            "resume_kind": prc.get("resume_kind", "domain_activation"),
+            "monster_id": int(chosen.get("monster_id", -1)),
+            "monster_name": chosen.get("name", "?"),
+            "area": chosen.get("area", ""),
+            "strength_cost": int(chosen.get("strength_cost", 0) or 0),
+            "magic_cost": int(chosen.get("magic_cost", 0) or 0),
+            "options": list(prc.get("options") or []),
+        }
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "slay_monster_payment"
+
+    def _resume_after_immediate_slay(self, resume_kind):
+        """Continue the engine after the may-slay prompt resolves (slay or pass)."""
+        if resume_kind == "harvest_pending_slay":
+            self._drain_pending_harvest_slays()
+            return
+        # Default: domain activation follow-up (existing behaviour).
+        self._resume_after_domain_activation_follow_up()
+
+    def _execute_slay_payout(self, player_id):
+        """Bare-verb `slay` payout. Either prompts now (action phase) or queues for harvest end."""
+        if getattr(self, "phase", None) == "harvest":
+            label = getattr(self, "_immediate_slay_source_label", None) or "Effect"
+            self.pending_harvest_slays.append({
+                "player_id": player_id,
+                "source_label": label,
+            })
+            return [0, 0, 0, 0]
+        label = getattr(self, "_immediate_slay_source_label", None) or "Effect"
+        self._open_immediate_slay_prompt(player_id, label, resume_kind="domain_activation")
+        return [0, 0, 0, 0]
+
+    def _drain_pending_harvest_slays(self):
+        """Open a may-slay prompt for the next pending harvest slay, or finish harvest.
+
+        Called after the regular harvest scan completes and after each pending
+        slay resolves. Once the queue is empty we finish harvest the same way
+        `_harvest_run_automation_until_blocked` would have.
+        """
+        # Clean up any prompt residue from the just-resolved entry.
+        if isinstance(self.action_required, dict):
+            aa = str(self.action_required.get("action", "") or "")
+            if aa in ("choose_monster_slay", "slay_monster_payment"):
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+        self.pending_required_choice = None
+        while self.pending_harvest_slays:
+            entry = self.pending_harvest_slays[0]
+            pid = entry.get("player_id")
+            label = entry.get("source_label", "Effect")
+            options = self._immediate_slay_monster_options()
+            if not options:
+                self._log_game_event(
+                    f"{self._player_label(pid)} could not use \"{label}\" "
+                    f"(no accessible monsters to slay)."
+                )
+                self.pending_harvest_slays.pop(0)
+                continue
+            # Pop now so the prompt resolution doesn't double-drain.
+            self.pending_harvest_slays.pop(0)
+            self._open_immediate_slay_prompt(pid, label, resume_kind="harvest_pending_slay")
+            return
+        # Queue empty: complete harvest normally.
+        if getattr(self, "phase", None) == "harvest" and not getattr(self, "harvest_processed", False):
+            self._harvest_complete_finalize()
+
     def _resume_after_domain_activation_follow_up(self):
         """Clear optional domain activation prompts and restore action/end-turn resolution."""
         self.pending_required_choice = None
@@ -2924,9 +2939,16 @@ class Game:
     def _apply_harvest_jousting_passive(self, player):
         """Apply automatic harvest-phase domain passives for the active player.
 
-        Accepts DB spellings `harvest.gain_per_owned_citizen_name` and `harvest:gain_per_owned_citizen_name`.
-        Format: `<verb> <citizen_name> <resource_letter> <multiplier_per_card>`
-        resource_letter: g | s | m | v
+        Supports compound passives joined by ` + ` (same compounding rule as
+        domain activations). Each leg is a self-contained named-count verb:
+          - `harvest.gain_per_owned_citizen_name <NAME> <R> <N>` -> counts owned citizens
+          - `harvest.gain_per_owned_starter_name <NAME> <R> <N>` -> counts owned starters
+        Names match case-insensitively against the card's `name`. Resource
+        letter R is one of g | s | m | v. Multiplier N is gained per matching
+        unflipped card in the relevant pool.
+
+        Example (Jousting Field gains 1g per Knight whether citizen or starter):
+          `harvest.gain_per_owned_citizen_name Knight g 1 + harvest.gain_per_owned_starter_name Knight g 1`
         """
         if not player:
             return
@@ -2936,50 +2958,61 @@ class Game:
             raw = (getattr(d, "passive_effect", None) or "").strip()
             if not raw:
                 continue
-            parts = raw.split()
-            verb = parts[0].strip().lower()
-            if verb != "harvest.gain_per_owned_citizen_name":
+            for leg in [s.strip() for s in raw.split(" + ") if s.strip()]:
+                self._apply_harvest_named_count_leg(player, d, leg)
+
+    def _apply_harvest_named_count_leg(self, player, domain, leg):
+        """Apply a single `harvest.gain_per_owned_{citizen,starter}_name NAME R N` leg."""
+        parts = leg.split()
+        if len(parts) < 4:
+            return
+        verb = parts[0].strip().lower()
+        if verb == "harvest.gain_per_owned_citizen_name":
+            pool_attr = "owned_citizens"
+            pool_label = "citizen"
+        elif verb == "harvest.gain_per_owned_starter_name":
+            pool_attr = "owned_starters"
+            pool_label = "starter"
+        else:
+            return
+        unit_name = parts[1]
+        res = (parts[2] or "").strip().lower()
+        try:
+            mult = int(parts[3])
+        except (TypeError, ValueError):
+            return
+        want = unit_name.strip().lower()
+        n = 0
+        for c in list(getattr(player, pool_attr, []) or []):
+            if getattr(c, "is_flipped", False):
                 continue
-            if len(parts) < 4:
-                continue
-            citizen_name = parts[1]
-            res = (parts[2] or "").strip().lower()
-            try:
-                mult = int(parts[3])
-            except (TypeError, ValueError):
-                continue
-            want = citizen_name.strip().lower()
-            n = 0
-            for c in list(getattr(player, "owned_citizens", []) or []):
-                if getattr(c, "is_flipped", False):
-                    continue
-                if (getattr(c, "name", "") or "").strip().lower() == want:
-                    n += 1
-            if n <= 0:
-                continue
-            gain = mult * n
-            dg = ds = dm = dv = 0
-            if res == "g":
-                dg = gain
-            elif res == "s":
-                ds = gain
-            elif res == "m":
-                dm = gain
-            elif res == "v":
-                dv = gain
-            else:
-                continue
-            before = self._player_scores_line(player)
-            player.gold_score = int(player.gold_score) + dg
-            player.strength_score = int(player.strength_score) + ds
-            player.magic_score = int(player.magic_score) + dm
-            player.victory_score = int(player.victory_score) + dv
-            self._bump_harvest_delta(player, dg, ds, dm, dv)
-            after = self._player_scores_line(player)
-            self._log_game_event(
-                f"{self._player_label(player.player_id)} harvest passive \"{getattr(d, 'name', 'Domain')}\" "
-                f"({citizen_name} x{n}): scores {before} -> {after}"
-            )
+            if (getattr(c, "name", "") or "").strip().lower() == want:
+                n += 1
+        if n <= 0:
+            return
+        gain = mult * n
+        dg = ds = dm = dv = 0
+        if res == "g":
+            dg = gain
+        elif res == "s":
+            ds = gain
+        elif res == "m":
+            dm = gain
+        elif res == "v":
+            dv = gain
+        else:
+            return
+        before = self._player_scores_line(player)
+        player.gold_score = int(player.gold_score) + dg
+        player.strength_score = int(player.strength_score) + ds
+        player.magic_score = int(player.magic_score) + dm
+        player.victory_score = int(player.victory_score) + dv
+        self._bump_harvest_delta(player, dg, ds, dm, dv)
+        after = self._player_scores_line(player)
+        self._log_game_event(
+            f"{self._player_label(player.player_id)} harvest passive \"{getattr(domain, 'name', 'Domain')}\" "
+            f"({unit_name} {pool_label} x{n}): scores {before} -> {after}"
+        )
 
     def _prompt_domain_monster_strength_boost(self, player, domain, effect):
         parts = effect.split()
@@ -3089,7 +3122,14 @@ class Game:
         before = self._player_scores_line(player)
         _prior_action = (self.action_required or {}).get("action", "")
         _prior_concurrent = getattr(self, "concurrent_action", None)
-        payout = self.execute_special_payout(effect, player.player_id, auto_apply_single_choice=False)
+        # Tag any bare-verb `slay` payout in the effect with this domain's name so the
+        # prompt knows what to call out. Cleared in finally so the tag never leaks
+        # into other payout paths (harvest, action.end queues, etc.).
+        self._immediate_slay_source_label = getattr(domain, "name", "Domain")
+        try:
+            payout = self.execute_special_payout(effect, player.player_id, auto_apply_single_choice=False)
+        finally:
+            self._immediate_slay_source_label = None
         _new_action = (self.action_required or {}).get("action", "")
         _new_concurrent = getattr(self, "concurrent_action", None)
         if (_new_action and _new_action != _prior_action) or (_new_concurrent is not _prior_concurrent):
@@ -3777,6 +3817,110 @@ class Game:
                 return
 
             prc0 = getattr(self, "pending_required_choice", None) or {}
+
+            # Immediate "may slay a Monster" prompt — stage 1: pick a monster.
+            if prc0.get("kind") == "immediate_slay" and str(current_required).strip() == "choose_monster_slay":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                resume_kind = prc0.get("resume_kind", "domain_activation")
+                source_label = prc0.get("source_label", "Effect")
+                if act == "skip":
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} declined to slay (\"{source_label}\")."
+                    )
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    self._resume_after_immediate_slay(resume_kind)
+                    return
+                if not act.startswith("choose_monster_slay "):
+                    return
+                opts = list(prc0.get("options") or [])
+                try:
+                    idx = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if idx < 0 or idx >= len(opts):
+                    return
+                # Stage 2: collect the slay payment.
+                self._enter_slay_payment_stage(prc0, opts[idx])
+                return
+
+            # Immediate "may slay a Monster" prompt — stage 2: collect payment + slay.
+            if prc0.get("kind") == "immediate_slay" and str(current_required).strip() == "slay_monster_payment":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                resume_kind = prc0.get("resume_kind", "domain_activation")
+                source_label = prc0.get("source_label", "Effect")
+                if act == "back":
+                    self.action_required["action"] = "choose_monster_slay"
+                    self.action_required["id"] = player_id
+                    self.pending_required_choice = {
+                        "kind": "immediate_slay",
+                        "stage": "pick_monster",
+                        "player_id": player_id,
+                        "source_label": source_label,
+                        "resume_kind": resume_kind,
+                        "options": list(prc0.get("options") or []),
+                        "allow_skip": True,
+                    }
+                    return
+                if act == "skip":
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} declined to slay (\"{source_label}\")."
+                    )
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    self._resume_after_immediate_slay(resume_kind)
+                    return
+                if not act.startswith("slay_pay "):
+                    return
+                parts = act.split()
+                if len(parts) < 4:
+                    return
+                try:
+                    gp = int(parts[1])
+                    sp = int(parts[2])
+                    mp = int(parts[3])
+                except (TypeError, ValueError):
+                    return
+                monster_id = int(prc0.get("monster_id", -1))
+                if monster_id < 0:
+                    return
+                target = self._player_by_id(player_id)
+                before_tup = self._player_resource_tuple(target) if target else (0, 0, 0, 0)
+                try:
+                    self.slay_monster(player_id, monster_id, sp, mp, gp)
+                except ValueError as e:
+                    # Payment didn't validate; surface in the log so the player
+                    # sees why nothing happened, but keep the prompt open so they
+                    # can retry with a corrected payment.
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} could not slay "
+                        f"\"{prc0.get('monster_name', '?')}\" via \"{source_label}\": {e}"
+                    )
+                    return
+                # When the slay was triggered by a citizen harvest payout (resolved at
+                # end of harvest), count the net resource delta toward harvest_delta so
+                # the empty-harvest bonus_resource_choice gate sees it correctly.
+                if resume_kind == "harvest_pending_slay" and target:
+                    after_tup = self._player_resource_tuple(target)
+                    self._bump_harvest_delta(
+                        target,
+                        after_tup[0] - before_tup[0],
+                        after_tup[1] - before_tup[1],
+                        after_tup[2] - before_tup[2],
+                        after_tup[3] - before_tup[3],
+                    )
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self.pending_required_choice = None
+                self._resume_after_immediate_slay(resume_kind)
+                return
+
             if prc0.get("kind") == "domain_boost_monster" and str(current_required).strip() == "choose_monster_strength":
                 act = (action or "").strip().lower()
                 opts = list(prc0.get("options") or [])

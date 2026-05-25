@@ -1057,6 +1057,182 @@ function renderDomainChooseMonster(state) {
   });
 }
 
+// "May slay a Monster" prompt — stage 1: pick a monster (or pass).
+// Triggered by a bare-verb `slay` payout. The activation source is in
+// pending_required_choice.source_label (e.g. "Eye of Asteraten" for the
+// build-time activation; later, a citizen name for harvest-time slays).
+function renderImmediateSlayPickMonster(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const opts = Array.isArray(prc?.options) ? prc.options : [];
+  const sourceLabel = (prc?.source_label || 'Effect').toString();
+
+  const body = mk('prompt-modal-body');
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — \"${sourceLabel}\" may slay a monster.`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({
+      title: `${sourceLabel}: may slay a Monster`,
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const sub = mk('prompt-modal-note');
+  sub.textContent = 'Choose a monster to slay (you will set strength/magic payment next), or pass.';
+  body.appendChild(sub);
+
+  appendPromptResourcesPanel(body, state);
+
+  const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
+  opts.forEach((o, idx) => {
+    const nm = (o?.name || '?').toString();
+    const sc = Number(o?.strength_cost || 0);
+    const mc = Number(o?.magic_cost || 0);
+    const area = (o?.area || '').toString();
+    const tail = area ? ` · ${area}` : '';
+    const label = `${nm} (${sc} str + ${mc} mag${tail})`;
+    foot.appendChild(promptButton(label, () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: `choose_monster_slay ${idx + 1}`,
+      },
+      {
+        title: 'Choose monster?',
+        message: `Pick "${nm}" — you'll set the strength/magic payment on the next step.`,
+      },
+    )));
+  });
+
+  foot.appendChild(promptButton('Pass (do not slay)', () => confirmAndPostGameAction(
+    {
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: 'skip',
+    },
+    {
+      title: 'Pass on slay?',
+      message: `Decline the may-slay-a-Monster effect from "${sourceLabel}".`,
+      confirmLabel: 'Pass',
+    },
+  ), true));
+
+  openPromptOverlayShell({
+    title: `${sourceLabel}: may slay a Monster`,
+    dismissible: false,
+    bodyEl: body,
+    footerEl: foot,
+  });
+}
+
+// "May slay a Monster" prompt — stage 2: collect strength/magic payment for the
+// monster picked in stage 1, then submit `slay_pay <g> <s> <m>` (gold is forced
+// to 0 because monsters can't be slain with gold).
+function renderImmediateSlayPayment(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const sourceLabel = (prc?.source_label || 'Effect').toString();
+  const monsterName = (prc?.monster_name || '?').toString();
+  const strengthCost = Number(prc?.strength_cost || 0);
+  const magicCost = Number(prc?.magic_cost || 0);
+
+  const body = mk('prompt-modal-body');
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — paying for slay of "${monsterName}".`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({
+      title: `${sourceLabel}: pay to slay`,
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const me = playerById(state, PLAYER_ID) || {};
+  const sMax = Number(me?.strength_score || 0);
+  const mMax = Number(me?.magic_score || 0);
+
+  // Suggested payment: spend strength first up to its cost, fall back to magic
+  // for any shortfall, and require the magic minimum.
+  const wildNeeded = Math.max(0, strengthCost - sMax);
+  const suggestedStrength = Math.min(sMax, strengthCost);
+  const suggestedMagic = magicCost + wildNeeded;
+
+  const sub = mk('prompt-modal-note');
+  sub.textContent = `Slay "${monsterName}" — strength cost ${strengthCost}, magic minimum ${magicCost}. Magic above the minimum can cover any strength shortfall (1g equivalent rule does not apply to monsters).`;
+  body.appendChild(sub);
+
+  appendPromptResourcesPanel(body, state);
+
+  const payWrap = mk('market-pay-row');
+  payWrap.appendChild(mkPayField('', 'pay-g', 0, 0, 0, true, 'Monsters use strength and magic', 'gold'));
+  payWrap.appendChild(mkPayField('', 'pay-s', 0, sMax, suggestedStrength, false, 'Strength payment', 'strength'));
+  payWrap.appendChild(mkPayField('', 'pay-m', magicCost, mMax, suggestedMagic, false, 'Magic payment (minimum required)', 'magic'));
+
+  const fields = mk('market-pay-fields');
+  fields.appendChild(payWrap);
+  body.appendChild(fields);
+
+  const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
+  foot.appendChild(promptButton(`Slay ${monsterName}`, () => {
+    const p = readMarketPayRow(payWrap);
+    confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: `slay_pay 0 ${p.strength} ${p.magic}`,
+      },
+      {
+        title: 'Slay monster?',
+        message: `Slay "${monsterName}" using ${p.strength} strength and ${p.magic} magic.`,
+      },
+    );
+  }));
+  foot.appendChild(promptButton('Back (pick a different monster)', () => confirmAndPostGameAction(
+    {
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: 'back',
+    },
+    {
+      title: 'Back to monster list?',
+      message: 'Return to the monster selection step.',
+      confirmLabel: 'Back',
+    },
+  ), true));
+  foot.appendChild(promptButton('Pass (do not slay)', () => confirmAndPostGameAction(
+    {
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: 'skip',
+    },
+    {
+      title: 'Pass on slay?',
+      message: `Decline the may-slay-a-Monster effect from "${sourceLabel}".`,
+      confirmLabel: 'Pass',
+    },
+  ), true));
+
+  openPromptOverlayShell({
+    title: `${sourceLabel}: pay to slay "${monsterName}"`,
+    dismissible: false,
+    bodyEl: body,
+    footerEl: foot,
+  });
+}
+
 // Maps `pending_required_choice.kind` (paired with action_required="choose_owned_card")
 // to user-facing copy. New consumers register their kind here so the renderer can show
 // the right title/explainer instead of a generic "Choose one of your cards" fallback.
@@ -1516,6 +1692,16 @@ function renderPromptModal(state) {
 
   if (reqAction === 'choose_monster_strength') {
     renderDomainChooseMonster(state);
+    return;
+  }
+
+  if (reqAction === 'choose_monster_slay') {
+    renderImmediateSlayPickMonster(state);
+    return;
+  }
+
+  if (reqAction === 'slay_monster_payment') {
+    renderImmediateSlayPayment(state);
     return;
   }
 

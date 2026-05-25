@@ -66,9 +66,6 @@ class GameObjectEncoder(JSONEncoder):
                 "beast_count": roles["beast_count"],
                 "effects": obj.effects,
                 "harvest_delta": getattr(obj, "harvest_delta", {"gold": 0, "strength": 0, "magic": 0, "victory": 0}),
-                "free_slay_actions": int(getattr(obj, "free_slay_actions", 0) or 0),
-                "free_hire_actions": int(getattr(obj, "free_hire_actions", 0) or 0),
-                "free_build_actions": int(getattr(obj, "free_build_actions", 0) or 0),
             }
         if isinstance(obj, Duke):
             return obj.to_dict()
@@ -123,6 +120,7 @@ class GameObjectEncoder(JSONEncoder):
                 "harvest_player_order": getattr(obj, "harvest_player_order", None),
                 "harvest_player_idx": getattr(obj, "harvest_player_idx", 0),
                 "harvest_consumed": getattr(obj, "harvest_consumed", {}) or {},
+                "pending_harvest_slays": list(getattr(obj, "pending_harvest_slays", None) or []),
                 "harvest_prompt_slots": obj.harvest_slots_for_api() if hasattr(obj, "harvest_slots_for_api") else [],
                 "game_log": list(getattr(obj, "game_log", None) or []),
                 "shutdown": shutdown,

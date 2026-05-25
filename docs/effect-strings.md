@@ -28,12 +28,13 @@ This document covers how effect strings work across the three card tables (citiz
 | Darktide Harbour | `choose <citizens where role==shadow>` | Prompt: take a shadow citizen |
 | Cloudrider's Camp | `s 3 + choose <citizens where role==soldier and gold_cost<=2>` | Gain 3s; prompt: take a soldier citizen worth ≤2g |
 | Wisborg | `manipulate_resources mode=self_convert pay=g:3 gain=v:3 optional=true` | Optionally pay 3g to gain 3vp |
+| Eye of Asteraten | `s 5 + slay` | Gain 5s, then prompt to slay an accessible monster (with normal payment) or pass |
 
 ### Domains — `passive_effect`
 
 | Card | String | Meaning |
 |---|---|---|
-| Jousting Field | `harvest.gain_per_owned_citizen_name Knight g 1` | Harvest phase: gain 1g per Knight owned |
+| Jousting Field | `harvest.gain_per_owned_citizen_name Knight g 1 + harvest.gain_per_owned_starter_name Knight g 1` | Harvest phase: gain 1g per Knight owned (citizens + starters) |
 | Foxgrove Palisade | `roll.set_one_die target=6 cost=g:2` | Roll phase: pay 2g to set a die to 6 |
 | The Desert Orchid | `roll.set_one_die target=1 cost=g_per_owned_role:holy_citizen` | Roll phase: pay 1g per holy citizen to set a die to 1 |
 | Emerald Stronghold | `effect.add action.emeraldstronghold` | Flag: ignore + when buying citizens |
@@ -106,6 +107,34 @@ No equivalent pattern in domains or monsters. Could be expressed as a compound b
 ```
 exchange s 1 g 2    # pay 1s, receive 2g
 ```
+
+### 4b. `slay` — bare verb that opens an immediate may-slay-a-Monster prompt
+
+Used by domain activations (and, by design, future citizen harvest payouts).
+The engine treats a bare `slay` token as: "the controlling player may
+immediately slay one accessible monster, paying its normal strength/magic
+cost." It replaces the older `grant_action slay` mechanic of accruing a
+free-slay action token to spend later.
+
+```
+slay                # bare verb; usually appears as the tail of a compound, e.g. "s 5 + slay"
+```
+
+Resolution differs by phase:
+
+- **Action phase (domain activation):** the prompt opens immediately. Stage 1
+  (`action_required.action = "choose_monster_slay"`) lists every accessible
+  monster top + a Pass button. Stage 2 (`action_required.action =
+  "slay_monster_payment"`) collects the strength/magic payment and slays.
+- **Harvest phase (citizen payout):** the slay opportunity is queued onto
+  `pending_harvest_slays` and drained at the end of the harvest scan, so the
+  slay's reward always resolves *after* every other harvest payout including
+  special payouts (across all players). Each pending slay opens the same
+  two-stage prompt in turn order.
+
+`pending_required_choice.kind = "immediate_slay"` is the discriminator on
+both stages; `resume_kind` (`"domain_activation"` or `"harvest_pending_slay"`)
+tells the engine where to resume after the slay or pass.
 
 ### 4a. `steal` — only exists in citizens
 
@@ -180,6 +209,7 @@ action.end manipulate_resources mode=pay_to_player gain=v:1 pay=m:1 optional=tru
 action.end manipulate_resources mode=take_from_player take=m:1 optional=true        → action.end take_from_player m 1 optional
 
 harvest.gain_per_owned_citizen_name Knight g 1   → no change
+harvest.gain_per_owned_starter_name Knight g 1   → no change (sibling verb; counts starter pool)
 roll.set_one_die target=6 cost=g:2               → no change
 effect.add action.emeraldstronghold              → no change
 ```
