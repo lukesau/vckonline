@@ -189,6 +189,14 @@
         options: expansions.sort().map(v => ({ value: v, label: titleCase(v) })),
       });
     }
+    const implementationGroup = {
+      key: "implementation",
+      label: "Status",
+      options: [
+        { value: "implemented",   label: "Implemented" },
+        { value: "unimplemented", label: "Unimplemented" },
+      ],
+    };
     if (type === "citizens") {
       groups.push({
         key: "role",
@@ -209,11 +217,7 @@
           { value: "off", label: "Off-turn" },
         ],
       });
-      groups.push({
-        key: "unimplemented",
-        label: "Status",
-        options: [{ value: "yes", label: "Unimplemented only" }],
-      });
+      groups.push(implementationGroup);
     } else if (type === "monsters") {
       const areas = unique(cards.map(c => c.area).filter(Boolean)).sort();
       if (areas.length) {
@@ -236,11 +240,7 @@
         label: "Reward",
         options: [{ value: "yes", label: "Has special" }],
       });
-      groups.push({
-        key: "unimplemented",
-        label: "Status",
-        options: [{ value: "yes", label: "Unimplemented only" }],
-      });
+      groups.push(implementationGroup);
     } else if (type === "domains") {
       groups.push({
         key: "effect",
@@ -250,18 +250,16 @@
           { value: "activation", label: "Activation" },
         ],
       });
+      groups.push(implementationGroup);
       groups.push({
         key: "banned",
-        label: "Status",
-        options: [
-          { value: "yes",           label: "Banned only" },
-          { value: "unimplemented", label: "Unimplemented only" },
-        ],
+        label: "Banned",
+        options: [{ value: "yes", label: "Banned only" }],
       });
     } else if (type === "dukes") {
       groups.push({
         key: "banned",
-        label: "Status",
+        label: "Banned",
         options: [{ value: "yes", label: "Banned only" }],
       });
     }
@@ -296,6 +294,8 @@
         if (!hay.includes(q)) return false;
       }
       if (f.expansion && c.expansion !== f.expansion) return false;
+      if (f.implementation === "implemented" && c.is_unimplemented) return false;
+      if (f.implementation === "unimplemented" && !c.is_unimplemented) return false;
       if (type === "citizens") {
         if (f.role) {
           const count = c[`${f.role}_count`] || 0;
@@ -308,19 +308,16 @@
           if (f.has_special === "on" && !on) return false;
           if (f.has_special === "off" && !off) return false;
         }
-        if (f.unimplemented === "yes" && !c.is_unimplemented) return false;
       }
       if (type === "monsters") {
         if (f.area && c.area !== f.area) return false;
         if (f.monster_type && c.monster_type !== f.monster_type) return false;
         if (f.has_special_reward === "yes" && !c.has_special_reward) return false;
-        if (f.unimplemented === "yes" && !c.is_unimplemented) return false;
       }
       if (type === "domains") {
         if (f.effect === "passive" && !c.has_passive_effect) return false;
         if (f.effect === "activation" && !c.has_activation_effect) return false;
         if (f.banned === "yes" && !c.is_banned) return false;
-        if (f.banned === "unimplemented" && !c.is_unimplemented) return false;
       }
       if (type === "dukes") {
         if (f.banned === "yes" && !c.is_banned) return false;

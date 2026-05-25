@@ -45,7 +45,7 @@ If the DB is unreachable, `/api/wiki/cards` returns `503` with a `detail` descri
 
 - Type tabs (Citizens / Monsters / Domains / Dukes / Starters) with row counts.
 - Free-text search across name, expansion, area, monster type, and every effect/text field.
-- Per-type filter chips: expansion, citizen role, monster area/type, domain effect kind, banned-only, unimplemented-only.
+- Per-type filter chips: expansion, citizen role, monster area/type, domain effect kind, banned-only, implementation status (Implemented / Unimplemented).
 - Responsive card grid using `400×570` art from `images/{kind}s/`.
 - Click any card → modal with full art, stats, role badges, raw effect strings, payouts, and (for dukes) the full multiplier matrix.
 - Banned entries render a red `Banned` badge but are still listed.
