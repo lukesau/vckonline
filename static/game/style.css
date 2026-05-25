@@ -693,7 +693,11 @@ html, body {
   min-height: 0;
   max-height: clamp(88px, 100cqh, 900px);
   max-height: 100cqh;
-  overflow: visible;
+  /* hidden, not visible: the fan is sized to fit exactly inside the 1×2 slot,
+     and clipping any sub-pixel slop prevents the slop from propagating into
+     `.card-group-stacks`' scrollHeight and turning the parent into a barely-
+     scrollable container that hijacks mouse-wheel events. */
+  overflow: hidden;
 }
 
 /* One “row” target height = half the tableau strip (50cqh); second row can be added later at same size. */
@@ -942,7 +946,7 @@ html, body {
   align-items: center;
   justify-content: flex-start;
   min-height: 0;
-  overflow: visible;
+  overflow: hidden;
 }
 .tableau-card-fan .tableau-fan-card {
   flex: 0 0 auto;
