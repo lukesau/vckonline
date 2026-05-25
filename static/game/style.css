@@ -2474,6 +2474,29 @@ html, body {
   vertical-align: middle;
 }
 
+.market-stat-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.market-stat-inline-text {
+  color: rgba(255,255,255,0.85);
+  white-space: nowrap;
+}
+
+.market-stat-inline-sep {
+  color: rgba(255,255,255,0.35);
+  user-select: none;
+}
+
 .modal-resource-icon {
   display: block;
   height: 1.15em;
@@ -2513,12 +2536,6 @@ html, body {
   gap: 10px;
 }
 
-.market-action-heading {
-  font-size: 16px;
-  font-weight: 800;
-  color: #fff;
-}
-
 .market-resources-row {
   font-size: 16px;
   font-weight: 600;
@@ -2530,11 +2547,6 @@ html, body {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-}
-
-.market-resources-intro {
-  color: rgba(255,255,255,0.72);
-  margin-right: 2px;
 }
 
 .market-effects-banner {
@@ -2551,29 +2563,6 @@ html, body {
   font-size: 16px;
   font-weight: 700;
   color: var(--str);
-}
-
-.market-cost-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  font-size: 16px;
-  color: rgba(255,255,255,0.75);
-  line-height: 1.45;
-  overflow-wrap: break-word;
-}
-
-.market-afford-ok {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--vp);
-}
-
-.market-afford-bad {
-  font-size: 16px;
-  font-weight: 700;
-  color: rgba(224,80,80,0.95);
 }
 
 .market-pay-fields {

@@ -157,13 +157,6 @@ function cardDetailedRules(card) {
 
   const parts = [];
   pushHarvestHints(parts, card);
-  if (card.monster_id !== undefined && card.monster_id !== null) {
-    const vp = Number(card.vp_reward || 0);
-    const gr = Number(card.gold_reward || 0);
-    const sr = Number(card.strength_reward || 0);
-    const mr = Number(card.magic_reward || 0);
-    parts.push(`Reward: VP ${vp} · G ${gr} · S ${sr} · M ${mr}`);
-  }
 
   const passive = (card.passive_effect ?? '').toString().trim();
   const activation = (card.activation_effect ?? '').toString().trim();
@@ -617,71 +610,12 @@ function mkPayField(label, cls, minV, maxV, value, disabled, title, resourceIcon
   return lab;
 }
 
-function fillMarketCostSummary(costEl, card, ctx, pay) {
-  const stackTail = ` · stack ×${ctx.stackSize}`;
-  if (card.citizen_id != null) {
-    costEl.appendChild(document.createTextNode('Cost: '));
-    costEl.appendChild(makeModalResourceInline('gold', ctx.scaledCost, 'modal-gold', false));
-    if (ctx.dupHint) costEl.appendChild(document.createTextNode(` (${ctx.dupHint})`));
-    if (ctx.emeraldHint) costEl.appendChild(document.createTextNode(` · ${ctx.emeraldHint}`));
-    costEl.appendChild(document.createTextNode(' · suggested pay '));
-    costEl.appendChild(makeModalResourceInline('gold', pay.payGold ?? 0, 'modal-gold', false));
-    if (pay.payMagic) {
-      costEl.appendChild(document.createTextNode(', '));
-      costEl.appendChild(makeModalResourceInline('magic', pay.payMagic ?? 0, 'modal-mag', false));
-    }
-    costEl.appendChild(document.createTextNode(stackTail));
-    return;
-  }
-  if (card.domain_id != null) {
-    costEl.appendChild(document.createTextNode('Cost: '));
-    costEl.appendChild(makeModalResourceInline('gold', ctx.effectiveGold, 'modal-gold', false));
-    if (ctx.pratchettHint) costEl.appendChild(document.createTextNode(` (${ctx.pratchettHint})`));
-    costEl.appendChild(document.createTextNode(' · suggested pay '));
-    costEl.appendChild(makeModalResourceInline('gold', pay.payGold ?? 0, 'modal-gold', false));
-    if (pay.payMagic) {
-      costEl.appendChild(document.createTextNode(', '));
-      costEl.appendChild(makeModalResourceInline('magic', pay.payMagic ?? 0, 'modal-mag', false));
-    }
-    costEl.appendChild(document.createTextNode(stackTail));
-    return;
-  }
-  if (card.monster_id != null) {
-    const sc = Number(ctx.top?.strength_cost || 0);
-    const mm = Number(ctx.top?.magic_cost || 0);
-    costEl.appendChild(document.createTextNode('Cost: '));
-    costEl.appendChild(makeModalResourceInline('strength', sc, 'modal-str', false));
-    costEl.appendChild(document.createTextNode(' + '));
-    costEl.appendChild(makeModalResourceInline('magic', mm, 'modal-mag', false));
-    costEl.appendChild(document.createTextNode(' minimum · suggested pay '));
-    costEl.appendChild(makeModalResourceInline('strength', pay.payStrength ?? 0, 'modal-str', false));
-    costEl.appendChild(document.createTextNode(', '));
-    costEl.appendChild(makeModalResourceInline('magic', pay.payMagic ?? 0, 'modal-mag', false));
-    costEl.appendChild(document.createTextNode(stackTail));
-  }
-}
-
 function appendMarketActionUI(infoEl, card, ctx) {
   const panel = mk('market-action-panel');
-  const actName = ctx.actingPlayer?.name || ctx.reqId || 'Active player';
-
-  const hdr = mk('market-action-heading');
-  if (ctx.standardActionPhase) {
-    hdr.textContent = ctx.isYourTurn
-      ? `Your action (${ctx.actionsRemaining} remaining)`
-      : `${actName}'s turn — ${ctx.actionsRemaining} action(s) remaining`;
-  } else {
-    hdr.textContent = `Phase: ${fmtPhase(ctx.phase)}`;
-  }
-  panel.appendChild(hdr);
 
   if (ctx.actingPlayer) {
     const p = ctx.actingPlayer;
     const resRow = mk('market-resources-row market-resources-row--strip');
-    const intro = document.createElement('span');
-    intro.className = 'market-resources-intro';
-    intro.textContent = `Resources (${actName}):`;
-    resRow.appendChild(intro);
     resRow.appendChild(makeResourceScorePill('gold', p.gold_score, 'Gold', TABLEAU_RESOURCE_ICONS.gold));
     resRow.appendChild(makeResourceScorePill('strength', p.strength_score, 'Strength', TABLEAU_RESOURCE_ICONS.strength));
     resRow.appendChild(makeResourceScorePill('magic', p.magic_score, 'Magic', TABLEAU_RESOURCE_ICONS.magic));
@@ -742,16 +676,6 @@ function appendMarketActionUI(infoEl, card, ctx) {
     payWrap.appendChild(mkPayField('', 'pay-s', 0, Smax, pay.payStrength ?? 0, inputsDisabled, 'Strength payment', 'strength'));
     payWrap.appendChild(mkPayField('', 'pay-m', 0, Mmax, pay.payMagic ?? 0, inputsDisabled, 'Magic payment', 'magic'));
   }
-
-  const costEl = mk('market-cost-summary');
-  fillMarketCostSummary(costEl, card, ctx, pay);
-  panel.appendChild(costEl);
-
-  const affordEl = mk(ctx.evalRes.ok ? 'market-afford-ok' : 'market-afford-bad');
-  affordEl.textContent = ctx.evalRes.ok
-    ? 'Suggested payment fits current resources.'
-    : 'Suggested payment exceeds resources — adjust G/S/M or magic coverage.';
-  panel.appendChild(affordEl);
 
   const fieldsRow = mk('market-pay-fields');
   fieldsRow.appendChild(payWrap);
@@ -835,28 +759,109 @@ function appendMarketActionUI(infoEl, card, ctx) {
   infoEl.appendChild(panel);
 }
 
+/** Inline resource value with an explicit sign prefix (e.g. "-3 × icon" or "+1 × icon"). */
+function makeSignedModalResource(kind, val, cls, prefix) {
+  const wrap = document.createElement('span');
+  wrap.className = cls
+    ? `modal-stat-value ${cls} modal-resource-inline`
+    : 'modal-stat-value modal-resource-inline';
+  if (prefix) wrap.appendChild(document.createTextNode(prefix));
+  wrap.appendChild(document.createTextNode(String(val)));
+  wrap.appendChild(document.createTextNode(' \u00D7 '));
+  const img = document.createElement('img');
+  img.className = 'modal-resource-icon';
+  img.alt = '';
+  const iconKey = kind === 'vp' ? 'victory' : kind;
+  img.src = TABLEAU_RESOURCE_ICONS[iconKey];
+  const names = { gold: 'Gold', strength: 'Strength', magic: 'Magic', vp: 'Victory Points' };
+  const tip = `${prefix}${val} ${names[kind] || ''}`.trim();
+  wrap.title = tip;
+  wrap.setAttribute('aria-label', tip);
+  wrap.appendChild(img);
+  return wrap;
+}
+
+function appendMarketCompactStatLine(infoEl, card) {
+  const row = mk('market-stat-inline');
+
+  const items = [];
+
+  let typeLabel = null;
+  if (card.monster_id != null) typeLabel = 'Monster';
+  else if (card.citizen_id != null) typeLabel = 'Citizen';
+  else if (card.domain_id != null) typeLabel = 'Domain';
+  else if (card.duke_id != null) typeLabel = 'Duke';
+  else if (card.starter_id != null) typeLabel = 'Starter';
+  if (typeLabel) {
+    const el = document.createElement('span');
+    el.className = 'market-stat-inline-text';
+    el.textContent = typeLabel;
+    items.push(el);
+  }
+
+  if (card.gold_cost)     items.push(makeSignedModalResource('gold', card.gold_cost, 'modal-gold', '-'));
+  if (card.strength_cost) items.push(makeSignedModalResource('strength', card.strength_cost, 'modal-str', '-'));
+  if (card.magic_cost)    items.push(makeSignedModalResource('magic', card.magic_cost, 'modal-mag', '-'));
+
+  if (card.vp_reward)       items.push(makeSignedModalResource('vp', card.vp_reward, 'modal-vp', '+'));
+  if (card.gold_reward)     items.push(makeSignedModalResource('gold', card.gold_reward, 'modal-gold', '+'));
+  if (card.strength_reward) items.push(makeSignedModalResource('strength', card.strength_reward, 'modal-str', '+'));
+  if (card.magic_reward)    items.push(makeSignedModalResource('magic', card.magic_reward, 'modal-mag', '+'));
+
+  if (card.domain_id != null) {
+    const req = [];
+    if (card.shadow_count)  req.push(`${card.shadow_count} Shadow`);
+    if (card.holy_count)    req.push(`${card.holy_count} Holy`);
+    if (card.soldier_count) req.push(`${card.soldier_count} Soldier`);
+    if (card.worker_count)  req.push(`${card.worker_count} Worker`);
+    if (req.length) {
+      const el = document.createElement('span');
+      el.className = 'market-stat-inline-text';
+      el.textContent = `Requires ${req.join(', ')}`;
+      items.push(el);
+    }
+  }
+
+  if (card.citizen_id != null || card.domain_id != null) {
+    const rc = citizenRoleCounts(card);
+    const rp = [];
+    if (rc.sn > 0)  rp.push(`Shadow +${rc.sn}`);
+    if (rc.hn > 0)  rp.push(`Holy +${rc.hn}`);
+    if (rc.son > 0) rp.push(`Soldier +${rc.son}`);
+    if (rc.wn > 0)  rp.push(`Worker +${rc.wn}`);
+    if (rp.length) {
+      const el = document.createElement('span');
+      el.className = 'market-stat-inline-text';
+      el.textContent = rp.join(' · ');
+      items.push(el);
+    }
+  }
+
+  if (card.is_flipped) {
+    const el = document.createElement('span');
+    el.className = 'market-stat-inline-text';
+    el.textContent = 'Flipped';
+    items.push(el);
+  }
+
+  if (!items.length) return;
+
+  items.forEach((el, i) => {
+    if (i > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'market-stat-inline-sep';
+      sep.textContent = '\u00B7';
+      row.appendChild(sep);
+    }
+    row.appendChild(el);
+  });
+
+  infoEl.appendChild(row);
+}
+
 /** Stats, roles, text, and detailed rules for a face-up market card (domain / citizen / monster). */
 function appendMarketFaceUpInspectBody(infoEl, card) {
-  appendCardModalStatRows(infoEl, card);
-
-  const rc = citizenRoleCounts(card);
-  const rp = [];
-  if (rc.sn > 0) rp.push(`Shadow +${rc.sn}`);
-  if (rc.hn > 0) rp.push(`Holy +${rc.hn}`);
-  if (rc.son > 0) rp.push(`Soldier +${rc.son}`);
-  if (rc.wn > 0) rp.push(`Worker +${rc.wn}`);
-  if (rp.length && (card.citizen_id != null || card.domain_id != null)) {
-    const row = mk('modal-stat-row');
-    const l = document.createElement('span');
-    l.className = 'modal-stat-label';
-    l.textContent = 'Roles';
-    const v = document.createElement('span');
-    v.className = 'modal-stat-value';
-    v.textContent = rp.join(' · ');
-    row.appendChild(l);
-    row.appendChild(v);
-    infoEl.appendChild(row);
-  }
+  appendMarketCompactStatLine(infoEl, card);
 
   if (card.text) {
     const t = document.createElement('p');
