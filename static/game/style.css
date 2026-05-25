@@ -2522,6 +2522,20 @@ html, body {
   width: 100%;
 }
 
+/* Keyboard-open mode: collapse non-essential modal chrome so the payment fields
+   stay visible above the on-screen keyboard. Toggled by JS based on the visual
+   viewport shrinking when the soft keyboard opens. */
+body.is-virtual-keyboard-open .card-modal--market .card-modal-img,
+body.is-virtual-keyboard-open .card-modal--board-stack .card-modal-stack-img-host {
+  display: none;
+}
+
+body.is-virtual-keyboard-open .card-modal {
+  gap: 12px;
+  padding: 16px;
+  max-height: 100dvh;
+}
+
 .market-rules-extra {
   border-top-color: rgba(255,255,255,0.06);
 }

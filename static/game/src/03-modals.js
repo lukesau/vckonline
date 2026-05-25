@@ -867,6 +867,61 @@ function confirmAndPostGameAction(body, ui, afterSuccess) {
   });
 }
 
+/**
+ * Detect on-screen keyboard presence by comparing the visual viewport (which shrinks
+ * when the soft keyboard opens on iOS / Android) to the layout viewport. Toggles
+ * `body.is-virtual-keyboard-open` so CSS can collapse non-essential modal chrome
+ * (e.g. the large card image) and the focused input stays in view above the keyboard.
+ * Also nudges the active input into the visible area after focus so number entry
+ * doesn't disappear behind the keyboard.
+ */
+function initVirtualKeyboardWatcher() {
+  const KB_THRESHOLD_PX = 150;
+
+  function setKbOpen(open) {
+    document.body.classList.toggle('is-virtual-keyboard-open', !!open);
+  }
+
+  function scrollFocusedInputIntoView() {
+    const el = document.activeElement;
+    if (!el) return;
+    const tag = el.tagName;
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA') return;
+    try {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } catch (_) {
+      try { el.scrollIntoView(); } catch (_) { /* ignore */ }
+    }
+  }
+
+  const vv = window.visualViewport;
+  if (vv) {
+    const recheck = () => {
+      const layoutH = window.innerHeight || vv.height;
+      const open = (layoutH - vv.height) > KB_THRESHOLD_PX;
+      setKbOpen(open);
+      if (open) requestAnimationFrame(scrollFocusedInputIntoView);
+    };
+    vv.addEventListener('resize', recheck);
+    vv.addEventListener('scroll', recheck);
+    recheck();
+  }
+
+  document.addEventListener('focusin', e => {
+    const t = e.target;
+    if (!t || (t.tagName !== 'INPUT' && t.tagName !== 'TEXTAREA')) return;
+    // Wait for the keyboard animation + viewport resize before deciding so the
+    // kb-open class reflects whether the soft keyboard actually appeared. On
+    // desktop the class stays off and we skip the scroll, avoiding stray jumps.
+    setTimeout(() => {
+      if (document.activeElement !== t) return;
+      if (!document.body.classList.contains('is-virtual-keyboard-open')) return;
+      try { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+      catch (_) { /* ignore */ }
+    }, 280);
+  });
+}
+
 function initActionConfirmModal() {
   const backdrop = document.getElementById('action-confirm-modal');
   const ok = document.getElementById('action-confirm-ok');

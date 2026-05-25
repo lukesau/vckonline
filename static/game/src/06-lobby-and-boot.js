@@ -724,6 +724,8 @@ function initLobbyModal() {
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────
+initVirtualKeyboardWatcher();
+
 if (!GAME_ID || !PLAYER_ID) {
   initLobbyModal();
 } else {
