@@ -228,6 +228,7 @@ def _load_events(cur):
             "special_reward_text":     row["special_reward_text"],
             "activation_effect_text":  row["activation_effect_text"],
             "passive_effect_text":     row["passive_effect_text"],
+            "expansion":               row["expansion"],
         }
         entry["is_unimplemented"] = _is_unimplemented_event(row)
         out.append(entry)
