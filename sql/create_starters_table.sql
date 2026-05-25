@@ -13,6 +13,7 @@ CREATE TABLE vckonline.starters (
 	has_special_payout_off_turn tinyint(4) DEFAULT 0 NOT NULL,
 	special_payout_on_turn mediumtext CHARACTER SET latin1 COLLATE latin1_swedish_ci DEFAULT NULL NULL,
 	special_payout_off_turn mediumtext CHARACTER SET latin1 COLLATE latin1_swedish_ci DEFAULT NULL NULL,
+	activation_trigger varchar(64) CHARACTER SET latin1 COLLATE latin1_swedish_ci DEFAULT '' NOT NULL,
     PRIMARY KEY (idstarters)
 )
 ENGINE=InnoDB

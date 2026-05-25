@@ -165,6 +165,7 @@ def _load_starters(cur):
             row["special_payout_on_turn"],
             row["special_payout_off_turn"],
             row["expansion"],
+            row.get("activation_trigger", "") or "",
         )
         out.append(s.to_dict())
     return out

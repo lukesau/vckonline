@@ -693,8 +693,7 @@ html, body {
   min-height: 0;
   max-height: clamp(88px, 100cqh, 900px);
   max-height: 100cqh;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: visible;
 }
 
 /* One “row” target height = half the tableau strip (50cqh); second row can be added later at same size. */
@@ -724,17 +723,6 @@ html, body {
   flex-shrink: 0;
   align-self: center;
   justify-content: center;
-}
-
-.seat-carousel .tableau-stack-top > .card.card-has-image {
-  flex: 0 0 auto;
-  box-sizing: border-box;
-  height: clamp(56px, 22vmin, 160px);
-  height: 50cqh;
-  min-height: 52px;
-  width: auto;
-  aspect-ratio: 108 / 158;
-  align-self: center;
 }
 
 .seat-carousel .grid-stack.tableau-card-stack {
@@ -942,40 +930,25 @@ html, body {
   pointer-events: none;
 }
 
-/* Ordered tableau stacks (e.g. slain monsters — newest on top, slivers beneath) */
+/* Ordered tableau stacks (e.g. slain monsters): cards are fanned vertically so
+   each card after the first overlaps the previous one. The overlap distance is
+   set via --fan-overlap by JS so the whole pile always fits the 1×2 (100cqh)
+   slot. z-index is set per-card in JS so newer cards (later in the array) sit
+   on top of older ones in the overlap region. */
 .grid-stack.tableau-card-stack {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  min-height: 0;
-}
-.tableau-stack-foundation {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 0 3px 1px;
-  pointer-events: none;
-}
-.tableau-stack-sliver {
-  height: 5px;
-  border-radius: 3px;
-  border: 1px dashed rgba(255, 255, 255, 0.28);
-  box-sizing: border-box;
-  margin: 0 6px;
-  opacity: 0.92;
-}
-.tableau-stack-top {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
   position: relative;
-  z-index: 2;
-}
-.tableau-stack-top > .card {
-  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
   min-height: 0;
+  overflow: visible;
+}
+.tableau-card-fan .tableau-fan-card {
+  flex: 0 0 auto;
+}
+.tableau-card-fan .tableau-fan-card:not(:first-child) {
+  margin-top: calc(-1 * var(--fan-overlap, 0px));
 }
 
 .center-board .card-slot-empty {

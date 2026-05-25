@@ -33,7 +33,7 @@ class Starter(Card):
     def __init__(self, starter_id, name, roll_match1, roll_match2, gold_payout_on_turn, gold_payout_off_turn,
                  strength_payout_on_turn, strength_payout_off_turn, magic_payout_on_turn, magic_payout_off_turn,
                  has_special_payout_on_turn, has_special_payout_off_turn, special_payout_on_turn,
-                 special_payout_off_turn, expansion):
+                 special_payout_off_turn, expansion, activation_trigger=""):
         super().__init__()
         self.starter_id = starter_id
         self.name = name
@@ -50,6 +50,9 @@ class Starter(Card):
         self.special_payout_on_turn = special_payout_on_turn
         self.special_payout_off_turn = special_payout_off_turn
         self.expansion = expansion
+        # Non-dice activation gate. Empty string -> use roll_match. Substrings
+        # "doubles" and "no_payout" are recognized by the harvest engine.
+        self.activation_trigger = activation_trigger or ""
 
     def to_dict(self):
         return {
@@ -67,7 +70,8 @@ class Starter(Card):
             "has_special_payout_off_turn": self.has_special_payout_off_turn,
             "special_payout_on_turn": self.special_payout_on_turn,
             "special_payout_off_turn": self.special_payout_off_turn,
-            "expansion": self.expansion
+            "expansion": self.expansion,
+            "activation_trigger": self.activation_trigger,
         }
 
     @classmethod
@@ -77,7 +81,8 @@ class Starter(Card):
                    data["strength_payout_off_turn"], data["magic_payout_on_turn"], data["magic_payout_off_turn"],
                    data["has_special_payout_on_turn"], data["has_special_payout_off_turn"],
                    data["special_payout_on_turn"],
-                   data["special_payout_off_turn"], data["expansion"])
+                   data["special_payout_off_turn"], data["expansion"],
+                   data.get("activation_trigger", ""))
 
 
 class Citizen(Card):

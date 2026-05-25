@@ -11,7 +11,8 @@ INSERT INTO `vckonline`.`starters`
 `has_special_payout_on_turn`,
 `has_special_payout_off_turn`,
 `special_payout_on_turn`,
-`special_payout_off_turn`)
+`special_payout_off_turn`,
+`activation_trigger`)
 VALUES
 ('Peasant',/*name*/
 5,/*roll_match1*/
@@ -25,4 +26,5 @@ VALUES
 0,/*has_special_payout_on_turn*/
 0,/*has_special_payout_off_turn*/
 0,/*special_payout_on_turn*/
-0/*special_payout_off_turn*/);
+0,/*special_payout_off_turn*/
+''/*activation_trigger*/);

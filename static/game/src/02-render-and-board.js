@@ -52,17 +52,19 @@ function layoutSlotAssignment(state) {
   return { n, layoutKey: 'p5', me, top: [opp[1], opp[2]], left: opp[3], right: opp[0] };
 }
 
-// ── Tableau sections (domains first … dukes last) ─────────────────────────
+// ── Tableau sections (domains first … starters last) ─────────────────────
 function tableauGroupsForPlayer(player) {
   const defs = [
-    ['Domains', 'owned_domains'],
-    ['Citizens', 'owned_citizens'],
-    ['Monsters', 'owned_monsters'],
-    ['Starters', 'owned_starters'],
-    ['Dukes', 'owned_dukes'],
+    ['Domains', ['owned_domains']],
+    ['Citizens', ['owned_citizens']],
+    ['Monsters', ['owned_monsters']],
+    ['Starters', ['owned_starters', 'owned_dukes']],
   ];
   return defs
-    .map(([label, key]) => ({ label, cards: player[key] || [] }))
+    .map(([label, keys]) => ({
+      label,
+      cards: keys.reduce((acc, k) => acc.concat(player[k] || []), []),
+    }))
     .filter(g => g.cards.length > 0);
 }
 
@@ -159,11 +161,7 @@ function renderSeatEl(player, state, variant) {
       );
     } else if (g.label === 'Monsters') {
       const monsters = Array.isArray(g.cards) ? g.cards : [];
-      if (monsters.length > 1) {
-        stacksWrap.appendChild(makeTableauOrderedStack(monsters, cardMode));
-      } else {
-        monsters.forEach(c => stacksWrap.appendChild(makeTableauStack(c, 1, cardMode)));
-      }
+      stacksWrap.appendChild(makeTableauMonsterFan(monsters, cardMode));
     } else {
       g.cards.forEach(c => stacksWrap.appendChild(makeTableauStack(c, 1, cardMode)));
     }
@@ -889,34 +887,50 @@ function makeTableauStack(card, count, mode) {
 }
 
 /**
- * Ordered tableau stack: index 0 is oldest, last index is newest (top).
- * Reusable for any ordered pile where the viewer taps the stack and pages through in a modal.
+ * Vertical fan of cards used for slain-monster piles in the tableau.
+ *
+ * Cards are appended in input order, so index 0 sits at the top of the slot
+ * and the highest index sits at the bottom. Per-card z-index makes later
+ * (newer) cards paint on top of earlier (older) ones in their overlap region,
+ * so the newest slain monster is fully visible at the bottom and older
+ * monsters show only their top edges above it.
+ *
+ *   N == 1   → render a single normal-height card (one row, like a citizen).
+ *   N == 2   → two full cards stacked top-to-bottom with no overlap, filling
+ *              the 1×2 slot.
+ *   N >= 3   → cards begin to overlap vertically. The whole fan still fits in
+ *              the 1×2 (100cqh) slot, so as more cards are added each older
+ *              card shows a smaller sliver above the one below it.
+ *
+ * Stays compatible with the shared stack-inspect click handler via the
+ * `tableau-card-stack[data-stack]` selector; each child card carries its
+ * index on `data-stack-index` so clicking a partially-visible card opens the
+ * inspect modal on that card.
  */
-function makeTableauOrderedStack(cards, mode) {
+function makeTableauMonsterFan(cards, mode) {
   const arr = Array.isArray(cards) ? cards.filter(Boolean) : [];
   if (arr.length === 0) return mk('grid-stack');
   if (arr.length === 1) return makeTableauStack(arr[0], 1, mode);
 
-  const wrap = mk('grid-stack tableau-card-stack');
+  const wrap = mk('grid-stack tableau-card-stack tableau-card-fan');
   wrap.dataset.stack = JSON.stringify(arr);
 
-  const foundation = mk('tableau-stack-foundation');
-  const maxSlivers = 8;
-  const under = Math.min(arr.length - 1, maxSlivers);
-  for (let i = 0; i < under; i++) {
-    foundation.appendChild(mk('tableau-stack-sliver'));
-  }
-  wrap.appendChild(foundation);
+  // Step between consecutive card top edges, expressed in cqh of the carousel
+  // tableau container. Card height is 50cqh; the slot height is 100cqh. To fit
+  // every card we need (N-1)*step + 50cqh = 100cqh → step = 50/(N-1) cqh.
+  // The negative top margin each non-first card uses is then `cardHeight - step`,
+  // i.e. how much the next card overlaps the previous one.
+  const stepCqh = 50 / (arr.length - 1);
+  const overlapCqh = 50 - stepCqh;
+  wrap.style.setProperty('--fan-overlap', `${overlapCqh}cqh`);
 
-  const topWrap = mk('tableau-stack-top');
-  topWrap.appendChild(makeCard(arr[arr.length - 1], mode));
-  wrap.appendChild(topWrap);
-
-  if (arr.length > maxSlivers + 1) {
-    const badge = mk('stack-depth');
-    badge.textContent = `×${arr.length}`;
-    wrap.appendChild(badge);
-  }
+  arr.forEach((card, i) => {
+    const cardEl = makeCard(card, mode);
+    cardEl.classList.add('tableau-fan-card');
+    cardEl.dataset.stackIndex = String(i);
+    cardEl.style.zIndex = String(i + 1);
+    wrap.appendChild(cardEl);
+  });
   return wrap;
 }
 

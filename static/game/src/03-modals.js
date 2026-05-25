@@ -738,7 +738,15 @@ document.addEventListener('click', e => {
       arr = null;
     }
     if (Array.isArray(arr) && arr.length > 1) {
-      openCardStackInspectModal(arr, arr.length - 1);
+      // Honor the clicked card's stack index so tapping a partially-visible
+      // older card in the monster fan opens the inspector on that card.
+      let startIdx = arr.length - 1;
+      const rawIdx = cardEl.dataset.stackIndex;
+      if (rawIdx != null && rawIdx !== '') {
+        const n = Number(rawIdx);
+        if (Number.isFinite(n) && n >= 0 && n < arr.length) startIdx = n;
+      }
+      openCardStackInspectModal(arr, startIdx);
       return;
     }
   }

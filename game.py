@@ -1161,6 +1161,15 @@ class Game:
         slots = []
         for idx, st in enumerate(getattr(player, "owned_starters", []) or []):
             ok, n = self._roll_match_count(st)
+            # `activation_trigger` lets a starter fire on non-dice conditions
+            # (e.g. doubles, end-of-harvest "no payout"). `doubles` is the only
+            # leg evaluable in-band; `no_payout` is handled in
+            # `_harvest_complete_finalize` because it depends on the final
+            # harvest_delta after every other card has resolved.
+            if not ok:
+                trig = (getattr(st, "activation_trigger", "") or "").lower()
+                if "doubles" in trig and self.die_one == self.die_two and self.die_one != 0:
+                    ok, n = True, 1
             if not ok:
                 continue
             sid = int(getattr(st, "starter_id", -1))
@@ -1264,11 +1273,62 @@ class Game:
             if int(d.get("gold", 0)) == 0 and int(d.get("strength", 0)) == 0 and int(d.get("magic", 0)) == 0:
                 self.pending_harvest_choices.append(p.player_id)
         if self.pending_harvest_choices:
-            self.action_required["id"] = self.pending_harvest_choices[0]
-            self.action_required["action"] = "bonus_resource_choice"
+            self._activate_finalize_bonus_for(self.pending_harvest_choices[0])
         else:
             self.action_required["id"] = self.game_id
             self.action_required["action"] = ""
+
+    def _find_owned_starter_with_trigger(self, player, trigger_substr):
+        """Return the first non-flipped owned starter whose activation_trigger
+        contains `trigger_substr` (case-insensitive), else None."""
+        for st in getattr(player, "owned_starters", []) or []:
+            if getattr(st, "is_flipped", False):
+                continue
+            trig = (getattr(st, "activation_trigger", "") or "").lower()
+            if trigger_substr in trig:
+                return st
+        return None
+
+    def _activate_finalize_bonus_for(self, player_id):
+        """Open the end-of-harvest bonus prompt for `player_id`.
+
+        If the player owns a starter with a `no_payout` activation trigger
+        (Herald), fire it via the normal harvest activation pipeline (which
+        opens its `choose g 1 s 1 m 1` prompt). Otherwise fall back to the
+        legacy hard-coded `bonus_resource_choice` action so players without
+        Herald still get the missed-harvest consolation.
+        """
+        player = self._player_by_id(player_id)
+        if not player:
+            if self.pending_harvest_choices and self.pending_harvest_choices[0] == player_id:
+                self.pending_harvest_choices.pop(0)
+            if self.pending_harvest_choices:
+                self._activate_finalize_bonus_for(self.pending_harvest_choices[0])
+            else:
+                self.action_required["id"] = self.game_id
+                self.action_required["action"] = ""
+            return
+        starter = self._find_owned_starter_with_trigger(player, "no_payout")
+        if starter is not None:
+            on_turn = player_id == self.current_player_id()
+            self._apply_harvest_activation(player, starter, "starter", on_turn)
+            # Activation normally opens a `choose ...` prompt; if it didn't (e.g.
+            # malformed special_payout), advance the queue so we don't stall.
+            aa = (self.action_required.get("action") or "").strip()
+            aid = self.action_required.get("id")
+            if aid == player_id and aa:
+                return
+            if self.pending_harvest_choices and self.pending_harvest_choices[0] == player_id:
+                self.pending_harvest_choices.pop(0)
+            if self.pending_harvest_choices:
+                self._activate_finalize_bonus_for(self.pending_harvest_choices[0])
+            else:
+                self.action_required["id"] = self.game_id
+                self.action_required["action"] = ""
+            return
+        # Legacy fallback: hard-coded bonus_resource_choice prompt.
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "bonus_resource_choice"
 
     def _harvest_run_automation_until_blocked(self):
         # Steal pre-phase: all steal effects across all players fire first, in harvest
@@ -3680,13 +3740,11 @@ class Game:
                     f"scores {before} -> {after}"
                 )
 
-                # Pop current pending player and either queue the next, or clear blocking.
-                if getattr(self, "pending_harvest_choices", None):
-                    if self.pending_harvest_choices and self.pending_harvest_choices[0] == player_id:
-                        self.pending_harvest_choices.pop(0)
-                if getattr(self, "pending_harvest_choices", None) and self.pending_harvest_choices:
-                    self.action_required["id"] = self.pending_harvest_choices[0]
-                    self.action_required["action"] = "bonus_resource_choice"
+                # Pop current pending player and either fire the next bonus, or clear blocking.
+                if self.pending_harvest_choices and self.pending_harvest_choices[0] == player_id:
+                    self.pending_harvest_choices.pop(0)
+                if self.pending_harvest_choices:
+                    self._activate_finalize_bonus_for(self.pending_harvest_choices[0])
                     return
 
                 self.action_required['action'] = ""
@@ -4413,6 +4471,20 @@ class Game:
                 if getattr(self, "pending_required_choice", None):
                     self.pending_required_choice = None
                 self._resume_payout_continuation()
+                # If we're in the post-finalize bonus-drain phase (Herald-style
+                # `no_payout` activations open a regular `choose` prompt here),
+                # pop this player and fire the next pending bonus.
+                if (
+                    self.phase == "harvest"
+                    and getattr(self, "harvest_processed", False)
+                    and (self.action_required.get("action") or "") == ""
+                    and self.pending_harvest_choices
+                    and self.pending_harvest_choices[0] == player_id
+                ):
+                    self.pending_harvest_choices.pop(0)
+                    if self.pending_harvest_choices:
+                        self._activate_finalize_bonus_for(self.pending_harvest_choices[0])
+                        return
                 self._maybe_resume_harvest_prompt()
                 return
 

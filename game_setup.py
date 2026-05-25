@@ -214,6 +214,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
                 row["special_payout_on_turn"],
                 row["special_payout_off_turn"],
                 row["expansion"],
+                row.get("activation_trigger", "") or "",
             )
             starter_stack.append(my_starter)
         my_cursor.close()
