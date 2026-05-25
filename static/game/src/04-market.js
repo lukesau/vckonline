@@ -581,7 +581,7 @@ function readMarketPayRow(row) {
   return { gold: g, strength: s, magic: m };
 }
 
-function mkPayField(label, cls, minV, maxV, value, disabled, title, resourceIconKey) {
+function mkPayField(label, cls, minV, maxV, value, disabled, title, resourceIconKey, currentValue) {
   const lab = document.createElement('label');
   lab.className = 'market-pay-field';
   if (title) lab.title = title;
@@ -589,6 +589,9 @@ function mkPayField(label, cls, minV, maxV, value, disabled, title, resourceIcon
   span.className = 'market-pay-field-label';
   if (resourceIconKey && TABLEAU_RESOURCE_ICONS[resourceIconKey]) {
     span.classList.add(`market-pay-field-label--${resourceIconKey}`);
+    if (currentValue !== undefined && currentValue !== null) {
+      span.appendChild(document.createTextNode(`${currentValue} \u00D7 `));
+    }
     const img = document.createElement('img');
     img.className = 'market-pay-label-icon';
     img.src = TABLEAU_RESOURCE_ICONS[resourceIconKey];
@@ -612,16 +615,6 @@ function mkPayField(label, cls, minV, maxV, value, disabled, title, resourceIcon
 
 function appendMarketActionUI(infoEl, card, ctx) {
   const panel = mk('market-action-panel');
-
-  if (ctx.actingPlayer) {
-    const p = ctx.actingPlayer;
-    const resRow = mk('market-resources-row market-resources-row--strip');
-    resRow.appendChild(makeResourceScorePill('gold', p.gold_score, 'Gold', TABLEAU_RESOURCE_ICONS.gold));
-    resRow.appendChild(makeResourceScorePill('strength', p.strength_score, 'Strength', TABLEAU_RESOURCE_ICONS.strength));
-    resRow.appendChild(makeResourceScorePill('magic', p.magic_score, 'Magic', TABLEAU_RESOURCE_ICONS.magic));
-    resRow.appendChild(makeVpScorePill(p.victory_score));
-    panel.appendChild(resRow);
-  }
 
   const fx = [];
   if (ctx.emeraldActive) fx.push('Emerald Stronghold: ignore citizen duplicate surcharge');
@@ -660,21 +653,21 @@ function appendMarketActionUI(infoEl, card, ctx) {
   if (card.citizen_id != null) {
     primaryLabel = 'Hire citizen';
     payWrap.dataset.citizenId = String(card.citizen_id);
-    payWrap.appendChild(mkPayField('', 'pay-g', 0, Gmax, pay.payGold ?? 0, inputsDisabled, 'Gold payment', 'gold'));
-    payWrap.appendChild(mkPayField('', 'pay-s', 0, 0, 0, true, 'Citizens use gold and magic', 'strength'));
-    payWrap.appendChild(mkPayField('', 'pay-m', 0, Mmax, pay.payMagic ?? 0, inputsDisabled, 'Magic payment', 'magic'));
+    payWrap.appendChild(mkPayField('', 'pay-g', 0, Gmax, pay.payGold ?? 0, inputsDisabled, 'Gold payment', 'gold', Gmax));
+    payWrap.appendChild(mkPayField('', 'pay-s', 0, 0, 0, true, 'Citizens use gold and magic', 'strength', Smax));
+    payWrap.appendChild(mkPayField('', 'pay-m', 0, Mmax, pay.payMagic ?? 0, inputsDisabled, 'Magic payment', 'magic', Mmax));
   } else if (card.domain_id != null) {
     primaryLabel = 'Build domain';
     payWrap.dataset.domainId = String(card.domain_id);
-    payWrap.appendChild(mkPayField('', 'pay-g', 0, Gmax, pay.payGold ?? 0, inputsDisabled, 'Gold payment', 'gold'));
-    payWrap.appendChild(mkPayField('', 'pay-s', 0, 0, 0, true, 'Domains use gold and magic', 'strength'));
-    payWrap.appendChild(mkPayField('', 'pay-m', 0, Mmax, pay.payMagic ?? 0, inputsDisabled, 'Magic payment', 'magic'));
+    payWrap.appendChild(mkPayField('', 'pay-g', 0, Gmax, pay.payGold ?? 0, inputsDisabled, 'Gold payment', 'gold', Gmax));
+    payWrap.appendChild(mkPayField('', 'pay-s', 0, 0, 0, true, 'Domains use gold and magic', 'strength', Smax));
+    payWrap.appendChild(mkPayField('', 'pay-m', 0, Mmax, pay.payMagic ?? 0, inputsDisabled, 'Magic payment', 'magic', Mmax));
   } else if (card.monster_id != null) {
     primaryLabel = 'Slay monster';
     payWrap.dataset.monsterId = String(card.monster_id);
-    payWrap.appendChild(mkPayField('', 'pay-g', 0, 0, 0, true, 'Monsters use strength and magic', 'gold'));
-    payWrap.appendChild(mkPayField('', 'pay-s', 0, Smax, pay.payStrength ?? 0, inputsDisabled, 'Strength payment', 'strength'));
-    payWrap.appendChild(mkPayField('', 'pay-m', 0, Mmax, pay.payMagic ?? 0, inputsDisabled, 'Magic payment', 'magic'));
+    payWrap.appendChild(mkPayField('', 'pay-g', 0, 0, 0, true, 'Monsters use strength and magic', 'gold', Gmax));
+    payWrap.appendChild(mkPayField('', 'pay-s', 0, Smax, pay.payStrength ?? 0, inputsDisabled, 'Strength payment', 'strength', Smax));
+    payWrap.appendChild(mkPayField('', 'pay-m', 0, Mmax, pay.payMagic ?? 0, inputsDisabled, 'Magic payment', 'magic', Mmax));
   }
 
   const fieldsRow = mk('market-pay-fields');
