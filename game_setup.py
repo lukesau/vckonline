@@ -18,7 +18,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
     duke_query = "select_random_dukes"
     duke_stack = []
     exhausted_stack = [Exhausted(i) for i in range(len(player_list_from_lobby) * 2)]
-    starter_query = "SELECT * FROM starters"
+    starter_query = "SELECT * FROM starters ORDER BY id_starters"
     starter_stack = []
     player_list = []
     citizen_grid: List[List[Citizen]] = [[] for _ in range(10)]
@@ -234,10 +234,12 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
             player_list.append(my_player)
         random.shuffle(player_list)
         player_list[0].is_first = True
-        # give players starters and dukes
+        # give players starters and dukes. Every player gets one of every
+        # starter; the stack is a shared template (instances aren't mutated
+        # per-player).
         for player in player_list:
-            player.owned_starters.append(starter_stack[0])
-            player.owned_starters.append(starter_stack[1])
+            for starter in starter_stack:
+                player.owned_starters.append(starter)
             for _ in range(2):
                 player.owned_dukes.append(duke_stack.pop())
         # deal monsters onto the board.
