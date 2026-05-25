@@ -144,9 +144,11 @@ html, body {
   display: flex;
   flex-direction: column;
   /* Horizontal inset lives here, not on the scroll viewport: padding on an overflow-x flex
-     scroller breaks % slide widths + scroll snap in WebKit (flush first slide, next slide peeks). */
-  padding-left: max(12px, env(safe-area-inset-left, 12px));
-  padding-right: max(12px, env(safe-area-inset-right, 12px));
+     scroller breaks % slide widths + scroll snap in WebKit (flush first slide, next slide peeks).
+     Match the 8px horizontal padding used by .gl-mid / .gl-top so the tableau aligns with the
+     rest of the board. */
+  padding-left: max(8px, env(safe-area-inset-left, 8px));
+  padding-right: max(8px, env(safe-area-inset-right, 8px));
 }
 
 .tableau-carousel-viewport {
@@ -230,7 +232,7 @@ html, body {
   min-width: 0;
   align-self: stretch;
   box-sizing: border-box;
-  padding: 0 10px;
+  padding: 0;
   scroll-snap-align: start;
   scroll-snap-stop: always;
   overflow-x: hidden;
