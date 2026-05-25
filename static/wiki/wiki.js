@@ -6,13 +6,14 @@
 (() => {
   "use strict";
 
-  const TYPE_ORDER = ["citizens", "monsters", "domains", "dukes", "starters"];
+  const TYPE_ORDER = ["citizens", "monsters", "domains", "dukes", "starters", "events"];
   const TYPE_LABELS = {
     citizens: "Citizens",
     monsters: "Monsters",
     domains:  "Domains",
     dukes:    "Dukes",
     starters: "Starters",
+    events:   "Events",
   };
   // The card-image endpoint expects the *singular* type name.
   const TYPE_TO_IMAGE_KIND = {
@@ -21,6 +22,7 @@
     domains:  "domain",
     dukes:    "duke",
     starters: "starter",
+    events:   "event",
   };
   const TYPE_TO_ID_FIELD = {
     citizens: "citizen_id",
@@ -28,6 +30,7 @@
     domains:  "domain_id",
     dukes:    "duke_id",
     starters: "starter_id",
+    events:   "id_events",
   };
 
   const state = {
@@ -262,6 +265,23 @@
         label: "Banned",
         options: [{ value: "yes", label: "Banned only" }],
       });
+    } else if (type === "events") {
+      groups.push({
+        key: "effect",
+        label: "Has effect",
+        options: [
+          { value: "roll",       label: "Roll" },
+          { value: "activation", label: "Activation" },
+          { value: "passive",    label: "Passive" },
+          { value: "reward",     label: "Special reward" },
+        ],
+      });
+      groups.push({
+        key: "is_monster",
+        label: "Monster",
+        options: [{ value: "yes", label: "Is monster" }],
+      });
+      groups.push(implementationGroup);
     }
     return groups;
   }
@@ -289,7 +309,8 @@
           c.special_cost,
           c.passive_effect,
           c.activation_effect,
-          c.text,
+          c.roll_effect,
+          c.effect_text,
         ].filter(Boolean).join(" ").toLowerCase();
         if (!hay.includes(q)) return false;
       }
@@ -321,6 +342,13 @@
       }
       if (type === "dukes") {
         if (f.banned === "yes" && !c.is_banned) return false;
+      }
+      if (type === "events") {
+        if (f.effect === "roll"       && !c.has_roll_effect)        return false;
+        if (f.effect === "activation" && !c.has_activation_effect)  return false;
+        if (f.effect === "passive"    && !c.has_passive_effect)     return false;
+        if (f.effect === "reward"     && !c.has_special_reward)     return false;
+        if (f.is_monster === "yes"    && !c.is_monster)             return false;
       }
       return true;
     });
@@ -436,10 +464,14 @@
     if (card.gold_reward != null && type === "monsters") stats.push(stat("gold", "Gold reward", `${card.gold_reward}`));
     if (card.strength_reward != null && type === "monsters" && card.strength_reward) stats.push(stat("str", "Strength reward", `${card.strength_reward}`));
     if (card.magic_reward != null && type === "monsters" && card.magic_reward) stats.push(stat("mag", "Magic reward", `${card.magic_reward}`));
-    if (card.roll_match1 != null && (type === "citizens" || type === "starters")) {
+    if (card.roll_match1 != null && (type === "citizens" || type === "starters" || type === "events")) {
       const rolls = [card.roll_match1, card.roll_match2].filter(r => r && r > 0);
       if (rolls.length) stats.push(stat("", "Rolls", rolls.join(" / ")));
     }
+    if (type === "events" && card.gold_reward)     stats.push(stat("gold", "Gold reward",     `${card.gold_reward}`));
+    if (type === "events" && card.strength_reward) stats.push(stat("str",  "Strength reward", `${card.strength_reward}`));
+    if (type === "events" && card.magic_reward)    stats.push(stat("mag",  "Magic reward",    `${card.magic_reward}`));
+    if (type === "events" && card.monster_type)    stats.push(stat("",     "Monster type",    titleCase(card.monster_type)));
     if (type === "monsters" && card.area) stats.push(stat("", "Area", card.area));
     if (type === "monsters" && card.monster_type) stats.push(stat("", "Type", titleCase(card.monster_type)));
     if (type === "monsters" && card.order != null) stats.push(stat("", "Order", String(card.order)));
@@ -469,6 +501,7 @@
     if (type === "monsters") return renderMonsterRewards(card);
     if (type === "domains") return renderDomain(card);
     if (type === "dukes") return renderDuke(card);
+    if (type === "events") return renderEvent(card);
     return null;
   }
 
@@ -544,7 +577,7 @@
     const sections = [];
     const passive = (card.passive_effect || "").toString().trim();
     const activation = (card.activation_effect || "").toString().trim();
-    const text = (card.text || "").toString().trim();
+    const text = (card.effect_text || "").toString().trim();
     if (passive) {
       sections.push(h("section", { class: "wiki-section" },
         h("h3", {}, "Passive effect"),
@@ -561,6 +594,39 @@
       sections.push(h("section", { class: "wiki-section" },
         h("h3", {}, "Rules text"),
         h("div", { class: "wiki-rules-text" }, text),
+      ));
+    }
+    return sections.length ? h("div", {}, ...sections) : null;
+  }
+
+  function renderEvent(card) {
+    const sections = [];
+    const roll = (card.roll_effect || "").toString().trim();
+    const activation = (card.activation_effect || "").toString().trim();
+    const passive = (card.passive_effect || "").toString().trim();
+    const reward = (card.special_reward || "").toString().trim();
+    if (roll) {
+      sections.push(h("section", { class: "wiki-section" },
+        h("h3", {}, "Roll effect"),
+        h("div", { class: "wiki-effect" }, roll),
+      ));
+    }
+    if (activation) {
+      sections.push(h("section", { class: "wiki-section" },
+        h("h3", {}, "Activation effect"),
+        h("div", { class: "wiki-effect" }, activation),
+      ));
+    }
+    if (passive) {
+      sections.push(h("section", { class: "wiki-section" },
+        h("h3", {}, "Passive effect"),
+        h("div", { class: "wiki-effect" }, passive),
+      ));
+    }
+    if (reward) {
+      sections.push(h("section", { class: "wiki-section" },
+        h("h3", {}, "Special reward"),
+        h("div", { class: "wiki-effect" }, reward),
       ));
     }
     return sections.length ? h("div", {}, ...sections) : null;
