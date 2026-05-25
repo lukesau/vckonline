@@ -1261,6 +1261,14 @@ class Game:
         self.harvest_processed = True
         self.harvest_player_order = None
         self.harvest_player_idx = 0
+        # Snapshot which players had any card activate this harvest BEFORE
+        # resetting the bookkeeping. We gate the end-of-harvest bonus
+        # (legacy bonus_resource_choice or Herald's `no_payout` trigger) on
+        # "no cards of yours fired", not on "harvest_delta is zero" — those
+        # diverge whenever a card activates but its payout nets nothing
+        # (e.g. an `exchange` you can't afford, a `count` that finds zero
+        # of the counted thing, a steal against an empty victim, etc.).
+        activated_pids = {pid for pid, keys in self.harvest_consumed.items() if keys}
         self.harvest_consumed = {}
         self._harvest_steal_phase_done = False
         # Pending may-slay prompts contributed gains directly (via slay_monster), so
@@ -1269,8 +1277,7 @@ class Game:
         self.pending_harvest_slays = []
         self.pending_harvest_choices = []
         for p in self.player_list:
-            d = getattr(p, "harvest_delta", {}) or {}
-            if int(d.get("gold", 0)) == 0 and int(d.get("strength", 0)) == 0 and int(d.get("magic", 0)) == 0:
+            if p.player_id not in activated_pids:
                 self.pending_harvest_choices.append(p.player_id)
         if self.pending_harvest_choices:
             self._activate_finalize_bonus_for(self.pending_harvest_choices[0])
