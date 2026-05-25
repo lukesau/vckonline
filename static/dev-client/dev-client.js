@@ -1474,7 +1474,29 @@ let playerId = localStorage.getItem('playerId') || '';
                             return `+${an} ${el}`;
                         }).join(' + ');
                         const extraSuffix = extraText ? ` + ${extraText}` : '';
-                        const who = name ? `${name} citizen` : label;
+                        const cid = Number(opt?.citizen_id);
+                        let have = 0;
+                        let remaining = 0;
+                        if (Number.isFinite(cid)) {
+                            const player = Array.isArray(gameState?.player_list)
+                                ? gameState.player_list.find(p => (p?.player_id || '') === playerId)
+                                : null;
+                            const ownedCitizens = Array.isArray(player?.owned_citizens) ? player.owned_citizens : [];
+                            for (const card of ownedCitizens) {
+                                if (Number(card?.citizen_id) === cid) have += 1;
+                            }
+                            const grid = Array.isArray(gameState?.citizen_grid) ? gameState.citizen_grid : [];
+                            for (const stack of grid) {
+                                if (!Array.isArray(stack)) continue;
+                                for (const card of stack) {
+                                    if (Number(card?.citizen_id) === cid) remaining += 1;
+                                }
+                            }
+                        }
+                        const cost = Number(opt?.gold_cost);
+                        const prettyCost = Number.isFinite(cost) ? cost : 0;
+                        const infoSuffix = ` (Cost: ${prettyCost} Have: ${have} Remain: ${remaining})`;
+                        const who = name ? `${name} citizen${infoSuffix}` : `${label}${infoSuffix}`;
                         return `<button onclick="sendChooseIndex(${idx + 1})">Gain ${escapeHtml(prettyAmt)} ${escapeHtml(who)}${escapeHtml(extraSuffix)}</button>`;
                     }
                     return `<button onclick="sendChooseIndex(${idx + 1})">+${escapeHtml(prettyAmt)} ${escapeHtml(label)}</button>`;

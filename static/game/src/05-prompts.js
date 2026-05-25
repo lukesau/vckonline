@@ -1404,7 +1404,33 @@ function renderChooseOwnedCard(state) {
   });
 }
 
-function chooseOptionButtonLabel(opt, idx) {
+function boardCitizenCountById(state, citizenId) {
+  const cid = Number(citizenId);
+  if (!Number.isFinite(cid)) return 0;
+  const grid = Array.isArray(state?.citizen_grid) ? state.citizen_grid : [];
+  let n = 0;
+  for (const stack of grid) {
+    if (!Array.isArray(stack)) continue;
+    for (const card of stack) {
+      if (Number(card?.citizen_id) === cid) n += 1;
+    }
+  }
+  return n;
+}
+
+function ownedCitizenCountById(state, playerId, citizenId) {
+  const cid = Number(citizenId);
+  if (!Number.isFinite(cid)) return 0;
+  const player = playerById(state, playerId);
+  const citizens = Array.isArray(player?.owned_citizens) ? player.owned_citizens : [];
+  let n = 0;
+  for (const card of citizens) {
+    if (Number(card?.citizen_id) === cid) n += 1;
+  }
+  return n;
+}
+
+function chooseOptionButtonLabel(opt, idx, state) {
   const token = (opt?.token || '').toString();
   const label = labelForChoiceToken(token);
   const amt = Number(opt.amount);
@@ -1429,7 +1455,12 @@ function chooseOptionButtonLabel(opt, idx) {
       return `+${an} ${el}`;
     }).join(' + ');
     const extraSuffix = extraText ? ` + ${extraText}` : '';
-    const who = name ? `${name} citizen` : label;
+    const cost = Number(opt?.gold_cost);
+    const prettyCost = Number.isFinite(cost) ? cost : 0;
+    const have = opt?.citizen_id != null ? ownedCitizenCountById(state, PLAYER_ID, opt.citizen_id) : 0;
+    const remaining = opt?.citizen_id != null ? boardCitizenCountById(state, opt.citizen_id) : 0;
+    const infoSuffix = ` (Cost: ${prettyCost} Have: ${have} Remain: ${remaining})`;
+    const who = name ? `${name} citizen${infoSuffix}` : `${label}${infoSuffix}`;
     return `Gain ${prettyAmt} ${who}${extraSuffix}`;
   }
   return `+${prettyAmt} ${label}`;
@@ -1470,7 +1501,7 @@ function renderChoosePrompt(state, chooseCmd) {
 
   const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
   options.forEach((opt, idx) => {
-    const optLabel = chooseOptionButtonLabel(opt, idx);
+    const optLabel = chooseOptionButtonLabel(opt, idx, state);
     foot.appendChild(promptButton(optLabel, () => confirmAndPostGameAction(
       {
         player_id: PLAYER_ID,
