@@ -589,14 +589,15 @@ function mkPayField(label, cls, minV, maxV, value, disabled, title, resourceIcon
   span.className = 'market-pay-field-label';
   if (resourceIconKey && TABLEAU_RESOURCE_ICONS[resourceIconKey]) {
     span.classList.add(`market-pay-field-label--${resourceIconKey}`);
-    if (currentValue !== undefined && currentValue !== null) {
-      span.appendChild(document.createTextNode(`${currentValue} \u00D7 `));
-    }
+    span.classList.add('market-pay-field-label--pill');
     const img = document.createElement('img');
     img.className = 'market-pay-label-icon';
     img.src = TABLEAU_RESOURCE_ICONS[resourceIconKey];
     img.alt = '';
     span.appendChild(img);
+    if (currentValue !== undefined && currentValue !== null) {
+      span.appendChild(document.createTextNode(String(currentValue)));
+    }
     if (label) span.appendChild(document.createTextNode(` ${label}`));
   } else {
     span.textContent = label;

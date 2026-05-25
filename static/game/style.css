@@ -2577,6 +2577,15 @@ html, body {
   text-transform: uppercase;
 }
 
+.market-pay-field-label--pill {
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.4);
+  font-weight: 600;
+  align-self: flex-start;
+}
+
 .market-pay-field-label--gold { color: var(--gold); text-transform: none; letter-spacing: normal; }
 .market-pay-field-label--strength { color: var(--str); text-transform: none; letter-spacing: normal; }
 .market-pay-field-label--magic { color: var(--mag); text-transform: none; letter-spacing: normal; }
