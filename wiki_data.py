@@ -54,6 +54,18 @@ def _is_unimplemented_domain(row):
     return False
 
 
+def _is_unimplemented_event(row):
+    if row["has_roll_effect"] and _is_empty_special(row["roll_effect"]):
+        return True
+    if row["has_activation_effect"] and _is_empty_special(row["activation_effect"]):
+        return True
+    if row["has_passive_effect"] and _is_empty_special(row["passive_effect"]):
+        return True
+    if row["has_special_reward"] and _is_empty_special(row["special_reward"]):
+        return True
+    return False
+
+
 def _connect():
     import mariadb
     return mariadb.connect(
@@ -149,7 +161,7 @@ def _load_domains(cur, banned):
             row["has_passive_effect"],
             row["passive_effect"],
             row["activation_effect"],
-            row["text"],
+            row["effect_text"],
             row["expansion"],
         )
         entry = d.to_dict()
@@ -184,6 +196,40 @@ def _load_dukes(cur, banned):
         )
         entry = d.to_dict()
         entry["is_banned"] = int(row["id_dukes"]) in banned
+        out.append(entry)
+    return out
+
+
+def _load_events(cur):
+    rows = _fetch_all(cur, "SELECT * FROM events ORDER BY id_events")
+    out = []
+    for row in rows:
+        entry = {
+            "id_events":               row["id_events"],
+            "name":                    row["name"],
+            "roll_match1":             row["roll_match1"],
+            "roll_effect":             row["roll_effect"],
+            "has_roll_effect":         row["has_roll_effect"],
+            "is_monster":              row["is_monster"],
+            "has_activation_effect":   row["has_activation_effect"],
+            "has_passive_effect":      row["has_passive_effect"],
+            "strength_cost":           row["strength_cost"],
+            "magic_cost":              row["magic_cost"],
+            "monster_type":            row["monster_type"],
+            "vp_reward":               row["vp_reward"],
+            "gold_reward":             row["gold_reward"],
+            "strength_reward":         row["strength_reward"],
+            "magic_reward":            row["magic_reward"],
+            "has_special_reward":      row["has_special_reward"],
+            "special_reward":          row["special_reward"],
+            "activation_effect":       row["activation_effect"],
+            "passive_effect":          row["passive_effect"],
+            "roll_effect_text":        row["roll_effect_text"],
+            "special_reward_text":     row["special_reward_text"],
+            "activation_effect_text":  row["activation_effect_text"],
+            "passive_effect_text":     row["passive_effect_text"],
+        }
+        entry["is_unimplemented"] = _is_unimplemented_event(row)
         out.append(entry)
     return out
 
@@ -240,6 +286,7 @@ def load_all_cards_for_wiki():
                 "domains": _load_domains(cur, banned_domains),
                 "dukes": _load_dukes(cur, banned_dukes),
                 "starters": _load_starters(cur),
+                "events": _load_events(cur),
             }
         finally:
             cur.close()

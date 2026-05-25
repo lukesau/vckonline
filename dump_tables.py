@@ -14,9 +14,10 @@ TABLES = [
     # (table_name, id_column, columns_to_backtick_quote)
     ("citizens", "id_citizens",  []),
     ("monsters", "id_monsters",  ["monster_type", "monster_order"]),
-    ("domains",  "id_domains",   ["text"]),
+    ("domains",  "id_domains",   []),
     ("starters", "id_starters",  []),
     ("dukes",    "id_dukes",     []),
+    ("events",   "id_events",    []),
 ]
 
 BATCH_SIZE = 10
