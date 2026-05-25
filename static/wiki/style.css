@@ -345,6 +345,7 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
 .wiki-badge.gold { background: var(--gold); color: #1a1a1a; border-color: transparent; }
 .wiki-badge.vp { background: var(--vp); color: #fff; border-color: transparent; }
 .wiki-badge.banned { background: var(--banned); color: #fff; border-color: transparent; }
+.wiki-badge.unimplemented { background: #8a6f1f; color: #fff; border-color: transparent; }
 .wiki-badge.extra { background: #3a6a9a; color: #fff; border-color: transparent; }
 .wiki-badge.expansion { background: rgba(0,0,0,0.7); color: var(--muted); }
 

@@ -209,6 +209,11 @@
           { value: "off", label: "Off-turn" },
         ],
       });
+      groups.push({
+        key: "unimplemented",
+        label: "Status",
+        options: [{ value: "yes", label: "Unimplemented only" }],
+      });
     } else if (type === "monsters") {
       const areas = unique(cards.map(c => c.area).filter(Boolean)).sort();
       if (areas.length) {
@@ -231,6 +236,11 @@
         label: "Reward",
         options: [{ value: "yes", label: "Has special" }],
       });
+      groups.push({
+        key: "unimplemented",
+        label: "Status",
+        options: [{ value: "yes", label: "Unimplemented only" }],
+      });
     } else if (type === "domains") {
       groups.push({
         key: "effect",
@@ -243,7 +253,10 @@
       groups.push({
         key: "banned",
         label: "Status",
-        options: [{ value: "yes", label: "Banned only" }],
+        options: [
+          { value: "yes",           label: "Banned only" },
+          { value: "unimplemented", label: "Unimplemented only" },
+        ],
       });
     } else if (type === "dukes") {
       groups.push({
@@ -295,16 +308,19 @@
           if (f.has_special === "on" && !on) return false;
           if (f.has_special === "off" && !off) return false;
         }
+        if (f.unimplemented === "yes" && !c.is_unimplemented) return false;
       }
       if (type === "monsters") {
         if (f.area && c.area !== f.area) return false;
         if (f.monster_type && c.monster_type !== f.monster_type) return false;
         if (f.has_special_reward === "yes" && !c.has_special_reward) return false;
+        if (f.unimplemented === "yes" && !c.is_unimplemented) return false;
       }
       if (type === "domains") {
         if (f.effect === "passive" && !c.has_passive_effect) return false;
         if (f.effect === "activation" && !c.has_activation_effect) return false;
         if (f.banned === "yes" && !c.is_banned) return false;
+        if (f.banned === "unimplemented" && !c.is_unimplemented) return false;
       }
       if (type === "dukes") {
         if (f.banned === "yes" && !c.is_banned) return false;
@@ -337,6 +353,10 @@
     const imgUrl = `/card-image/${kind}/${id}`;
     const badges = [];
     if (card.is_banned) badges.push(h("span", { class: "wiki-badge banned" }, "Banned"));
+    if (card.is_unimplemented) badges.push(h("span", {
+      class: "wiki-badge unimplemented",
+      title: "Has a flagged special effect with no text — not yet implemented",
+    }, "Unimplemented"));
     if (card.is_extra) badges.push(h("span", { class: "wiki-badge extra", title: "Only included in 5-player games" }, "5+"));
     if (card.expansion) badges.push(h("span", { class: "wiki-badge expansion" }, card.expansion));
 
@@ -390,6 +410,10 @@
     const left = h("div", { class: "wiki-modal-image-col" },
       img,
       card.is_banned ? h("span", { class: "wiki-badge banned" }, "Banned in game setup") : null,
+      card.is_unimplemented ? h("span", {
+        class: "wiki-badge unimplemented",
+        title: "Has a flagged special effect with no text — not yet implemented",
+      }, "Unimplemented") : null,
     );
 
     const right = h("div", { class: "wiki-modal-detail" },
