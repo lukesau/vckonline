@@ -2166,22 +2166,35 @@ let playerId = localStorage.getItem('playerId') || '';
                 const magicMin = Number(cost?.magicMin || 0);
 
                 const remainingMagic = M - magicMin;
-                if (remainingMagic < 0) return { ok: false };
+                if (remainingMagic < 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold: 0, deficitStrength: 0, remainingMagic: 0 };
 
                 const deficitGold = Math.max(0, goldCost - G);
                 const deficitStrength = Math.max(0, strengthCost - S);
 
                 // Rule: you must contribute at least 1 of a required color to use magic as wild.
                 // Example: cost S8 cannot be paid with M8 alone; you need at least S1, then M can cover the rest.
-                if (goldCost > 0 && deficitGold > 0 && G <= 0) return { ok: false };
-                if (strengthCost > 0 && deficitStrength > 0 && S <= 0) return { ok: false };
+                if (goldCost > 0 && deficitGold > 0 && G <= 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold, deficitStrength, remainingMagic };
+                if (strengthCost > 0 && deficitStrength > 0 && S <= 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold, deficitStrength, remainingMagic };
 
                 const ok = (deficitGold + deficitStrength) <= remainingMagic;
 
-                // Payment split used for sending action requests (avoid going negative server-side).
-                const payGold = Math.min(G, goldCost);
-                const payStrength = Math.min(S, strengthCost);
-                const payMagic = magicMin + deficitGold + deficitStrength;
+                // Magic-first suggestion: cover as much of the primary cost as possible with magic, paying
+                // just 1 of the primary resource (the minimum the server validator requires when using
+                // magic as wild). Fall back to spending more primary when the player doesn't have enough
+                // magic to cover the remainder.
+                const primaryCost = goldCost > 0 ? goldCost : strengthCost;
+                const primaryHave = goldCost > 0 ? G : S;
+                let primaryPay = 0;
+                let wildPay = 0;
+                if (primaryCost > 0) {
+                    primaryPay = Math.max(1, primaryCost - remainingMagic);
+                    primaryPay = Math.min(primaryPay, primaryHave, primaryCost);
+                    wildPay = Math.max(0, primaryCost - primaryPay);
+                }
+
+                const payGold = goldCost > 0 ? primaryPay : 0;
+                const payStrength = strengthCost > 0 ? primaryPay : 0;
+                const payMagic = magicMin + wildPay;
                 return { ok, payGold, payStrength, payMagic, deficitGold, deficitStrength, remainingMagic };
             }
 

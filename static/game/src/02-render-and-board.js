@@ -1090,9 +1090,13 @@ function makeHeader(player, state) {
   return h;
 }
 // ── Card factory ──────────────────────────────────────────────────────────
-/** Viewer cannot see the card face (face-down domain pile, future hidden stacks, etc.). */
+/** Viewer cannot see the card face (face-down domain pile, future hidden stacks, etc.).
+ *  Flipped tableau citizens are deliberately excluded: they are physically face-down
+ *  but the viewer knows exactly which card it is (it stays on the same tableau slot). */
 function cardObscuredFromViewer(card) {
-  return !!(card && typeof card === 'object' && card.is_visible === false);
+  if (!card || typeof card !== 'object') return false;
+  if (card.is_flipped) return false;
+  return card.is_visible === false;
 }
 
 function isDomainStackFaceDown(card) {
@@ -1152,23 +1156,58 @@ function makeCard(card, mode) {
   if (imgUrl) {
     el.classList.add('card-has-image');
     el.setAttribute('role', 'img');
-    const aria = cardObscuredFromViewer(card)
-      ? (isDomainStackFaceDown(card) ? 'Face-down domain' : 'Hidden card')
-      : (card.name || 'Card');
+    let aria;
+    if (cardObscuredFromViewer(card)) {
+      aria = isDomainStackFaceDown(card) ? 'Face-down domain' : 'Hidden card';
+    } else if (card.is_flipped) {
+      aria = card.name ? `${card.name} (flipped face-down)` : 'Flipped citizen';
+    } else {
+      aria = card.name || 'Card';
+    }
     el.setAttribute('aria-label', aria);
 
-    const img = document.createElement('img');
-    img.className = 'card-img';
-    img.alt = '';
-    img.onerror = () => {
+    const fallbackToText = () => {
       el.classList.remove('card-has-image');
       el.removeAttribute('role');
       el.removeAttribute('aria-label');
       el.innerHTML = '';
       _appendCardText(el, card, mode);
     };
-    img.src = imgUrl;  // set src after onerror so handler is registered first
-    el.appendChild(img);
+
+    if (card.is_flipped) {
+      // Flipped citizens: viewer knows the card, but it is physically face-down.
+      // Render both faces stacked in a 3D flip-stage so the CSS animation can
+      // periodically rotate between the back and the (already-known) front.
+      const stage = mk('card-flip-stage');
+      const inner = mk('card-flip-inner');
+
+      const back = mk('card-flip-face card-flip-back');
+      const backImg = document.createElement('img');
+      backImg.className = 'card-img';
+      backImg.alt = '';
+      backImg.src = obscuredTypeBackUrl(card);
+      back.appendChild(backImg);
+
+      const front = mk('card-flip-face card-flip-front');
+      const frontImg = document.createElement('img');
+      frontImg.className = 'card-img';
+      frontImg.alt = '';
+      frontImg.onerror = fallbackToText;
+      frontImg.src = imgUrl;
+      front.appendChild(frontImg);
+
+      inner.appendChild(back);
+      inner.appendChild(front);
+      stage.appendChild(inner);
+      el.appendChild(stage);
+    } else {
+      const img = document.createElement('img');
+      img.className = 'card-img';
+      img.alt = '';
+      img.onerror = fallbackToText;
+      img.src = imgUrl;  // set src after onerror so handler is registered first
+      el.appendChild(img);
+    }
   } else {
     _appendCardText(el, card, mode);
   }

@@ -1164,11 +1164,17 @@ function renderImmediateSlayPayment(state) {
   const sMax = Number(me?.strength_score || 0);
   const mMax = Number(me?.magic_score || 0);
 
-  // Suggested payment: spend strength first up to its cost, fall back to magic
-  // for any shortfall, and require the magic minimum.
-  const wildNeeded = Math.max(0, strengthCost - sMax);
-  const suggestedStrength = Math.min(sMax, strengthCost);
-  const suggestedMagic = magicCost + wildNeeded;
+  // Suggested payment: prefer using magic as the wild resource so the player only spends 1 strength
+  // (the validator minimum to use magic-as-wild). Fall back to spending more strength when the player
+  // doesn't have enough magic to cover the remainder of the strength cost.
+  const remainingMagic = Math.max(0, mMax - magicCost);
+  let suggestedStrength = 0;
+  let suggestedMagic = magicCost;
+  if (strengthCost > 0) {
+    suggestedStrength = Math.max(1, strengthCost - remainingMagic);
+    suggestedStrength = Math.min(suggestedStrength, sMax, strengthCost);
+    suggestedMagic = magicCost + Math.max(0, strengthCost - suggestedStrength);
+  }
 
   const sub = mk('prompt-modal-note');
   sub.textContent = `Slay "${monsterName}" — strength cost ${strengthCost}, magic minimum ${magicCost}. Magic above the minimum can cover any strength shortfall (1g equivalent rule does not apply to monsters).`;
