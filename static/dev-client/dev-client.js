@@ -2179,6 +2179,38 @@ let playerId = localStorage.getItem('playerId') || '';
                 }
             }
 
+            // Magic reserved for off-turn `exchange m N ...` citizen specials (e.g. magic-cost converts
+            // a player will want to use on opponents' harvests). Skips flipped citizens since their
+            // off-turn payouts can't trigger. Returns { total, breakdown: [{name, perCard, count}] }.
+            function magicOffTurnExchangeReservation(player) {
+                const citizens = Array.isArray(player?.owned_citizens) ? player.owned_citizens : [];
+                const byName = new Map();
+                for (const c of citizens) {
+                    if (!c || c.is_flipped) continue;
+                    const off = (c.special_payout_off_turn ?? '').toString().trim().toLowerCase();
+                    if (!off.startsWith('exchange m')) continue;
+                    const m = off.match(/^exchange\s+m\s+(\d+)/);
+                    if (!m) continue;
+                    const perCard = Number(m[1]) || 0;
+                    if (perCard <= 0) continue;
+                    const name = (c.name ?? '').toString() || '?';
+                    const entry = byName.get(name) || { name, perCard, count: 0 };
+                    entry.count += 1;
+                    byName.set(name, entry);
+                }
+                let total = 0;
+                const breakdown = [];
+                for (const entry of byName.values()) {
+                    total += entry.perCard * entry.count;
+                    breakdown.push(entry);
+                }
+                return { total, breakdown };
+            }
+
+            function reservedMagicForOffTurnConverts(player) {
+                return magicOffTurnExchangeReservation(player).total;
+            }
+
             function canAffordCost(player, cost) {
                 const G = Number(player?.gold_score || 0);
                 const S = Number(player?.strength_score || 0);
@@ -2188,15 +2220,17 @@ let playerId = localStorage.getItem('playerId') || '';
                 const magicMin = Number(cost?.magicMin || 0);
 
                 const remainingMagic = M - magicMin;
-                if (remainingMagic < 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold: 0, deficitStrength: 0, remainingMagic: 0 };
+                if (remainingMagic < 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold: 0, deficitStrength: 0, remainingMagic: 0, reservedMagic: 0 };
 
                 const deficitGold = Math.max(0, goldCost - G);
                 const deficitStrength = Math.max(0, strengthCost - S);
 
+                const reservedMagic = reservedMagicForOffTurnConverts(player);
+
                 // Rule: you must contribute at least 1 of a required color to use magic as wild.
                 // Example: cost S8 cannot be paid with M8 alone; you need at least S1, then M can cover the rest.
-                if (goldCost > 0 && deficitGold > 0 && G <= 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold, deficitStrength, remainingMagic };
-                if (strengthCost > 0 && deficitStrength > 0 && S <= 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold, deficitStrength, remainingMagic };
+                if (goldCost > 0 && deficitGold > 0 && G <= 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold, deficitStrength, remainingMagic, reservedMagic };
+                if (strengthCost > 0 && deficitStrength > 0 && S <= 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold, deficitStrength, remainingMagic, reservedMagic };
 
                 const ok = (deficitGold + deficitStrength) <= remainingMagic;
 
@@ -2204,20 +2238,34 @@ let playerId = localStorage.getItem('playerId') || '';
                 // just 1 of the primary resource (the minimum the server validator requires when using
                 // magic as wild). Fall back to spending more primary when the player doesn't have enough
                 // magic to cover the remainder.
+                //
+                // The `reservedMagic` budget reduces how much magic we *prefer* to spend as wild — but
+                // only as a suggestion. If the player has no other way to pay the cost, we still dip
+                // into the reservation (the action stays affordable; the suggestion just stops being
+                // "polite").
+                //
+                // Don't-drain-the-primary override: if respecting the reservation would force the
+                // suggestion to spend the player's *last* unit of the primary resource, and the player
+                // has enough total magic (ignoring the reservation) to instead spend just 1 primary,
+                // prefer that — even if it dips into the reservation.
+                const wildBudget = Math.max(0, remainingMagic - reservedMagic);
                 const primaryCost = goldCost > 0 ? goldCost : strengthCost;
                 const primaryHave = goldCost > 0 ? G : S;
                 let primaryPay = 0;
                 let wildPay = 0;
                 if (primaryCost > 0) {
-                    primaryPay = Math.max(1, primaryCost - remainingMagic);
+                    primaryPay = Math.max(1, primaryCost - wildBudget);
                     primaryPay = Math.min(primaryPay, primaryHave, primaryCost);
+                    if (primaryPay > 1 && primaryPay >= primaryHave && remainingMagic >= primaryCost - 1) {
+                        primaryPay = 1;
+                    }
                     wildPay = Math.max(0, primaryCost - primaryPay);
                 }
 
                 const payGold = goldCost > 0 ? primaryPay : 0;
                 const payStrength = strengthCost > 0 ? primaryPay : 0;
                 const payMagic = magicMin + wildPay;
-                return { ok, payGold, payStrength, payMagic, deficitGold, deficitStrength, remainingMagic };
+                return { ok, payGold, payStrength, payMagic, deficitGold, deficitStrength, remainingMagic, reservedMagic };
             }
 
             function topOfStack(stack) {

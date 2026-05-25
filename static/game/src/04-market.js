@@ -4,6 +4,43 @@ function topOfStack(stack) {
   return stack[stack.length - 1];
 }
 
+// Inspect the player's tableau for citizens whose off-turn special payout is an `exchange m N ...`
+// effect (pay N magic, gain something on someone else's turn). We use this to "reserve" that much
+// magic from the magic-first payment suggestion so a player isn't recommended to dump all their
+// blue and then find themselves unable to convert during an opponent's harvest. Flipped citizens
+// can't activate their off-turn payouts, so they're skipped.
+//
+// Returns { total, breakdown: [{name, perCard, count}] }; callers can use `total` for the math
+// and `breakdown` for an explanatory hint in the UI.
+function magicOffTurnExchangeReservation(player) {
+  const citizens = Array.isArray(player?.owned_citizens) ? player.owned_citizens : [];
+  const byName = new Map();
+  for (const c of citizens) {
+    if (!c || c.is_flipped) continue;
+    const off = (c.special_payout_off_turn ?? '').toString().trim().toLowerCase();
+    if (!off.startsWith('exchange m')) continue;
+    const m = off.match(/^exchange\s+m\s+(\d+)/);
+    if (!m) continue;
+    const perCard = Number(m[1]) || 0;
+    if (perCard <= 0) continue;
+    const name = (c.name ?? '').toString() || '?';
+    const entry = byName.get(name) || { name, perCard, count: 0 };
+    entry.count += 1;
+    byName.set(name, entry);
+  }
+  let total = 0;
+  const breakdown = [];
+  for (const entry of byName.values()) {
+    total += entry.perCard * entry.count;
+    breakdown.push(entry);
+  }
+  return { total, breakdown };
+}
+
+function reservedMagicForOffTurnConverts(player) {
+  return magicOffTurnExchangeReservation(player).total;
+}
+
 function canAffordCost(player, cost) {
   const G = Number(player?.gold_score || 0);
   const S = Number(player?.strength_score || 0);
@@ -13,33 +50,48 @@ function canAffordCost(player, cost) {
   const magicMin = Number(cost?.magicMin || 0);
 
   const remainingMagic = M - magicMin;
-  if (remainingMagic < 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold: 0, deficitStrength: 0, remainingMagic: 0 };
+  if (remainingMagic < 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold: 0, deficitStrength: 0, remainingMagic: 0, reservedMagic: 0 };
 
   const deficitGold = Math.max(0, goldCost - G);
   const deficitStrength = Math.max(0, strengthCost - S);
 
-  if (goldCost > 0 && deficitGold > 0 && G <= 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold, deficitStrength, remainingMagic };
-  if (strengthCost > 0 && deficitStrength > 0 && S <= 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold, deficitStrength, remainingMagic };
+  const reservedMagic = reservedMagicForOffTurnConverts(player);
+
+  if (goldCost > 0 && deficitGold > 0 && G <= 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold, deficitStrength, remainingMagic, reservedMagic };
+  if (strengthCost > 0 && deficitStrength > 0 && S <= 0) return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold, deficitStrength, remainingMagic, reservedMagic };
 
   const ok = (deficitGold + deficitStrength) <= remainingMagic;
 
   // Magic-first suggestion: cover as much of the primary cost as possible with magic, paying just 1 of
   // the primary resource (the minimum the server validator requires when using magic as a wild). Fall
   // back to spending more primary when the player doesn't have enough magic to cover the remainder.
+  //
+  // The `reservedMagic` budget reduces how much magic we *prefer* to spend as wild — but only as a
+  // suggestion. If the player has no other way to pay the cost, we still dip into the reservation
+  // (the action stays affordable; the suggestion just stops being "polite").
+  //
+  // Don't-drain-the-primary override: if respecting the reservation would force the suggestion to
+  // spend the player's *last* unit of the primary resource, and the player has enough total magic
+  // (ignoring the reservation) to instead spend just 1 primary, prefer that — even if it dips into
+  // the reservation. Burning the last strength/gold is worse than dipping a magic reserve.
+  const wildBudget = Math.max(0, remainingMagic - reservedMagic);
   const primaryCost = goldCost > 0 ? goldCost : strengthCost;
   const primaryHave = goldCost > 0 ? G : S;
   let primaryPay = 0;
   let wildPay = 0;
   if (primaryCost > 0) {
-    primaryPay = Math.max(1, primaryCost - remainingMagic);
+    primaryPay = Math.max(1, primaryCost - wildBudget);
     primaryPay = Math.min(primaryPay, primaryHave, primaryCost);
+    if (primaryPay > 1 && primaryPay >= primaryHave && remainingMagic >= primaryCost - 1) {
+      primaryPay = 1;
+    }
     wildPay = Math.max(0, primaryCost - primaryPay);
   }
 
   const payGold = goldCost > 0 ? primaryPay : 0;
   const payStrength = strengthCost > 0 ? primaryPay : 0;
   const payMagic = magicMin + wildPay;
-  return { ok, payGold, payStrength, payMagic, deficitGold, deficitStrength, remainingMagic };
+  return { ok, payGold, payStrength, payMagic, deficitGold, deficitStrength, remainingMagic, reservedMagic };
 }
 
 function ownedNameCount(player, name) {
@@ -644,6 +696,16 @@ function appendMarketActionUI(infoEl, card, ctx) {
     const fb = mk('market-effects-banner');
     fb.textContent = `Active: ${fx.join(' · ')}`;
     panel.appendChild(fb);
+  }
+
+  const reservation = magicOffTurnExchangeReservation(ctx.actingPlayer);
+  if (reservation.total > 0) {
+    const rb = mk('market-effects-banner');
+    const detail = reservation.breakdown
+      .map(e => (e.count > 1 ? `${e.name} ×${e.count}` : e.name))
+      .join(', ');
+    rb.textContent = `Suggestion tries to keep ${reservation.total}m for off-turn exchanges (${detail}).`;
+    panel.appendChild(rb);
   }
 
   if (ctx.blockReason) {

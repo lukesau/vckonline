@@ -1167,18 +1167,38 @@ function renderImmediateSlayPayment(state) {
   // Suggested payment: prefer using magic as the wild resource so the player only spends 1 strength
   // (the validator minimum to use magic-as-wild). Fall back to spending more strength when the player
   // doesn't have enough magic to cover the remainder of the strength cost.
-  const remainingMagic = Math.max(0, mMax - magicCost);
+  //
+  // Also try to keep magic available for any off-turn `exchange m N ...` citizen exchanges in the
+  // player's tableau (e.g. a magic-cost convert) so the default doesn't recommend spending magic
+  // the player will want for an opponent's harvest. The reservation gives way to a "don't drain the
+  // last of the primary resource" rule — if respecting it would force spending the player's last
+  // strength, dip into the reserved magic instead.
+  const reservation = magicOffTurnExchangeReservation(me);
+  const wildBudget = Math.max(0, mMax - magicCost - reservation.total);
+  const remainingMagicTotal = Math.max(0, mMax - magicCost);
   let suggestedStrength = 0;
   let suggestedMagic = magicCost;
   if (strengthCost > 0) {
-    suggestedStrength = Math.max(1, strengthCost - remainingMagic);
+    suggestedStrength = Math.max(1, strengthCost - wildBudget);
     suggestedStrength = Math.min(suggestedStrength, sMax, strengthCost);
+    if (suggestedStrength > 1 && suggestedStrength >= sMax && remainingMagicTotal >= strengthCost - 1) {
+      suggestedStrength = 1;
+    }
     suggestedMagic = magicCost + Math.max(0, strengthCost - suggestedStrength);
   }
 
   const sub = mk('prompt-modal-note');
   sub.textContent = `Slay "${monsterName}" — strength cost ${strengthCost}, magic minimum ${magicCost}. Magic above the minimum can cover any strength shortfall (1g equivalent rule does not apply to monsters).`;
   body.appendChild(sub);
+
+  if (reservation.total > 0) {
+    const reserveNote = mk('prompt-modal-note');
+    const detail = reservation.breakdown
+      .map(e => (e.count > 1 ? `${e.name} ×${e.count}` : e.name))
+      .join(', ');
+    reserveNote.textContent = `Suggestion tries to keep ${reservation.total}m for off-turn exchanges (${detail}).`;
+    body.appendChild(reserveNote);
+  }
 
   appendPromptResourcesPanel(body, state);
 
