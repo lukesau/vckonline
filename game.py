@@ -70,9 +70,15 @@ def _parse_resource_kv(spec):
     return kind, n
 
 
-def _validate_monster_slay_payment(player, strength_cost, magic_min, gp, sp, mp):
+def _validate_monster_slay_payment(player, strength_cost, magic_min, gold_cost, gp, sp, mp):
     gp, sp, mp = _n(gp), _n(sp), _n(mp)
-    if gp != 0:
+    gold_cost = int(gold_cost or 0)
+    if gold_cost > 0:
+        if gp != gold_cost:
+            raise ValueError(f"Must pay exactly {gold_cost} gold (no substitution allowed).")
+        if int(getattr(player, "gold_score", 0)) < gp:
+            raise ValueError("Insufficient gold.")
+    elif gp != 0:
         raise ValueError("Gold cannot be spent on slaying monsters.")
     strength_cost = int(strength_cost or 0)
     magic_min = int(magic_min or 0)
@@ -283,6 +289,7 @@ class Game:
         # Between roll and harvest we allow a small "finalization window" where effects (or dev rigging)
         # may legally change the dice. When present, the engine blocks in roll_pending until finalized.
         self.pending_roll = game_state.get('pending_roll') or None
+        self.pending_event_slay_cost = game_state.get('pending_event_slay_cost') or None
 
         # If players were dealt multiple dukes, prompt every such player to keep exactly one.
         # This is a concurrent (non-ordered) action: any player may choose at any time, and
@@ -662,6 +669,7 @@ class Game:
         # "what just happened on the dice" should read self.roll_events.
         self.roll_events = self._compute_roll_events(rd1, rd2)
         self._apply_roll_on_event_passives()
+        self._apply_board_event_roll_effects(fd1, fd2)
 
         self.pending_roll = None
         # Move into harvest exactly like the old post-roll transition.
@@ -978,6 +986,177 @@ class Game:
                     f"{self._player_label(p.player_id)} \"{getattr(d, 'name', 'Domain')}\" triggered "
                     f"({event}); scores {before} -> {after}"
                 )
+
+    def _apply_board_event_roll_effects(self, d1, d2):
+        """Check all board stacks for Event cards with roll effects matching d1 or d2.
+
+        Iterates monster_grid (plus citizen_grid, domain_grid for future-proofing).
+        When an Event card's roll_match1 equals d1 or d2, fires its roll_effect.
+        """
+        active_player_id = self.current_player_id()
+        grids = [self.monster_grid, self.citizen_grid, self.domain_grid]
+        for grid in grids:
+            for stack in (grid or []):
+                if not stack:
+                    continue
+                top = stack[-1]
+                if not isinstance(top, Event):
+                    continue
+                if not top.has_roll_effect:
+                    continue
+                try:
+                    match_val = int(top.roll_match1 or 0)
+                except (TypeError, ValueError):
+                    continue
+                if d1 == match_val or d2 == match_val:
+                    self._execute_event_roll_effect(top, active_player_id)
+
+    def _execute_event_roll_effect(self, event, player_id):
+        """Execute an Event card's roll_effect string.
+
+        Supported grammar:
+          all_lose g|s|m N  — all players lose N of the resource (floor at 0)
+          add_slay_cost g|s|m N  — active player must add N cost to a chosen
+                                   accessible monster; stored as pending_event_slay_cost
+        """
+        raw = (event.roll_effect or "").strip()
+        if not raw:
+            return
+        parts = raw.split()
+        if len(parts) < 3:
+            self._log_game_event(
+                f"Event \"{event.name}\" triggered but roll_effect is malformed: {raw!r}"
+            )
+            return
+
+        verb = parts[0].lower()
+        resource = parts[1].lower()
+        try:
+            amount = int(parts[2])
+        except (TypeError, ValueError):
+            self._log_game_event(
+                f"Event \"{event.name}\" triggered but amount is not an int: {parts[2]!r}"
+            )
+            return
+
+        if verb == "all_lose":
+            res_map = {"g": "gold_score", "s": "strength_score", "m": "magic_score"}
+            attr = res_map.get(resource)
+            if not attr:
+                self._log_game_event(
+                    f"Event \"{event.name}\" all_lose: unknown resource {resource!r}"
+                )
+                return
+            for p in list(getattr(self, "player_list", []) or []):
+                current = int(getattr(p, attr, 0) or 0)
+                new_val = max(0, current - amount)
+                if current != new_val:
+                    self._log_game_event(
+                        f"{self._player_label(p.player_id)} loses {amount}{resource} "
+                        f"from event \"{event.name}\" (was {current}, now {new_val})."
+                    )
+                else:
+                    self._log_game_event(
+                        f"{self._player_label(p.player_id)} loses 0{resource} "
+                        f"from event \"{event.name}\" (already at {current}, floored)."
+                    )
+                setattr(p, attr, new_val)
+
+        elif verb == "add_slay_cost":
+            # Check if any accessible monster exists on the board.
+            has_target = False
+            for stack in (self.monster_grid or []):
+                if not stack:
+                    continue
+                t = stack[-1]
+                if getattr(t, "is_accessible", False) and (
+                    getattr(t, "monster_id", None) is not None
+                    or getattr(t, "event_id", None) is not None
+                ):
+                    has_target = True
+                    break
+            if not has_target:
+                self._log_game_event(
+                    f"Event \"{event.name}\" triggered add_slay_cost but no accessible "
+                    f"monsters on the board; skipped."
+                )
+                return
+            self.pending_event_slay_cost = {
+                "player_id": player_id,
+                "resource": resource,
+                "amount": amount,
+                "event_name": event.name,
+            }
+            self.action_required["id"] = player_id
+            self.action_required["action"] = "event_slay_cost_choice"
+            self._log_game_event(
+                f"Event \"{event.name}\" triggered: {self._player_label(player_id)} must add "
+                f"{amount}{resource} to a chosen monster's slay cost."
+            )
+        else:
+            self._log_game_event(
+                f"Event \"{event.name}\" triggered but unknown verb: {verb!r}"
+            )
+
+    def apply_event_slay_cost(self, player_id, monster_id=None, event_id=None):
+        """Resolve the pending_event_slay_cost choice.
+
+        The active player chooses an accessible monster (by monster_id or event_id)
+        and we apply the extra cost modifier to that card.
+        """
+        pesc = getattr(self, "pending_event_slay_cost", None)
+        if not pesc:
+            raise ValueError("No pending event slay cost choice.")
+        if str(pesc.get("player_id")) != str(player_id):
+            raise ValueError("It is not your turn to resolve this event effect.")
+
+        resource = pesc.get("resource", "s")
+        amount = int(pesc.get("amount", 1) or 1)
+        event_name = pesc.get("event_name", "Event")
+
+        # Find the target card on the board.
+        target = None
+        if monster_id is not None:
+            for stack in (self.monster_grid or []):
+                if not stack:
+                    continue
+                t = stack[-1]
+                if not getattr(t, "is_accessible", False):
+                    continue
+                if int(getattr(t, "monster_id", -1)) == int(monster_id):
+                    target = t
+                    break
+        elif event_id is not None:
+            for stack in (self.monster_grid or []):
+                if not stack:
+                    continue
+                t = stack[-1]
+                if not getattr(t, "is_accessible", False):
+                    continue
+                if int(getattr(t, "event_id", -1)) == int(event_id):
+                    target = t
+                    break
+
+        if target is None:
+            raise ValueError("Target monster not found or not accessible.")
+
+        # Apply the extra cost to the card.
+        if resource == "s":
+            target.extra_strength_cost = int(getattr(target, "extra_strength_cost", 0) or 0) + amount
+        elif resource == "m":
+            target.extra_magic_cost = int(getattr(target, "extra_magic_cost", 0) or 0) + amount
+        elif resource == "g":
+            target.extra_gold_cost = int(getattr(target, "extra_gold_cost", 0) or 0) + amount
+
+        self._log_game_event(
+            f"{self._player_label(player_id)} applied event \"{event_name}\": "
+            f"\"{getattr(target, 'name', '?')}\" slay cost +{amount}{resource}."
+        )
+
+        # Clear the pending state.
+        self.pending_event_slay_cost = None
+        self.action_required["id"] = self.game_id
+        self.action_required["action"] = ""
 
     def _player_by_id(self, player_id):
         for p in self.player_list:
@@ -3524,6 +3703,9 @@ class Game:
             return
         if self.exhausted_stack:
             exhausted = self.exhausted_stack.pop()
+            if isinstance(exhausted, Event):
+                exhausted.toggle_visibility(True)
+                exhausted.toggle_accessibility(True)
             citizen_stack.append(exhausted)
             self.exhausted_count = int(self.exhausted_count) + 1
 
@@ -4656,7 +4838,7 @@ class Game:
 
         raise ValueError("Citizen not available to hire.")
 
-    def slay_monster(self, player_id, monster_id, sp=0, mp=0, gp=0):
+    def slay_monster(self, player_id, monster_id, sp=0, mp=0, gp=0, event_id=None):
         gp, sp, mp = _n(gp), _n(sp), _n(mp)
         payout = [0, 0, 0, 0]
 
@@ -4664,8 +4846,19 @@ class Game:
             if not monster_stack:
                 continue
             top = monster_stack[-1]
-            if int(getattr(top, "monster_id", -1)) != int(monster_id):
-                continue
+            is_event_card = isinstance(top, Event)
+            # Match by monster_id for regular monsters, or event_id for Event cards.
+            if is_event_card:
+                if event_id is not None:
+                    if int(getattr(top, "event_id", -1)) != int(event_id):
+                        continue
+                else:
+                    # Caller passed monster_id only; skip Event cards.
+                    if int(getattr(top, "monster_id", -1)) != int(monster_id):
+                        continue
+            else:
+                if int(getattr(top, "monster_id", -1)) != int(monster_id):
+                    continue
             if not getattr(top, "is_accessible", False):
                 continue
 
@@ -4677,10 +4870,24 @@ class Game:
             if not player:
                 raise ValueError("Player not found.")
 
-            _validate_monster_slay_payment(player, top.strength_cost, top.magic_cost, gp, sp, mp)
+            # Compute effective costs including any event-applied extra costs.
+            effective_strength_cost = (
+                int(getattr(top, "strength_cost", 0) or 0)
+                + int(getattr(top, "extra_strength_cost", 0) or 0)
+            )
+            effective_magic_cost = (
+                int(getattr(top, "magic_cost", 0) or 0)
+                + int(getattr(top, "extra_magic_cost", 0) or 0)
+            )
+            effective_gold_cost = int(getattr(top, "extra_gold_cost", 0) or 0)
+
+            _validate_monster_slay_payment(
+                player, effective_strength_cost, effective_magic_cost, effective_gold_cost, gp, sp, mp
+            )
 
             before = self._player_scores_line(player)
             monster_to_add = monster_stack.pop(-1)
+            player.gold_score = player.gold_score - gp
             player.strength_score = player.strength_score - sp
             player.magic_score = player.magic_score - mp
             player.owned_monsters.append(monster_to_add)
@@ -4690,10 +4897,10 @@ class Game:
                 if isinstance(payout, list) and len(payout) >= 1 and payout[0] == -9999:
                     if not (isinstance(self.action_required, dict) and self.action_required.get("action")):
                         payout = [0, 0, 0, 0]
-            payout[0] = payout[0] + top.gold_reward
-            payout[1] = payout[1] + top.strength_reward
-            payout[2] = payout[2] + top.magic_reward
-            payout[3] = payout[3] + top.vp_reward
+            payout[0] = payout[0] + int(getattr(top, "gold_reward", 0) or 0)
+            payout[1] = payout[1] + int(getattr(top, "strength_reward", 0) or 0)
+            payout[2] = payout[2] + int(getattr(top, "magic_reward", 0) or 0)
+            payout[3] = payout[3] + int(getattr(top, "vp_reward", 0) or 0)
             player.gold_score = player.gold_score + payout[0]
             player.strength_score = player.strength_score + payout[1]
             player.magic_score = player.magic_score + payout[2]
@@ -4705,11 +4912,16 @@ class Game:
             elif self.exhausted_stack:
                 exhausted = self.exhausted_stack.pop()
                 monster_stack.append(exhausted)
-                self.exhausted_count = int(self.exhausted_count) + 1
+                if not isinstance(exhausted, Event):
+                    self.exhausted_count = int(self.exhausted_count) + 1
+                else:
+                    # Event card popped onto the board — it's already visible/accessible.
+                    exhausted.toggle_visibility(True)
+                    exhausted.toggle_accessibility(True)
             after = self._player_scores_line(player)
             pay = self._format_resource_payment(gp, sp, mp)
             self._log_game_event(
-                f"{self._player_label(player_id)} slew monster \"{monster_to_add.name}\" ({pay}); scores {before} -> {after}"
+                f"{self._player_label(player_id)} slew \"{monster_to_add.name}\" ({pay}); scores {before} -> {after}"
             )
             self._apply_action_event_gain_passives(player, "slay")
             return
@@ -4792,6 +5004,9 @@ class Game:
 
             if not domain_stack and self.exhausted_stack:
                 exhausted = self.exhausted_stack.pop()
+                if isinstance(exhausted, Event):
+                    exhausted.toggle_visibility(True)
+                    exhausted.toggle_accessibility(True)
                 domain_stack.append(exhausted)
                 self.exhausted_count = int(self.exhausted_count) + 1
             self._apply_domain_activation_effect(player, bought)

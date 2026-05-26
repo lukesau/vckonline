@@ -1,4 +1,4 @@
-from cards import Citizen, Domain, Duke, Monster, Starter
+from cards import Citizen, Domain, Duke, Event, Monster, Starter
 
 _MONSTER_TYPE_COUNT_KEYS = {
     "Minion": "minion_count",
@@ -48,7 +48,10 @@ class Player:
         player.owned_citizens = [Citizen.from_dict(c) for c in data["owned_citizens"]]
         player.owned_domains = [Domain.from_dict(d) for d in data["owned_domains"]]
         player.owned_dukes = [Duke.from_dict(d) for d in data["owned_dukes"]]
-        player.owned_monsters = [Monster.from_dict(m) for m in data["owned_monsters"]]
+        player.owned_monsters = [
+            Event.from_dict(m) if m.get("card_class") == "event" else Monster.from_dict(m)
+            for m in data["owned_monsters"]
+        ]
         player.gold_score = data["gold_score"]
         player.strength_score = data["strength_score"]
         player.magic_score = data["magic_score"]

@@ -403,3 +403,94 @@ class Exhausted(Card):
     @classmethod
     def from_dict(cls, d):
         return cls(d["exhausted_id"])
+
+
+class Event(Card):
+    def __init__(self, event_id, name, roll_match1, roll_effect, has_roll_effect, is_monster,
+                 has_activation_effect, has_passive_effect, activation_effect, passive_effect,
+                 strength_cost, magic_cost, monster_type, vp_reward, gold_reward,
+                 strength_reward, magic_reward, has_special_reward, special_reward, expansion,
+                 extra_strength_cost=0, extra_magic_cost=0, extra_gold_cost=0):
+        super().__init__()
+        self.event_id = event_id
+        self.name = name
+        self.roll_match1 = roll_match1
+        self.roll_effect = roll_effect
+        self.has_roll_effect = has_roll_effect
+        self.is_monster = is_monster
+        self.has_activation_effect = has_activation_effect
+        self.has_passive_effect = has_passive_effect
+        self.activation_effect = activation_effect
+        self.passive_effect = passive_effect
+        self.strength_cost = _coerce_int(strength_cost)
+        self.magic_cost = _coerce_int(magic_cost)
+        self.extra_strength_cost = _coerce_int(extra_strength_cost)
+        self.extra_magic_cost = _coerce_int(extra_magic_cost)
+        self.extra_gold_cost = _coerce_int(extra_gold_cost)
+        self.monster_type = monster_type
+        self.vp_reward = _coerce_int(vp_reward)
+        self.gold_reward = _coerce_int(gold_reward)
+        self.strength_reward = _coerce_int(strength_reward)
+        self.magic_reward = _coerce_int(magic_reward)
+        self.has_special_reward = has_special_reward
+        self.special_reward = special_reward
+        self.expansion = expansion
+        self.toggle_visibility(True)
+        self.toggle_accessibility(True)
+
+    def to_dict(self):
+        return {
+            **super().to_dict(),
+            "card_class": "event",
+            "event_id": self.event_id,
+            "name": self.name,
+            "roll_match1": self.roll_match1,
+            "roll_effect": self.roll_effect,
+            "has_roll_effect": self.has_roll_effect,
+            "is_monster": self.is_monster,
+            "has_activation_effect": self.has_activation_effect,
+            "has_passive_effect": self.has_passive_effect,
+            "activation_effect": self.activation_effect,
+            "passive_effect": self.passive_effect,
+            "strength_cost": self.strength_cost,
+            "magic_cost": self.magic_cost,
+            "extra_strength_cost": self.extra_strength_cost,
+            "extra_magic_cost": self.extra_magic_cost,
+            "extra_gold_cost": self.extra_gold_cost,
+            "monster_type": self.monster_type,
+            "vp_reward": self.vp_reward,
+            "gold_reward": self.gold_reward,
+            "strength_reward": self.strength_reward,
+            "magic_reward": self.magic_reward,
+            "has_special_reward": self.has_special_reward,
+            "special_reward": self.special_reward,
+            "expansion": self.expansion,
+        }
+
+    @classmethod
+    def from_dict(cls, d):
+        return cls(
+            event_id=d["event_id"],
+            name=d["name"],
+            roll_match1=d["roll_match1"],
+            roll_effect=d.get("roll_effect"),
+            has_roll_effect=d.get("has_roll_effect", 0),
+            is_monster=d.get("is_monster", 0),
+            has_activation_effect=d.get("has_activation_effect", 0),
+            has_passive_effect=d.get("has_passive_effect", 0),
+            activation_effect=d.get("activation_effect"),
+            passive_effect=d.get("passive_effect"),
+            strength_cost=d.get("strength_cost", 0),
+            magic_cost=d.get("magic_cost", 0),
+            monster_type=d.get("monster_type"),
+            vp_reward=d.get("vp_reward", 0),
+            gold_reward=d.get("gold_reward", 0),
+            strength_reward=d.get("strength_reward", 0),
+            magic_reward=d.get("magic_reward", 0),
+            has_special_reward=d.get("has_special_reward", 0),
+            special_reward=d.get("special_reward"),
+            expansion=d.get("expansion"),
+            extra_strength_cost=d.get("extra_strength_cost", 0),
+            extra_magic_cost=d.get("extra_magic_cost", 0),
+            extra_gold_cost=d.get("extra_gold_cost", 0),
+        )

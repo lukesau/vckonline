@@ -235,6 +235,7 @@ class GameActionRequest(BaseModel):
     citizen_id: Optional[int] = None
     domain_id: Optional[int] = None
     monster_id: Optional[int] = None
+    event_id: Optional[int] = None  # For slaying Event cards on the board
     # take_resource: "gold" | "strength" | "magic"
     resource: Optional[str] = None
     gold_cost: Optional[int] = None
@@ -586,15 +587,20 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             game.finish_turn_if_no_actions_remaining()
         
         elif request.action_type == "slay_monster":
-            if request.monster_id is None:
-                raise HTTPException(status_code=400, detail="monster_id required")
+            if request.monster_id is None and request.event_id is None:
+                raise HTTPException(status_code=400, detail="monster_id or event_id required")
             if request.payment is None and request.strength_cost is None and request.magic_cost is None:
                 raise HTTPException(status_code=400, detail="payment or strength_cost/magic_cost required")
             if not game.consume_player_action(request.player_id, action_type="slay_monster"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             g, s, m = resolve_action_payment(request)
             try:
-                game.slay_monster(request.player_id, request.monster_id, s, m, g)
+                game.slay_monster(
+                    request.player_id,
+                    request.monster_id,
+                    s, m, g,
+                    event_id=request.event_id,
+                )
             except ValueError as e:
                 _rollback_consumed_action(game)
                 raise HTTPException(status_code=400, detail=str(e))
@@ -687,6 +693,33 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Action failed: {str(e)}")
+
+
+class ApplyEventSlayCostRequest(BaseModel):
+    player_id: str
+    monster_id: Optional[int] = None
+    event_id: Optional[int] = None
+
+
+@app.post("/api/game/{game_id}/apply_event_slay_cost")
+async def apply_event_slay_cost(game_id: str, request: ApplyEventSlayCostRequest):
+    """Resolve the pending event slay-cost choice (add extra cost to a chosen monster)."""
+    game = games.get(game_id)
+    if not game:
+        return game_not_found_json()
+    if request.monster_id is None and request.event_id is None:
+        raise HTTPException(status_code=400, detail="monster_id or event_id required")
+    try:
+        game.apply_event_slay_cost(
+            request.player_id,
+            monster_id=request.monster_id,
+            event_id=request.event_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    game.tick_id = int(getattr(game, "tick_id", 0)) + 1
+    await manager.broadcast(game_id, game)
+    return {"message": "Event slay cost applied", "game_state": _serialize_game_for_player(game, request.player_id)}
 
 
 @app.post("/api/game/{game_id}/abandon")

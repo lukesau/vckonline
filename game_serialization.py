@@ -1,6 +1,6 @@
 from json import JSONEncoder
 
-from cards import Citizen, Domain, Duke, Exhausted, Monster, Starter
+from cards import Citizen, Domain, Duke, Event, Exhausted, Monster, Starter
 from game_models import GameMember, LobbyMember, Player
 
 
@@ -69,6 +69,8 @@ class GameObjectEncoder(JSONEncoder):
             }
         if isinstance(obj, Duke):
             return obj.to_dict()
+        if isinstance(obj, Event):
+            return obj.to_dict()
         if isinstance(obj, Monster):
             return obj.to_dict()
         if isinstance(obj, Starter):
@@ -124,5 +126,6 @@ class GameObjectEncoder(JSONEncoder):
                 "harvest_prompt_slots": obj.harvest_slots_for_api() if hasattr(obj, "harvest_slots_for_api") else [],
                 "game_log": list(getattr(obj, "game_log", None) or []),
                 "shutdown": shutdown,
+                "pending_event_slay_cost": getattr(obj, "pending_event_slay_cost", None),
             }
         return super().default(obj)

@@ -2,7 +2,7 @@ import random
 from typing import List
 
 from banned_cards import banned_domain_ids, banned_duke_ids
-from cards import Citizen, Domain, Duke, Exhausted, Monster, Starter
+from cards import Citizen, Domain, Duke, Event, Exhausted, Monster, Starter
 from game_models import Player
 
 
@@ -17,7 +17,8 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
     domain_stack = []
     duke_query = "select_random_dukes"
     duke_stack = []
-    exhausted_stack = [Exhausted(i) for i in range(len(player_list_from_lobby) * 2)]
+    # exhausted_stack is built after DB queries (see below); placeholder here.
+    exhausted_stack = []
     starter_query = "SELECT * FROM starters ORDER BY id_starters"
     starter_stack = []
     player_list = []
@@ -156,7 +157,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
                 row["has_passive_effect"],
                 row["passive_effect"],
                 row["activation_effect"],
-                row["text"],
+                row["effect_text"],
                 row["expansion"],
             )
             domain_stack.append(my_domain)
@@ -217,10 +218,61 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
                 row.get("activation_trigger", "") or "",
             )
             starter_stack.append(my_starter)
+        # Load base events and build the exhausted_stack
+        event_query = "SELECT * FROM events WHERE expansion = 'base' ORDER BY id_events"
+        my_cursor.execute(event_query)
+        event_rows = my_cursor.fetchall()
+        base_events = []
+        for row in event_rows:
+            ev = Event(
+                event_id=row["id_events"],
+                name=row["name"],
+                roll_match1=row["roll_match1"],
+                roll_effect=row.get("roll_effect"),
+                has_roll_effect=row.get("has_roll_effect", 0),
+                is_monster=row.get("is_monster", 0),
+                has_activation_effect=row.get("has_activation_effect", 0),
+                has_passive_effect=row.get("has_passive_effect", 0),
+                activation_effect=row.get("activation_effect"),
+                passive_effect=row.get("passive_effect"),
+                strength_cost=row.get("strength_cost", 0),
+                magic_cost=row.get("magic_cost", 0),
+                monster_type=row.get("monster_type"),
+                vp_reward=row.get("vp_reward", 0),
+                gold_reward=row.get("gold_reward", 0),
+                strength_reward=row.get("strength_reward", 0),
+                magic_reward=row.get("magic_reward", 0),
+                has_special_reward=row.get("has_special_reward", 0),
+                special_reward=row.get("special_reward"),
+                expansion=row.get("expansion"),
+            )
+            base_events.append(ev)
+
+        n_players = len(player_list_from_lobby)
+        total_tokens = n_players * 2
+        n_events = n_players  # half the pool becomes Event cards
+
+        if len(base_events) >= n_events:
+            chosen_events = random.sample(base_events, n_events)
+        else:
+            print(
+                f"Warning: only {len(base_events)} base events available but need {n_events}. "
+                "Filling remainder with plain Exhausted tokens."
+            )
+            chosen_events = list(base_events)
+
+        n_exhausted = total_tokens - len(chosen_events)
+        plain_exhausted = [Exhausted(i) for i in range(n_exhausted)]
+        exhausted_stack = chosen_events + plain_exhausted
+        random.shuffle(exhausted_stack)
+
         my_cursor.close()
         my_connect.close()
     except Exception as e:
         print(f"Error: {e}")
+        # Fallback: plain exhausted tokens if DB load failed
+        if not exhausted_stack:
+            exhausted_stack = [Exhausted(i) for i in range(len(player_list_from_lobby) * 2)]
     # create players and determine order
     if not all([player_list_from_lobby, starter_query, monster_stack, citizen_stack, domain_stack, duke_stack]):
         raise ValueError("One or more required lists are empty.")
@@ -334,5 +386,6 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_starting_resou
             "harvest_consumed": {},
             "game_log": [],
             "pending_action_end_queue": [],
+            "pending_event_slay_cost": None,
         }
         return game_state
