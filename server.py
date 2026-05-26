@@ -717,7 +717,8 @@ async def apply_event_slay_cost(game_id: str, request: ApplyEventSlayCostRequest
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    game.tick_id = int(getattr(game, "tick_id", 0)) + 1
+    while game.advance_tick():
+        pass
     await manager.broadcast(game_id, game)
     return {"message": "Event slay cost applied", "game_state": _serialize_game_for_player(game, request.player_id)}
 
