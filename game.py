@@ -357,6 +357,7 @@ class Game:
                 or aa.startswith("choose_monster")
                 or aa.startswith("choose_owned")
                 or aa == "domain_self_convert"
+                or aa == "event_slay_cost_choice"
             ):
                 return False
 
@@ -681,8 +682,10 @@ class Game:
         self._harvest_steal_phase_done = False
 
         # Clear the finalize prompt; harvest/action will set prompts as needed.
-        self.action_required["id"] = self.game_id
-        self.action_required["action"] = ""
+        # But preserve action_required when an event roll effect needs a player choice.
+        if (self.action_required.get("action") or "") != "event_slay_cost_choice":
+            self.action_required["id"] = self.game_id
+            self.action_required["action"] = ""
         self.tick_id += 1
         who = self._player_label(self.current_player_id())
         if fd1 == rd1 and fd2 == rd2:
@@ -2653,6 +2656,9 @@ class Game:
                 continue
             top = stack[-1]
             if not getattr(top, "is_accessible", False):
+                continue
+            # Skip Event/Exhausted placeholders that may occupy citizen slots.
+            if getattr(top, "citizen_id", None) is None:
                 continue
             if self._citizen_matches_filter(top, spec):
                 out.append(top)

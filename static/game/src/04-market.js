@@ -1013,5 +1013,5 @@ function openMarketCardModal(card) {
 
 function isBoardMarketCard(card, cardEl) {
   if (!cardEl || !cardEl.closest('.center-board')) return false;
-  return card.monster_id != null || card.citizen_id != null || card.domain_id != null;
+  return card.monster_id != null || card.citizen_id != null || card.domain_id != null || (card.event_id != null && card.is_monster);
 }

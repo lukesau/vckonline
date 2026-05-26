@@ -1132,6 +1132,84 @@ function renderImmediateSlayPickMonster(state) {
   });
 }
 
+// Event roll effect: player must choose which accessible monster gets extra slay cost.
+function renderEventSlayCostPrompt(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const pesc = state?.pending_event_slay_cost || {};
+  const eventName = (pesc.event_name || 'Event').toString();
+  const resource = (pesc.resource || 's').toString();
+  const amount = Number(pesc.amount || 1);
+  const resourceLabel = resource === 'g' ? 'Gold' : resource === 'm' ? 'Magic' : 'Strength';
+
+  const body = mk('prompt-modal-body');
+  const sub = mk('prompt-modal-note');
+
+  if (!isYou) {
+    sub.textContent = `Waiting on ${playerDisplayName(state, reqId)} to choose a monster for the "${eventName}" extra cost.`;
+    body.appendChild(sub);
+    openPromptOverlayShell({
+      title: `"${eventName}": add +${amount} ${resourceLabel} slay cost`,
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  sub.textContent = `Choose a monster to apply +${amount} ${resourceLabel} to its slay cost.`;
+  body.appendChild(sub);
+  appendPromptResourcesPanel(body, state);
+
+  // Collect accessible monsters/events from the top of the monster grid.
+  const targets = [];
+  const grid = state?.monster_grid || [];
+  for (const stack of grid) {
+    if (!Array.isArray(stack) || !stack.length) continue;
+    const top = stack[stack.length - 1];
+    if (!top?.is_accessible) continue;
+    if (top.monster_id != null || top.event_id != null) targets.push(top);
+  }
+
+  const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
+
+  if (targets.length === 0) {
+    const none = mk('prompt-modal-note');
+    none.textContent = 'No accessible monsters on the board — effect cannot be applied.';
+    body.appendChild(none);
+  } else {
+    targets.forEach(card => {
+      const nm = (card.name || '?').toString();
+      const sc = Number(card.strength_cost || 0) + Number(card.extra_strength_cost || 0);
+      const mc = Number(card.magic_cost || 0) + Number(card.extra_magic_cost || 0);
+      const label = `${nm} (${sc} str + ${mc} mag)`;
+      foot.appendChild(promptButton(label, async () => {
+        const body2 = { player_id: PLAYER_ID };
+        if (card.event_id != null) body2.event_id = Number(card.event_id);
+        else body2.monster_id = Number(card.monster_id);
+        const res = await fetch(`/api/game/${encodeURIComponent(GAME_ID)}/apply_event_slay_cost`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body2),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) { window.alert(payload?.detail || res.statusText || 'Request failed'); return; }
+        removePromptOverlay();
+        if (payload?.game_state) render(payload.game_state);
+        else fetchGameStateFromApi();
+      }));
+    });
+  }
+
+  openPromptOverlayShell({
+    title: `"${eventName}": add +${amount} ${resourceLabel} slay cost`,
+    dismissible: false,
+    bodyEl: body,
+    footerEl: foot.children.length > 0 ? foot : null,
+  });
+}
+
 // "May slay a Monster" prompt — stage 2: collect strength/magic payment for the
 // monster picked in stage 1, then submit `slay_pay <g> <s> <m>` (gold is forced
 // to 0 because monsters can't be slain with gold).
@@ -1764,6 +1842,11 @@ function renderPromptModal(state) {
 
   if (reqAction === 'choose_owned_card') {
     renderChooseOwnedCard(state);
+    return;
+  }
+
+  if (reqAction === 'event_slay_cost_choice') {
+    renderEventSlayCostPrompt(state);
     return;
   }
 
