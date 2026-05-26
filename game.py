@@ -1011,7 +1011,7 @@ class Game:
                     match_val = int(top.roll_match1 or 0)
                 except (TypeError, ValueError):
                     continue
-                if d1 == match_val or d2 == match_val:
+                if match_val == d1 or match_val == d2 or match_val == (d1 + d2):
                     self._execute_event_roll_effect(top, active_player_id)
 
     def _execute_event_roll_effect(self, event, player_id):
@@ -1835,6 +1835,8 @@ class Game:
             top = stack[-1]
             if not getattr(top, "is_accessible", False):
                 continue
+            if getattr(top, "citizen_id", None) is None:
+                continue  # Event/Exhausted placeholder — not a valid citizen target
             options.append({
                 "token": "citizen.center",
                 "idx": i,
@@ -1872,6 +1874,8 @@ class Game:
         citizen = stack[-1]
         if not getattr(citizen, "is_accessible", False):
             return None
+        if getattr(citizen, "citizen_id", None) is None:
+            return None  # Event/Exhausted placeholder — not discardable as a citizen
         discarded = stack.pop(-1)
         self._citizen_set_flipped(discarded, False)
         self.discard_pile.append(discarded)
@@ -2710,13 +2714,36 @@ class Game:
     # ----------------------------------------------------------------------
 
     def _immediate_slay_monster_options(self):
-        """Return option dicts for every accessible monster top across the grid."""
+        """Return option dicts for every accessible monster top across the grid.
+
+        Includes Event cards with is_monster=True that are occupying monster_grid
+        slots — they use event_id instead of monster_id in the option dict.
+        """
         options = []
         for stack in self.monster_grid:
             if not stack:
                 continue
             top = stack[-1]
             if not getattr(top, "is_accessible", False):
+                continue
+            eid = getattr(top, "event_id", None)
+            if eid is not None:
+                # Event occupying a monster slot — only include if it acts as a monster.
+                if not getattr(top, "is_monster", False):
+                    continue
+                options.append({
+                    "event_id": int(eid),
+                    "name": getattr(top, "name", "?"),
+                    "area": "",
+                    "strength_cost": (
+                        int(getattr(top, "strength_cost", 0) or 0)
+                        + int(getattr(top, "extra_strength_cost", 0) or 0)
+                    ),
+                    "magic_cost": (
+                        int(getattr(top, "magic_cost", 0) or 0)
+                        + int(getattr(top, "extra_magic_cost", 0) or 0)
+                    ),
+                })
                 continue
             mid = int(getattr(top, "monster_id", -1))
             if mid < 0:
@@ -2764,19 +2791,24 @@ class Game:
     def _enter_slay_payment_stage(self, prc, chosen):
         """Transition the may-slay prompt from pick_monster to pay_for_slay."""
         player_id = prc.get("player_id")
-        self.pending_required_choice = {
+        stage = {
             "kind": "immediate_slay",
             "stage": "pay_for_slay",
             "player_id": player_id,
             "source_label": prc.get("source_label", "Effect"),
             "resume_kind": prc.get("resume_kind", "domain_activation"),
-            "monster_id": int(chosen.get("monster_id", -1)),
             "monster_name": chosen.get("name", "?"),
             "area": chosen.get("area", ""),
             "strength_cost": int(chosen.get("strength_cost", 0) or 0),
             "magic_cost": int(chosen.get("magic_cost", 0) or 0),
             "options": list(prc.get("options") or []),
         }
+        # Carry the right id depending on whether this is a regular monster or an Event.
+        if chosen.get("event_id") is not None:
+            stage["event_id"] = int(chosen["event_id"])
+        else:
+            stage["monster_id"] = int(chosen.get("monster_id", -1))
+        self.pending_required_choice = stage
         self.action_required["id"] = player_id
         self.action_required["action"] = "slay_monster_payment"
 
@@ -3281,6 +3313,8 @@ class Game:
             top = stack[-1]
             if not getattr(top, "is_accessible", False):
                 continue
+            if getattr(top, "monster_id", None) is None:
+                continue  # Event/Exhausted placeholder — not a valid strength-boost target
             options.append({
                 "token": "monster.choice",
                 "monster_id": int(getattr(top, "monster_id", -1)),
@@ -4140,13 +4174,14 @@ class Game:
                     mp = int(parts[3])
                 except (TypeError, ValueError):
                     return
-                monster_id = int(prc0.get("monster_id", -1))
-                if monster_id < 0:
+                event_id_opt = prc0.get("event_id")
+                monster_id = int(prc0.get("monster_id", -1)) if event_id_opt is None else None
+                if event_id_opt is None and monster_id < 0:
                     return
                 target = self._player_by_id(player_id)
                 before_tup = self._player_resource_tuple(target) if target else (0, 0, 0, 0)
                 try:
-                    self.slay_monster(player_id, monster_id, sp, mp, gp)
+                    self.slay_monster(player_id, monster_id, sp, mp, gp, event_id=event_id_opt)
                 except ValueError as e:
                     # Payment didn't validate; surface in the log so the player
                     # sees why nothing happened, but keep the prompt open so they
@@ -4800,6 +4835,8 @@ class Game:
             if not citizen_stack:
                 continue
             top = citizen_stack[-1]
+            if getattr(top, "citizen_id", None) is None:
+                continue  # Event/Exhausted placeholder — not hirable
             if int(getattr(top, "citizen_id", -1)) != int(citizen_id) or not getattr(top, "is_accessible", False):
                 continue
 
@@ -4870,6 +4907,9 @@ class Game:
                 else:
                     continue
             else:
+                # When searching for an event, skip all non-Event cards.
+                if event_id is not None:
+                    continue
                 if int(getattr(top, "monster_id", -1)) != int(monster_id):
                     continue
             if not getattr(top, "is_accessible", False):
@@ -4968,6 +5008,8 @@ class Game:
             if not domain_stack:
                 continue
             top = domain_stack[-1]
+            if getattr(top, "domain_id", None) is None:
+                continue  # Event/Exhausted placeholder — not buildable
             if int(getattr(top, "domain_id", -1)) != int(domain_id):
                 continue
             if not getattr(top, "is_accessible", False):
@@ -5080,9 +5122,18 @@ class Game:
     def _check_end_game_condition(self):
         """Returns a reason string if any end condition is met, else None."""
         from cards import Exhausted
-        if all(not stack for stack in self.monster_grid):
+
+        def _depleted(stack):
+            """A stack counts as depleted if it is empty or holds only a
+            non-purchasable placeholder (Event or Exhausted token)."""
+            if not stack:
+                return True
+            top = stack[-1]
+            return isinstance(top, (Event, Exhausted))
+
+        if all(_depleted(s) for s in self.monster_grid):
             return "all monsters slain"
-        if all(not stack for stack in self.domain_grid):
+        if all(_depleted(s) for s in self.domain_grid):
             return "all domains built"
         if int(self.exhausted_count) >= len(self.player_list) * 2:
             return "exhausted stacks filled"

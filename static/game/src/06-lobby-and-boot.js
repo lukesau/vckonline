@@ -1,6 +1,6 @@
 // ── Lobby background ───────────────────────────────────────────────────────
 // `'collage'` = static overlapping card grid (original). `'bounce'` = one card, constant speed, specular wall bounces, new random card each bounce.
-const LOBBY_BACKGROUND_MODE = 'collage';
+const LOBBY_BACKGROUND_MODE = 'bounce';
 
 async function paintLobbyBackgroundCollage(canvas) {
   const t0 = performance.now();
