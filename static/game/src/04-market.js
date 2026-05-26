@@ -216,6 +216,7 @@ function findMarketStack(card, state) {
   let grid = null;
   let idKey = null;
   if (card.monster_id != null) { grid = state?.monster_grid; idKey = 'monster_id'; }
+  else if (card.event_id  != null) { grid = state?.monster_grid; idKey = 'event_id'; }
   else if (card.citizen_id != null) { grid = state?.citizen_grid; idKey = 'citizen_id'; }
   else if (card.domain_id != null) { grid = state?.domain_grid; idKey = 'domain_id'; }
   else return null;
@@ -243,6 +244,7 @@ function globalMarketPileIndexFromCard(card, state) {
   const loc = findMarketStack(card, state);
   if (!loc) return null;
   if (card.monster_id != null) return loc.stackIndex;
+  if (card.event_id   != null) return loc.stackIndex;
   if (card.citizen_id != null) return 5 + loc.stackIndex;
   if (card.domain_id != null) return 15 + loc.stackIndex;
   return null;
@@ -494,7 +496,7 @@ function evaluateMarketCardContext(card, state) {
     blockReason = 'Game state not loaded.';
   } else if (!loc) {
     blockReason = 'This card is not on the market (stacks may have changed).';
-  } else if (card.monster_id != null && !top.is_accessible) {
+  } else if ((card.monster_id != null || card.event_id != null) && !top.is_accessible) {
     blockReason = 'This monster stack is blocked.';
   } else if (card.citizen_id != null && !top.is_accessible) {
     blockReason = 'This citizen stack is blocked.';
@@ -529,6 +531,12 @@ function evaluateMarketCardContext(card, state) {
         gold: 0,
         strength: Number(top.strength_cost || 0),
         magicMin: Number(top.magic_cost || 0),
+      });
+    } else if (card.event_id != null) {
+      evalRes = canAffordCost(actingPlayer, {
+        gold:     Number(top.extra_gold_cost     || 0),
+        strength: Number(top.strength_cost       || 0) + Number(top.extra_strength_cost || 0),
+        magicMin: Number(top.magic_cost          || 0) + Number(top.extra_magic_cost    || 0),
       });
     }
   }
@@ -674,6 +682,14 @@ function appendMarketActionUI(infoEl, card, ctx) {
     payWrap.appendChild(mkPayField('', 'pay-g', 0, 0, 0, true, 'Monsters use strength and magic', 'gold', Gmax));
     payWrap.appendChild(mkPayField('', 'pay-s', 0, Smax, pay.payStrength ?? 0, inputsDisabled, 'Strength payment', 'strength', Smax));
     payWrap.appendChild(mkPayField('', 'pay-m', 0, Mmax, pay.payMagic ?? 0, inputsDisabled, 'Magic payment', 'magic', Mmax));
+  } else if (card.event_id != null) {
+    primaryLabel = 'Slay monster';
+    payWrap.dataset.eventId = String(card.event_id);
+    const effGold = Number(top?.extra_gold_cost || 0);
+    const goldDisabled = effGold === 0;
+    payWrap.appendChild(mkPayField('', 'pay-g', effGold, effGold, effGold, goldDisabled, effGold ? `Gold cost: ${effGold} (exact)` : 'No gold cost', 'gold', Gmax));
+    payWrap.appendChild(mkPayField('', 'pay-s', 0, Smax, pay.payStrength ?? 0, inputsDisabled, 'Strength payment', 'strength', Smax));
+    payWrap.appendChild(mkPayField('', 'pay-m', 0, Mmax, pay.payMagic ?? 0, inputsDisabled, 'Magic payment', 'magic', Mmax));
   }
 
   const fieldsRow = mk('market-pay-fields');
@@ -689,7 +705,7 @@ function appendMarketActionUI(infoEl, card, ctx) {
 
   const hireDisabled = !(card.citizen_id != null && ctx.canActThisCard);
   const buildDisabled = !(card.domain_id != null && ctx.canActThisCard);
-  const slayDisabled = !(card.monster_id != null && ctx.canActThisCard);
+  const slayDisabled = !((card.monster_id != null || card.event_id != null) && ctx.canActThisCard);
 
   const cardLabel = ((card && card.name) || 'Card').toString().trim() || 'Card';
 
@@ -727,19 +743,21 @@ function appendMarketActionUI(infoEl, card, ctx) {
         () => dismissCardInspectModal(),
       );
     }), buildDisabled);
-  } else if (card.monster_id != null) {
+  } else if (card.monster_id != null || card.event_id != null) {
     attachPrimary(promptButton('Slay', () => {
       const p = readMarketPayRow(payWrap);
+      const action = {
+        player_id: PLAYER_ID,
+        action_type: 'slay_monster',
+        payment: { gold: p.gold, strength: p.strength, magic: p.magic },
+      };
+      if (card.monster_id != null) action.monster_id = Number(card.monster_id);
+      if (card.event_id   != null) action.event_id   = Number(card.event_id);
       confirmAndPostGameAction(
-        {
-          player_id: PLAYER_ID,
-          action_type: 'slay_monster',
-          monster_id: Number(card.monster_id),
-          payment: { gold: p.gold, strength: p.strength, magic: p.magic },
-        },
+        action,
         {
           title: 'Slay monster?',
-          message: `Slay ${cardLabel} using the strength and magic amounts set in this panel.`,
+          message: `Slay ${cardLabel} using the amounts set in this panel.`,
         },
         () => dismissCardInspectModal(),
       );
@@ -829,6 +847,7 @@ function appendMarketCompactStatLine(infoEl, card, ctx) {
 
   let typeLabel = null;
   if (card.monster_id != null) typeLabel = 'Monster';
+  else if (card.event_id != null) typeLabel = 'Event';
   else if (card.citizen_id != null) typeLabel = 'Citizen';
   else if (card.domain_id != null) typeLabel = 'Domain';
   else if (card.duke_id != null) typeLabel = 'Duke';

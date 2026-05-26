@@ -836,7 +836,7 @@ function groupCardsForTableau(cards) {
   arr.forEach(c => {
     if (!c || typeof c !== 'object') return;
     const name = (c.name || c.title || '').toString().trim();
-    const id = c.starter_id || c.citizen_id || c.monster_id || c.domain_id || c.duke_id || c.id || '';
+    const id = c.starter_id || c.citizen_id || c.monster_id || c.event_id || c.domain_id || c.duke_id || c.id || '';
     const isCitizenKey = c.citizen_id !== undefined && c.citizen_id !== null;
     const flipSeg = isCitizenKey ? `||flip:${c.is_flipped ? 1 : 0}` : '';
     const key = `${name}||${id}${flipSeg}`;
@@ -1119,7 +1119,8 @@ function isDomainStackFaceDown(card) {
 
 function obscuredTypeBackUrl(card) {
   if (!card || typeof card !== 'object') return '/images/domains/domain_back.jpg';
-  if (card.monster_id !== undefined && card.monster_id !== null) {
+  if ((card.monster_id !== undefined && card.monster_id !== null) ||
+      (card.event_id   !== undefined && card.event_id   !== null)) {
     return '/images/monsters/monster_back.jpg';
   }
   if (card.citizen_id !== undefined && card.citizen_id !== null) {
@@ -1145,6 +1146,7 @@ function cardImageUrl(card) {
   if (card.duke_id    !== undefined) return `/card-image/duke/${card.duke_id}`;
   if (card.starter_id !== undefined) return `/card-image/starter/${card.starter_id}`;
   if (card.exhausted_id !== undefined) return `/card-image/exhausted/${card.exhausted_id}`;
+  if (card.event_id     !== undefined) return `/card-image/event/${card.event_id}`;
   return null;
 }
 
@@ -1231,6 +1233,7 @@ function makeCard(card, mode) {
 
 function cardClass(card) {
   if (card.exhausted_id !== undefined) return 'card-exhausted';
+  if (card.event_id     !== undefined) return 'card-monster';
   if (card.monster_id   !== undefined) return 'card-monster';
   if (card.citizen_id   !== undefined) return 'card-citizen';
   if (card.domain_id    !== undefined) return 'card-domain';
@@ -1239,6 +1242,16 @@ function cardClass(card) {
 }
 
 function cardSub(card) {
+  if (card.event_id !== undefined) {
+    const parts = [];
+    const sc = (card.strength_cost || 0) + (card.extra_strength_cost || 0);
+    const mc = (card.magic_cost    || 0) + (card.extra_magic_cost    || 0);
+    const gc =  card.extra_gold_cost || 0;
+    if (sc) parts.push(`${sc} str`);
+    if (mc) parts.push(`${mc} mag`);
+    if (gc) parts.push(`${gc} gold`);
+    return parts.length ? `Cost: ${parts.join(' + ')}` : '';
+  }
   if (card.monster_id !== undefined) {
     const parts = [];
     if (card.strength_cost) parts.push(`${card.strength_cost} str`);

@@ -4909,13 +4909,20 @@ class Game:
 
             if monster_stack:
                 monster_stack[-1].toggle_accessibility(True)
+            elif is_event_card:
+                # Event already counted toward exhausted_count when it was placed.
+                # Just drop a static placeholder so the slot still shows the exhausted back.
+                from cards import Exhausted as _Exhausted
+                placeholder = _Exhausted(int(self.exhausted_count))
+                placeholder.toggle_visibility(True)
+                monster_stack.append(placeholder)
             elif self.exhausted_stack:
                 exhausted = self.exhausted_stack.pop()
                 monster_stack.append(exhausted)
-                if not isinstance(exhausted, Event):
-                    self.exhausted_count = int(self.exhausted_count) + 1
-                else:
-                    # Event card popped onto the board — it's already visible/accessible.
+                # Always count the slot as exhausted, whether the drawn card is a plain
+                # Exhausted token or an Event card (Events ARE exhausted cards).
+                self.exhausted_count = int(self.exhausted_count) + 1
+                if isinstance(exhausted, Event):
                     exhausted.toggle_visibility(True)
                     exhausted.toggle_accessibility(True)
             after = self._player_scores_line(player)
