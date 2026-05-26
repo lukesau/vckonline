@@ -4842,7 +4842,16 @@ class Game:
         gp, sp, mp = _n(gp), _n(sp), _n(mp)
         payout = [0, 0, 0, 0]
 
-        for monster_stack in self.monster_grid:
+        # Regular monsters only live in monster_grid.
+        # Events can land on any grid depending on which stack emptied first.
+        candidate_grids = (
+            [self.monster_grid, self.citizen_grid, self.domain_grid]
+            if event_id is not None
+            else [self.monster_grid]
+        )
+
+        for grid in candidate_grids:
+          for monster_stack in grid:
             if not monster_stack:
                 continue
             top = monster_stack[-1]
@@ -4853,9 +4862,7 @@ class Game:
                     if int(getattr(top, "event_id", -1)) != int(event_id):
                         continue
                 else:
-                    # Caller passed monster_id only; skip Event cards.
-                    if int(getattr(top, "monster_id", -1)) != int(monster_id):
-                        continue
+                    continue
             else:
                 if int(getattr(top, "monster_id", -1)) != int(monster_id):
                     continue

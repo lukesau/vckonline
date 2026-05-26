@@ -216,9 +216,25 @@ function findMarketStack(card, state) {
   let grid = null;
   let idKey = null;
   if (card.monster_id != null) { grid = state?.monster_grid; idKey = 'monster_id'; }
-  else if (card.event_id  != null) { grid = state?.monster_grid; idKey = 'event_id'; }
   else if (card.citizen_id != null) { grid = state?.citizen_grid; idKey = 'citizen_id'; }
   else if (card.domain_id != null) { grid = state?.domain_grid; idKey = 'domain_id'; }
+  else if (card.event_id != null) {
+    // Events can land on any grid — search all three and track which one for global-index math.
+    const candidates = [
+      { g: state?.monster_grid, offset: 0  },
+      { g: state?.citizen_grid, offset: 5  },
+      { g: state?.domain_grid,  offset: 15 },
+    ];
+    for (const { g, offset } of candidates) {
+      const stacks = Array.isArray(g) ? g : [];
+      for (let i = 0; i < stacks.length; i++) {
+        const top = topOfStack(stacks[i]);
+        if (!top || top['event_id'] !== card.event_id) continue;
+        return { stack: stacks[i], stackIndex: i, top, globalOffset: offset };
+      }
+    }
+    return null;
+  }
   else return null;
   const stacks = Array.isArray(grid) ? grid : [];
   const cid = card[idKey];
@@ -244,7 +260,7 @@ function globalMarketPileIndexFromCard(card, state) {
   const loc = findMarketStack(card, state);
   if (!loc) return null;
   if (card.monster_id != null) return loc.stackIndex;
-  if (card.event_id   != null) return loc.stackIndex;
+  if (card.event_id   != null) return (loc.globalOffset ?? 0) + loc.stackIndex;
   if (card.citizen_id != null) return 5 + loc.stackIndex;
   if (card.domain_id != null) return 15 + loc.stackIndex;
   return null;
