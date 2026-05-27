@@ -1500,28 +1500,28 @@ function chooseOwnedCardCopy(prc, state) {
     };
   }
 
-  if (kind === 'discard_owned_card') {
+  if (kind === 'banish_owned_card') {
     return {
-      title: `Discard a ${noun}`,
-      explain: `Choose one of your owned ${noun}s. It is removed from play permanently (sent to the discard pile) — not face-down like a flip.`,
-      waiting: (label) => `Waiting on ${label} to discard a ${noun}.`,
-      confirmTitle: `Discard ${noun}?`,
-      confirmMessage: (nm) => `Permanently discard ${noun} "${nm}" to the discard pile.`,
+      title: `Banish a ${noun}`,
+      explain: `Choose one of your owned ${noun}s. It is removed from play permanently (sent to the banish pile) — not face-down like a flip.`,
+      waiting: (label) => `Waiting on ${label} to banish a ${noun}.`,
+      confirmTitle: `Banish ${noun}?`,
+      confirmMessage: (nm) => `Permanently banish ${noun} "${nm}" to the banish pile.`,
       skipLabel: 'Skip (optional)',
-      skipMessage: `Skip discarding a ${noun}.`,
+      skipMessage: `Skip banishing a ${noun}.`,
       tableauOwner: 'self',
     };
   }
 
-  if (kind === 'discard_center_card') {
+  if (kind === 'banish_center_card') {
     return {
-      title: `Discard a center-stack ${noun}`,
-      explain: `Choose one of the available ${noun}s from the center stacks. It is removed from play permanently (sent to the discard pile).`,
-      waiting: (label) => `Waiting on ${label} to discard a center-stack ${noun}.`,
-      confirmTitle: `Discard center-stack ${noun}?`,
-      confirmMessage: (nm) => `Permanently discard center-stack ${noun} "${nm}" to the discard pile.`,
+      title: `Banish a center-stack ${noun}`,
+      explain: `Choose one of the available ${noun}s from the center stacks. It is removed from play permanently (sent to the banish pile).`,
+      waiting: (label) => `Waiting on ${label} to banish a center-stack ${noun}.`,
+      confirmTitle: `Banish center-stack ${noun}?`,
+      confirmMessage: (nm) => `Permanently banish center-stack ${noun} "${nm}" to the banish pile.`,
       skipLabel: 'Skip (optional)',
-      skipMessage: `Skip discarding a center-stack ${noun}.`,
+      skipMessage: `Skip banishing a center-stack ${noun}.`,
       tableauOwner: 'center',
     };
   }
@@ -1567,7 +1567,7 @@ function renderChooseOwnedCard(state) {
   const opts = Array.isArray(prc?.options) ? prc.options : [];
   const copy = chooseOwnedCardCopy(prc, state);
   // Only domain_return_owned (and its reward) directly pays resources. Other
-  // owned-card prompts (discard, monster-flip targeting) only nudge future
+  // owned-card prompts (banish, monster-flip targeting) only nudge future
   // harvests, so we skip the supply strip there.
   const affectsResources = (prc?.kind || '').toString() === 'domain_return_owned';
 

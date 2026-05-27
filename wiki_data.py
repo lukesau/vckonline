@@ -58,6 +58,8 @@ def _load_citizens(cur):
             row["strength_payout_off_turn"],
             row["magic_payout_on_turn"],
             row["magic_payout_off_turn"],
+            row["vp_payout_on_turn"],
+            row["vp_payout_off_turn"],
             row["has_special_payout_on_turn"],
             row["has_special_payout_off_turn"],
             row["special_payout_on_turn"],

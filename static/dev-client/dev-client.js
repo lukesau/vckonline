@@ -2123,19 +2123,19 @@ let playerId = localStorage.getItem('playerId') || '';
                         skipLabel: 'Decline',
                     };
                 }
-                if (kind === 'discard_owned_card') {
+                if (kind === 'banish_owned_card') {
                     return {
-                        title: `Discard a ${noun}`,
-                        explain: `Choose one of your owned ${noun}s. It is removed from play permanently (sent to the discard pile) — not face-down like a flip.`,
-                        waiting: (reqId) => `Waiting on ${reqId} to discard a ${noun}.`,
+                        title: `Banish a ${noun}`,
+                        explain: `Choose one of your owned ${noun}s. It is removed from play permanently (sent to the banish pile) — not face-down like a flip.`,
+                        waiting: (reqId) => `Waiting on ${reqId} to banish a ${noun}.`,
                         skipLabel: 'Skip',
                     };
                 }
-                if (kind === 'discard_center_card') {
+                if (kind === 'banish_center_card') {
                     return {
-                        title: `Discard a center-stack ${noun}`,
-                        explain: `Choose one of the available ${noun}s from the center stacks. It is removed from play permanently (sent to the discard pile).`,
-                        waiting: (reqId) => `Waiting on ${reqId} to discard a center-stack ${noun}.`,
+                        title: `Banish a center-stack ${noun}`,
+                        explain: `Choose one of the available ${noun}s from the center stacks. It is removed from play permanently (sent to the banish pile).`,
+                        waiting: (reqId) => `Waiting on ${reqId} to banish a center-stack ${noun}.`,
                         skipLabel: 'Skip',
                     };
                 }

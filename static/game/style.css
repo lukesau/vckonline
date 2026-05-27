@@ -809,32 +809,32 @@ html, body {
 .card-exhausted .card-name { color: #444; }
 
 /* Flipped tableau citizens: viewer knows the card but it is physically face-down,
-   so we render both faces in a 3D flip-stage and continuously alternate to make
-   the face-down state legible. The viewer can still see / inspect the card. */
+   so we stack both faces and cross-fade the front in on top of the back to make
+   the face-down state legible. The viewer can still see / inspect the card. The
+   front never reaches full opacity (peaks at 75%) so the back always shows
+   through, and the back rests on its own between cycles. */
 .card.flipped .card-flip-stage {
   position: absolute;
   inset: 0;
-  perspective: 800px;
   pointer-events: none;
 }
 .card.flipped .card-flip-inner {
   position: relative;
   width: 100%;
   height: 100%;
-  transform-style: preserve-3d;
-  animation: card-flip-cycle 6s ease-in-out infinite;
-  will-change: transform;
 }
 .card.flipped .card-flip-face {
   position: absolute;
   inset: 0;
   border-radius: 4px;
   overflow: hidden;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
 }
-.card.flipped .card-flip-back  { transform: rotateY(0deg); }
-.card.flipped .card-flip-front { transform: rotateY(180deg); }
+.card.flipped .card-flip-back  { opacity: 1; }
+.card.flipped .card-flip-front {
+  opacity: 0;
+  animation: card-flip-cycle 5s ease-in-out infinite;
+  will-change: opacity;
+}
 .card.flipped .card-flip-face > .card-img {
   position: absolute;
   inset: 0;
@@ -844,13 +844,16 @@ html, body {
   border-radius: 4px;
   display: block;
 }
+/* 5s total cycle: 0%–60% (3s) is the back→front→back pulse, peaking at 0.75
+   opacity so the back always shows through by at least 25%. 60%–100% (2s) is
+   the rest period where only the back is visible. */
 @keyframes card-flip-cycle {
-  0%, 40%   { transform: rotateY(0deg); }
-  50%, 90%  { transform: rotateY(180deg); }
-  100%      { transform: rotateY(360deg); }
+  0%        { opacity: 0; }
+  30%       { opacity: 0.75; }
+  60%, 100% { opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .card.flipped .card-flip-inner { animation: none; transform: rotateY(0deg); }
+  .card.flipped .card-flip-front { animation: none; opacity: 0; }
 }
 
 /* ── Center board ───────────────────────────────────────────────────── */

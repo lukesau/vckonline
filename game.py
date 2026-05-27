@@ -253,11 +253,11 @@ class Game:
         self.roll_events = list(game_state.get('roll_events') or [])
         self.exhausted_count = game_state['exhausted_count']
         self.exhausted_stack = list(game_state.get('exhausted_stack') or [])
-        # Single global discard pile shared across all players. Cards land here
-        # when something explicitly "discards" them (truly out of play -- distinct
+        # Single global banish pile shared across all players. Cards land here
+        # when something explicitly "banishes" them (truly out of play -- distinct
         # from flipped citizens, which stay on a tableau face-down). Entries are
-        # the original card objects (Citizen, Monster, ...), in discard order.
-        self.discard_pile = list(game_state.get('discard_pile') or [])
+        # the original card objects (Citizen, Monster, ...), in banish order.
+        self.banish_pile = list(game_state.get('banish_pile') or [])
         # When a compound special-payout (`A + B + ...`) opens a blocking prompt
         # for leg N, legs N+1.. are stashed here so they fire after the prompt
         # resolves. None when nothing is pending.
@@ -358,6 +358,9 @@ class Game:
                 or aa == "manual_harvest"
                 or aa == "harvest_optional_exchange"
                 or aa == "harvest_steal"
+                or aa == "harvest_wild_gain_exchange"
+                or aa == "harvest_wild_cost_exchange"
+                or aa == "choose_domain_reward"
                 or aa == "choose_monster_slay"
                 or aa == "slay_monster_payment"
                 or aa.startswith("choose ")
@@ -571,6 +574,9 @@ class Game:
                 "manual_harvest",
                 "harvest_optional_exchange",
                 "harvest_steal",
+                "harvest_wild_gain_exchange",
+                "harvest_wild_cost_exchange",
+                "choose_domain_reward",
                 "domain_self_convert",
                 "choose_monster_slay",
                 "slay_monster_payment",
@@ -1386,10 +1392,12 @@ class Game:
                 dg = int(getattr(c, "gold_payout_on_turn", 0) or 0)
                 ds = int(getattr(c, "strength_payout_on_turn", 0) or 0)
                 dm = int(getattr(c, "magic_payout_on_turn", 0) or 0)
+                dv = int(getattr(c, "vp_payout_on_turn", 0) or 0)
                 player.gold_score = int(player.gold_score) + dg
                 player.strength_score = int(player.strength_score) + ds
                 player.magic_score = int(player.magic_score) + dm
-                self._bump_harvest_delta(player, dg, ds, dm, 0)
+                player.victory_score = int(player.victory_score) + dv
+                self._bump_harvest_delta(player, dg, ds, dm, dv)
                 cmd = _special_cmd(c, "special_payout_on_turn")
                 if getattr(c, "has_special_payout_on_turn", False) or cmd:
                     payout = self.execute_special_payout(cmd or c.special_payout_on_turn, player.player_id)
@@ -1402,10 +1410,12 @@ class Game:
                 dg = int(getattr(c, "gold_payout_off_turn", 0) or 0)
                 ds = int(getattr(c, "strength_payout_off_turn", 0) or 0)
                 dm = int(getattr(c, "magic_payout_off_turn", 0) or 0)
+                dv = int(getattr(c, "vp_payout_off_turn", 0) or 0)
                 player.gold_score = int(player.gold_score) + dg
                 player.strength_score = int(player.strength_score) + ds
                 player.magic_score = int(player.magic_score) + dm
-                self._bump_harvest_delta(player, dg, ds, dm, 0)
+                player.victory_score = int(player.victory_score) + dv
+                self._bump_harvest_delta(player, dg, ds, dm, dv)
                 cmd = _special_cmd(c, "special_payout_off_turn")
                 if getattr(c, "has_special_payout_off_turn", False) or cmd:
                     payout = self.execute_special_payout(cmd or c.special_payout_off_turn, player.player_id)
@@ -1512,6 +1522,9 @@ class Game:
             "manual_harvest",
             "harvest_optional_exchange",
             "harvest_steal",
+            "harvest_wild_gain_exchange",
+            "harvest_wild_cost_exchange",
+            "choose_domain_reward",
             "choose_monster_slay",
             "slay_monster_payment",
         ):
@@ -1898,14 +1911,205 @@ class Game:
         )
         return True
 
-    def _execute_discard_center_payout(self, command, player_id):
-        """Parse `discard_center <kind> [optional]` and prompt for a center-stack card.
+    _WILD_SCORE_MAP = {"g": "gold_score", "s": "strength_score", "m": "magic_score", "v": "victory_score"}
 
-        Gnoll Bonewitch-style discard removes an accessible card from the board,
-        not from a player's tableau. The removed card lands in the global discard pile.
+    def _execute_wild_gain_exchange_payout(self, command, player_id):
+        """exchange [res] [N] wild [M] — pay N of res, then choose M of any resource (g/s/m)."""
+        parts = (command or "").split()
+        if len(parts) < 5:
+            return [-9999, 0, 0, 0]
+        cost_res = parts[1].lower()
+        try:
+            cost_amt = int(parts[2])
+            gain_amt = int(parts[4])
+        except (ValueError, IndexError):
+            return [-9999, 0, 0, 0]
+        if cost_res not in self._WILD_SCORE_MAP or cost_amt <= 0 or gain_amt <= 0:
+            return [-9999, 0, 0, 0]
+        player = self._player_by_id(player_id)
+        if not player:
+            return [-9999, 0, 0, 0]
+        if int(getattr(player, self._WILD_SCORE_MAP[cost_res], 0) or 0) < cost_amt:
+            return [0, 0, 0, 0]
+        self.pending_required_choice = {
+            "kind": "harvest_wild_gain_exchange",
+            "player_id": player_id,
+            "cost_resource": cost_res,
+            "cost_amount": cost_amt,
+            "gain_amount": gain_amt,
+            "command": command,
+        }
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "harvest_wild_gain_exchange"
+        return [0, 0, 0, 0]
+
+    def _apply_wild_gain_exchange_choice(self, player_id, gain_res, prc):
+        """Deduct the fixed cost then award the chosen resource."""
+        player = self._player_by_id(player_id)
+        if not player:
+            return
+        cost_res = prc["cost_resource"]
+        cost_amt = prc["cost_amount"]
+        gain_amt = prc["gain_amount"]
+        before = self._player_scores_line(player)
+        setattr(player, self._WILD_SCORE_MAP[cost_res],
+                int(getattr(player, self._WILD_SCORE_MAP[cost_res], 0)) - cost_amt)
+        setattr(player, self._WILD_SCORE_MAP[gain_res],
+                int(getattr(player, self._WILD_SCORE_MAP[gain_res], 0)) + gain_amt)
+        dg = (-cost_amt if cost_res == "g" else 0) + (gain_amt if gain_res == "g" else 0)
+        ds = (-cost_amt if cost_res == "s" else 0) + (gain_amt if gain_res == "s" else 0)
+        dm = (-cost_amt if cost_res == "m" else 0) + (gain_amt if gain_res == "m" else 0)
+        dv = (-cost_amt if cost_res == "v" else 0) + (gain_amt if gain_res == "v" else 0)
+        self._bump_harvest_delta(player, dg, ds, dm, dv)
+        after = self._player_scores_line(player)
+        self._log_game_event(
+            f"{self._player_label(player_id)} wild-gain exchange ({prc.get('command')}): "
+            f"chose {gain_res}; scores {before} -> {after}"
+        )
+
+    def _execute_wild_cost_exchange_payout(self, command, player_id):
+        """exchange wild [N] [res] [M] — choose which resource to pay N of, then gain M of res."""
+        parts = (command or "").split()
+        if len(parts) < 5:
+            return [-9999, 0, 0, 0]
+        try:
+            cost_amt = int(parts[2])
+            gain_amt = int(parts[4])
+        except (ValueError, IndexError):
+            return [-9999, 0, 0, 0]
+        gain_res = parts[3].lower()
+        if gain_res not in self._WILD_SCORE_MAP or cost_amt <= 0 or gain_amt <= 0:
+            return [-9999, 0, 0, 0]
+        player = self._player_by_id(player_id)
+        if not player:
+            return [-9999, 0, 0, 0]
+        options = [
+            {"resource": res, "amount": cost_amt}
+            for res in ("g", "s", "m")
+            if int(getattr(player, self._WILD_SCORE_MAP[res], 0) or 0) >= cost_amt
+        ]
+        if not options:
+            return [0, 0, 0, 0]
+        self.pending_required_choice = {
+            "kind": "harvest_wild_cost_exchange",
+            "player_id": player_id,
+            "cost_options": options,
+            "gain_resource": gain_res,
+            "gain_amount": gain_amt,
+            "command": command,
+        }
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "harvest_wild_cost_exchange"
+        return [0, 0, 0, 0]
+
+    def _apply_wild_cost_exchange_choice(self, player_id, cost_res, prc):
+        """Deduct the chosen resource then award the fixed gain."""
+        player = self._player_by_id(player_id)
+        if not player:
+            return
+        cost_opts = prc.get("cost_options") or []
+        cost_amt = next((o["amount"] for o in cost_opts if o["resource"] == cost_res), None)
+        if cost_amt is None:
+            return
+        gain_res = prc["gain_resource"]
+        gain_amt = prc["gain_amount"]
+        before = self._player_scores_line(player)
+        setattr(player, self._WILD_SCORE_MAP[cost_res],
+                int(getattr(player, self._WILD_SCORE_MAP[cost_res], 0)) - cost_amt)
+        setattr(player, self._WILD_SCORE_MAP[gain_res],
+                int(getattr(player, self._WILD_SCORE_MAP[gain_res], 0)) + gain_amt)
+        dg = (-cost_amt if cost_res == "g" else 0) + (gain_amt if gain_res == "g" else 0)
+        ds = (-cost_amt if cost_res == "s" else 0) + (gain_amt if gain_res == "s" else 0)
+        dm = (-cost_amt if cost_res == "m" else 0) + (gain_amt if gain_res == "m" else 0)
+        dv = (-cost_amt if cost_res == "v" else 0) + (gain_amt if gain_res == "v" else 0)
+        self._bump_harvest_delta(player, dg, ds, dm, dv)
+        after = self._player_scores_line(player)
+        self._log_game_event(
+            f"{self._player_label(player_id)} wild-cost exchange ({prc.get('command')}): "
+            f"paid {cost_res}; scores {before} -> {after}"
+        )
+
+    def _execute_grant_domain_payout(self, player_id):
+        """Grant one free domain chosen from the accessible center stacks (no cost, no role check)."""
+        player = self._player_by_id(player_id)
+        if not player:
+            return [-9999, 0, 0, 0]
+        options = []
+        for stack_idx, domain_stack in enumerate(self.domain_grid):
+            if not domain_stack:
+                continue
+            top = domain_stack[-1]
+            if getattr(top, "domain_id", None) is None:
+                continue
+            if not getattr(top, "is_accessible", False) or not getattr(top, "is_visible", True):
+                continue
+            options.append({
+                "stack_idx": stack_idx,
+                "domain_id": int(getattr(top, "domain_id", 0)),
+                "name": getattr(top, "name", "Domain"),
+            })
+        source_name = getattr(self, "_immediate_slay_source_label", None) or "Effect"
+        if not options:
+            self._log_game_event(
+                f"{self._player_label(player_id)} could not use \"{source_name}\" "
+                f"(no domains available to take)."
+            )
+            return [0, 0, 0, 0]
+        self.pending_required_choice = {
+            "kind": "grant_domain_reward",
+            "player_id": player_id,
+            "source_name": source_name,
+            "options": options,
+        }
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "choose_domain_reward"
+        return [0, 0, 0, 0]
+
+    def _apply_grant_domain_choice(self, player_id, stack_idx):
+        """Acquire the chosen domain for free, running all the normal post-acquisition steps."""
+        player = self._player_by_id(player_id)
+        if not player:
+            return
+        domain_stacks = self.domain_grid
+        if stack_idx < 0 or stack_idx >= len(domain_stacks):
+            return
+        domain_stack = domain_stacks[stack_idx]
+        if not domain_stack:
+            return
+        top = domain_stack[-1]
+        if getattr(top, "domain_id", None) is None:
+            return
+        source_name = (getattr(self, "pending_required_choice", None) or {}).get("source_name", "Effect")
+        before = self._player_scores_line(player)
+        acquired = domain_stack.pop(-1)
+        acquired.acquired_turn_number = int(self.turn_number)
+        player.owned_domains.append(acquired)
+        vp_gain = int(getattr(acquired, "vp_reward", 0) or 0)
+        if vp_gain:
+            player.victory_score = int(getattr(player, "victory_score", 0)) + vp_gain
+            self._bump_harvest_delta(player, 0, 0, 0, vp_gain)
+        if not domain_stack and self.exhausted_stack:
+            exhausted = self.exhausted_stack.pop()
+            if isinstance(exhausted, Event):
+                exhausted.toggle_visibility(True)
+                exhausted.toggle_accessibility(True)
+            domain_stack.append(exhausted)
+            self.exhausted_count = int(self.exhausted_count) + 1
+        after = self._player_scores_line(player)
+        self._log_game_event(
+            f"{self._player_label(player_id)} took domain \"{acquired.name}\" "
+            f"via \"{source_name}\" (free); scores {before} -> {after}"
+        )
+        self._apply_domain_activation_effect(player, acquired)
+
+    def _execute_banish_center_payout(self, command, player_id):
+        """Parse `banish_center <kind> [optional]` and prompt for a center-stack card.
+
+        Gnoll Bonewitch-style banish removes an accessible card from the board,
+        not from a player's tableau. The removed card lands in the global banish pile.
         """
         parts = (command or "").strip().split()
-        if not parts or parts[0].lower() != "discard_center":
+        if not parts or parts[0].lower() != "banish_center":
             return [-9999, 0, 0, 0]
         if len(parts) < 2:
             return [-9999, 0, 0, 0]
@@ -1931,25 +2135,25 @@ class Game:
             })
         if not options:
             self._log_game_event(
-                f"{self._player_label(player_id)} had no center-stack {kind} to discard; effect skipped."
+                f"{self._player_label(player_id)} had no center-stack {kind} to banish; effect skipped."
             )
             return [0, 0, 0, 0]
         self.action_required["id"] = player_id
         self.action_required["action"] = "choose_owned_card"
         self.pending_required_choice = {
-            "kind": "discard_center_card",
+            "kind": "banish_center_card",
             "player_id": player_id,
             "card_kind": kind,
             "options": options,
             "allow_skip": optional,
         }
         self._log_game_event(
-            f"{self._player_label(player_id)} is choosing a center-stack {kind} to discard."
+            f"{self._player_label(player_id)} is choosing a center-stack {kind} to banish."
         )
         return [0, 0, 0, 0]
 
-    def _discard_center_citizen(self, stack_idx):
-        """Remove the accessible top citizen from a board stack and push it to the discard pile."""
+    def _banish_center_citizen(self, stack_idx):
+        """Remove the accessible top citizen from a board stack and push it to the banish pile."""
         stacks = list(getattr(self, "citizen_grid", []) or [])
         if stack_idx < 0 or stack_idx >= len(stacks):
             return None
@@ -1960,30 +2164,30 @@ class Game:
         if not getattr(citizen, "is_accessible", False):
             return None
         if getattr(citizen, "citizen_id", None) is None:
-            return None  # Event/Exhausted placeholder — not discardable as a citizen
-        discarded = stack.pop(-1)
-        self._citizen_set_flipped(discarded, False)
-        self.discard_pile.append(discarded)
+            return None  # Event/Exhausted placeholder — not banishable as a citizen
+        banished = stack.pop(-1)
+        self._citizen_set_flipped(banished, False)
+        self.banish_pile.append(banished)
         self._finalize_citizen_stack_after_claiming_top(stack)
-        return discarded
+        return banished
 
-    def _execute_discard_owned_payout(self, command, player_id):
-        """Parse `discard_owned <kind> [optional]` and open a self-target prompt.
+    def _execute_banish_owned_payout(self, command, player_id):
+        """Parse `banish_owned <kind> [optional]` and open a self-target prompt.
 
         Grammar (positional, mirrors `return_owned` and `take_owned`):
           kind:     citizen   (future: monster, ...)
           optional: literal "optional" flag when the actor may decline
 
-        "Discard" is a permanent removal: the chosen card leaves the player's
-        tableau and lands on the global `self.discard_pile`. Distinct from
+        "Banish" is a permanent removal: the chosen card leaves the player's
+        tableau and lands on the global `self.banish_pile`. Distinct from
         `_citizen_set_flipped` (face-down but still on the tableau and recoverable).
 
-        Returns [0,0,0,0] -- the discard itself grants no resources; any companion
+        Returns [0,0,0,0] -- the banish itself grants no resources; any companion
         gains live in a sibling compound leg (e.g. `... + choose <citizens>`),
         which is chained automatically via `_set_payout_continuation`.
         """
         parts = (command or "").strip().split()
-        if not parts or parts[0].lower() != "discard_owned":
+        if not parts or parts[0].lower() != "banish_owned":
             return [-9999, 0, 0, 0]
         if len(parts) < 2:
             return [-9999, 0, 0, 0]
@@ -2006,27 +2210,27 @@ class Game:
             })
         if not options:
             self._log_game_event(
-                f"{self._player_label(player_id)} had no {kind} to discard; effect skipped."
+                f"{self._player_label(player_id)} had no {kind} to banish; effect skipped."
             )
             return [0, 0, 0, 0]
         self.action_required["id"] = player_id
         self.action_required["action"] = "choose_owned_card"
         self.pending_required_choice = {
-            "kind": "discard_owned_card",
+            "kind": "banish_owned_card",
             "player_id": player_id,
             "card_kind": kind,
             "options": options,
             "allow_skip": optional,
         }
         self._log_game_event(
-            f"{self._player_label(player_id)} is choosing a {kind} to discard."
+            f"{self._player_label(player_id)} is choosing a {kind} to banish."
         )
         return [0, 0, 0, 0]
 
-    def _discard_owned_citizen(self, player, src_idx):
-        """Remove a citizen from `player.owned_citizens[src_idx]` and push to the global discard pile.
+    def _banish_owned_citizen(self, player, src_idx):
+        """Remove a citizen from `player.owned_citizens[src_idx]` and push to the global banish pile.
 
-        Returns the discarded citizen (for logging), or None on bad index.
+        Returns the banished citizen (for logging), or None on bad index.
         Caller is responsible for logging the higher-level "via <card>" context.
         """
         owned = list(getattr(player, "owned_citizens", []) or [])
@@ -2036,7 +2240,7 @@ class Game:
         if getattr(citizen, "is_flipped", False):
             self._citizen_set_flipped(citizen, False)
         del player.owned_citizens[src_idx]
-        self.discard_pile.append(citizen)
+        self.banish_pile.append(citizen)
         return citizen
 
     def _execute_flip_citizen_payout(self, command, player_id):
@@ -2062,6 +2266,8 @@ class Game:
             return [-9999, 0, 0, 0]
         options = []
         for p in self.player_list:
+            if p.player_id == player_id:
+                continue
             owned = list(getattr(p, "owned_citizens", []) or [])
             if not any(not getattr(c, "is_flipped", False) for c in owned):
                 continue
@@ -2069,7 +2275,6 @@ class Game:
                 "token": "player",
                 "player_id": p.player_id,
                 "name": getattr(p, "name", "?"),
-                "self": p.player_id == player_id,
             })
         if not options:
             self._log_game_event(
@@ -2278,6 +2483,10 @@ class Game:
             return self._execute_slay_payout(player_id)
         if low.startswith("steal"):
             return self._execute_steal_payout(raw, player_id)
+        if low.startswith("take_owned"):
+            return self._execute_take_owned_payout(raw, player_id)
+        if low == "<domains>" or low.startswith("<domains"):
+            return self._execute_grant_domain_payout(player_id)
         if low == "concurrent_flip_one_citizen":
             self._begin_concurrent_flip_one_citizen(player_id)
             return [0, 0, 0, 0]
@@ -2291,10 +2500,10 @@ class Game:
             )
         if low.startswith("flip_citizen"):
             return self._execute_flip_citizen_payout(raw, player_id)
-        if low.startswith("discard_center"):
-            return self._execute_discard_center_payout(raw, player_id)
-        if low.startswith("discard_owned"):
-            return self._execute_discard_owned_payout(raw, player_id)
+        if low.startswith("banish_center"):
+            return self._execute_banish_center_payout(raw, player_id)
+        if low.startswith("banish_owned"):
+            return self._execute_banish_owned_payout(raw, player_id)
         payout = [0, 0, 0, 0]  # gp, sp, mp, vp, todo: citizen, monster, domain
         split_command = self._tokenize_payout(command or "")
         if not split_command:
@@ -2416,6 +2625,10 @@ class Game:
                     case _:
                         payout[0] = -9999
             case "exchange":
+                if second_word == "wild":
+                    return self._execute_wild_cost_exchange_payout(raw, player_id)
+                if fourth_word == "wild":
+                    return self._execute_wild_gain_exchange_payout(raw, player_id)
                 player_x = self._player_by_id(player_id)
                 if not player_x:
                     payout[0] = -9999
@@ -3458,11 +3671,6 @@ class Game:
             if parsed:
                 self._prompt_return_owned_card(player, domain, parsed)
             return
-        if low.startswith("take_owned"):
-            parsed = self._parse_take_owned_effect(effect)
-            if parsed:
-                self._prompt_take_owned_card(player, domain, parsed)
-            return
         if low.startswith("manipulate_resources"):
             kv = _parse_domain_effect_kv(effect)
             mode = (kv.get("mode") or "").strip().lower()
@@ -3673,22 +3881,38 @@ class Game:
         optional = len(parts) >= 4 and parts[3].lower() == "optional"
         return {"kind": kind, "pick": pick, "optional": optional}
 
-    def _prompt_take_owned_card(self, player, domain, parsed):
-        """Open a `choose_player` prompt for Purloiner's-Perch-style activations.
+    def _execute_take_owned_payout(self, command, player_id):
+        """Route `take_owned <kind> <pick> [optional]` through execute_special_payout.
+
+        Works for both domain activations (source label already set by
+        _apply_domain_activation_effect) and monster special rewards (label set by
+        slay_monster before calling execute_special_payout).
+        """
+        parsed = self._parse_take_owned_effect(command)
+        if not parsed:
+            return [-9999, 0, 0, 0]
+        player = self._player_by_id(player_id)
+        if not player:
+            return [-9999, 0, 0, 0]
+        source_name = getattr(self, "_immediate_slay_source_label", None) or "Effect"
+        self._prompt_take_owned_card(player, source_name, parsed)
+        return [0, 0, 0, 0]
+
+    def _prompt_take_owned_card(self, player, source_name, parsed):
+        """Open a `choose_player` prompt for take_owned effects (domains and monsters).
 
         Reuses the same prompt verb used by `domain_manipulate_player` so client and
         blocking-check code don't need a new action token. The discriminator lives
         in `pending_required_choice.kind = "domain_take_owned"`.
 
         Eligibility: only other players with at least one owned card of the right
-        kind are listed. If nobody is eligible the effect is silently lost (we've
-        already paid the activation in the build flow); we log it so the player can
-        see why nothing happened.
+        kind are listed. If nobody is eligible the effect is silently lost; we log
+        it so the player can see why nothing happened.
         """
         kind = parsed["kind"]
         pick = parsed.get("pick", "random")
         optional = bool(parsed.get("optional"))
-        domain_name = getattr(domain, "name", "Domain")
+        domain_name = source_name
         active_pid = player.player_id
         attr = "owned_monsters" if kind == "monster" else "owned_citizens"
         options = []
@@ -4188,6 +4412,63 @@ class Game:
                     return
                 return
 
+            if current_required == "harvest_wild_gain_exchange":
+                prc_wg = getattr(self, "pending_required_choice", None) or {}
+                if prc_wg.get("kind") != "harvest_wild_gain_exchange" or prc_wg.get("player_id") != player_id:
+                    return
+                act_wg = (action or "").strip().lower()
+                if not act_wg.startswith("wild_gain_resource "):
+                    return
+                res_wg = act_wg.split()[1] if len(act_wg.split()) > 1 else ""
+                if res_wg not in ("g", "s", "m"):
+                    return
+                self.pending_required_choice = None
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self._apply_wild_gain_exchange_choice(player_id, res_wg, prc_wg)
+                self._maybe_resume_harvest_prompt()
+                return
+
+            if current_required == "harvest_wild_cost_exchange":
+                prc_wc = getattr(self, "pending_required_choice", None) or {}
+                if prc_wc.get("kind") != "harvest_wild_cost_exchange" or prc_wc.get("player_id") != player_id:
+                    return
+                act_wc = (action or "").strip().lower()
+                if not act_wc.startswith("wild_cost_resource "):
+                    return
+                res_wc = act_wc.split()[1] if len(act_wc.split()) > 1 else ""
+                valid_wc = {o["resource"] for o in (prc_wc.get("cost_options") or [])}
+                if res_wc not in valid_wc:
+                    return
+                self.pending_required_choice = None
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self._apply_wild_cost_exchange_choice(player_id, res_wc, prc_wc)
+                self._maybe_resume_harvest_prompt()
+                return
+
+            if current_required == "choose_domain_reward":
+                prc_dr = getattr(self, "pending_required_choice", None) or {}
+                if prc_dr.get("kind") != "grant_domain_reward" or prc_dr.get("player_id") != player_id:
+                    return
+                act_dr = (action or "").strip().lower()
+                if not act_dr.startswith("grant_domain "):
+                    return
+                opts_dr = list(prc_dr.get("options") or [])
+                try:
+                    sel_dr = int(act_dr.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if sel_dr < 0 or sel_dr >= len(opts_dr):
+                    return
+                stack_idx_dr = opts_dr[sel_dr]["stack_idx"]
+                self.pending_required_choice = None
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self._apply_grant_domain_choice(player_id, stack_idx_dr)
+                self._resume_after_domain_activation_follow_up()
+                return
+
             prc0 = getattr(self, "pending_required_choice", None) or {}
 
             # Immediate "may slay a Monster" prompt — stage 1: pick a monster.
@@ -4555,14 +4836,14 @@ class Game:
                 self._resume_after_domain_activation_follow_up()
                 return
 
-            if prc0.get("kind") == "discard_owned_card" and str(current_required).strip() == "choose_owned_card":
+            if prc0.get("kind") == "banish_owned_card" and str(current_required).strip() == "choose_owned_card":
                 if player_id != prc0.get("player_id"):
                     return
                 act = (action or "").strip().lower()
                 card_kind = prc0.get("card_kind")
                 if prc0.get("allow_skip") and act == "skip":
                     self._log_game_event(
-                        f"{self._player_label(player_id)} declined to discard a {card_kind}."
+                        f"{self._player_label(player_id)} declined to banish a {card_kind}."
                     )
                     self.action_required["action"] = ""
                     self.action_required["id"] = self.game_id
@@ -4584,18 +4865,18 @@ class Game:
                 if not player:
                     return
                 if card_kind == "citizen":
-                    discarded = self._discard_owned_citizen(player, src_idx)
+                    banished = self._banish_owned_citizen(player, src_idx)
                 else:
-                    discarded = None
-                if not discarded:
+                    banished = None
+                if not banished:
                     self.action_required["action"] = ""
                     self.action_required["id"] = self.game_id
                     self.pending_required_choice = None
                     self._resume_payout_continuation()
                     return
                 self._log_game_event(
-                    f"{self._player_label(player_id)} discarded {card_kind} "
-                    f"\"{card_label}\" to the discard pile."
+                    f"{self._player_label(player_id)} banished {card_kind} "
+                    f"\"{card_label}\" to the banish pile."
                 )
                 self.action_required["action"] = ""
                 self.action_required["id"] = self.game_id
@@ -4603,14 +4884,14 @@ class Game:
                 self._resume_payout_continuation()
                 return
 
-            if prc0.get("kind") == "discard_center_card" and str(current_required).strip() == "choose_owned_card":
+            if prc0.get("kind") == "banish_center_card" and str(current_required).strip() == "choose_owned_card":
                 if player_id != prc0.get("player_id"):
                     return
                 act = (action or "").strip().lower()
                 card_kind = prc0.get("card_kind")
                 if prc0.get("allow_skip") and act == "skip":
                     self._log_game_event(
-                        f"{self._player_label(player_id)} declined to discard a center-stack {card_kind}."
+                        f"{self._player_label(player_id)} declined to banish a center-stack {card_kind}."
                     )
                     self.action_required["action"] = ""
                     self.action_required["id"] = self.game_id
@@ -4629,18 +4910,18 @@ class Game:
                 stack_idx = int(opts[sel].get("idx", -1))
                 card_label = opts[sel].get("name", "?")
                 if card_kind == "citizen":
-                    discarded = self._discard_center_citizen(stack_idx)
+                    banished = self._banish_center_citizen(stack_idx)
                 else:
-                    discarded = None
-                if not discarded:
+                    banished = None
+                if not banished:
                     self.action_required["action"] = ""
                     self.action_required["id"] = self.game_id
                     self.pending_required_choice = None
                     self._resume_payout_continuation()
                     return
                 self._log_game_event(
-                    f"{self._player_label(player_id)} discarded center-stack {card_kind} "
-                    f"\"{card_label}\" to the discard pile."
+                    f"{self._player_label(player_id)} banished center-stack {card_kind} "
+                    f"\"{card_label}\" to the banish pile."
                 )
                 self.action_required["action"] = ""
                 self.action_required["id"] = self.game_id
@@ -5031,7 +5312,11 @@ class Game:
             player.owned_monsters.append(monster_to_add)
 
             if top.has_special_reward:
-                payout = self.execute_special_payout(top.special_reward, player_id)
+                self._immediate_slay_source_label = getattr(top, "name", "Monster")
+                try:
+                    payout = self.execute_special_payout(top.special_reward, player_id)
+                finally:
+                    self._immediate_slay_source_label = None
                 if isinstance(payout, list) and len(payout) >= 1 and payout[0] == -9999:
                     if not (isinstance(self.action_required, dict) and self.action_required.get("action")):
                         payout = [0, 0, 0, 0]

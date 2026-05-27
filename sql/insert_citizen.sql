@@ -13,6 +13,8 @@ INSERT INTO `vckonline`.`citizens`
 `strength_payout_off_turn`,
 `magic_payout_on_turn`,
 `magic_payout_off_turn`,
+`vp_payout_on_turn`,
+`vp_payout_off_turn`,
 `has_special_payout_on_turn`,
 `has_special_payout_off_turn`,
 `special_payout_on_turn`,
@@ -33,6 +35,8 @@ VALUES
 ,/*strength_payout_off_turn*/
 ,/*magic_payout_on_turn*/
 ,/*magic_payout_off_turn*/
+,/*vp_payout_on_turn*/
+,/*vp_payout_off_turn*/
 ,/*has_special_payout_on_turn*/
 ,/*has_special_payout_off_turn*/
 ,/*special_payout_on_turn*/

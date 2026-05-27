@@ -211,6 +211,15 @@
           { value: "worker",  label: "Worker" },
         ],
       });
+      const rollSignatures = unique(cards.map(rollSignatureFor).filter(Boolean))
+        .sort(compareRollSignatures);
+      if (rollSignatures.length) {
+        groups.push({
+          key: "roll_match",
+          label: "Rolls",
+          options: rollSignatures.map(sig => ({ value: sig, label: sig })),
+        });
+      }
       groups.push({
         key: "has_special",
         label: "Has effect",
@@ -290,6 +299,26 @@
     return Array.from(new Set(arr));
   }
 
+  // Returns a canonical "A" or "A/B" string of a card's positive roll matches,
+  // or null if the card has no positive matches. Negative/zero sentinels (e.g.
+  // the -1 used in roll_match2 for single-match citizens) are dropped so a card
+  // like Dragoon (rolls 9, 10) groups under "9/10" and Kings Guard (7, 8) under
+  // "7/8", while a single-match citizen with rolls (3, -1) groups under "3".
+  function rollSignatureFor(card) {
+    const rolls = [card.roll_match1, card.roll_match2]
+      .map(r => Number(r))
+      .filter(r => Number.isFinite(r) && r > 0);
+    if (!rolls.length) return null;
+    rolls.sort((a, b) => a - b);
+    return rolls.join("/");
+  }
+
+  function compareRollSignatures(a, b) {
+    const [a1, a2 = 0] = a.split("/").map(Number);
+    const [b1, b2 = 0] = b.split("/").map(Number);
+    return a1 - b1 || a2 - b2;
+  }
+
   // ── filtering pipeline ────────────────────────────────────────────────
   function filteredCards() {
     const type = state.activeType;
@@ -321,6 +350,10 @@
         if (f.role) {
           const count = c[`${f.role}_count`] || 0;
           if (count <= 0) return false;
+        }
+        if (f.roll_match) {
+          const sig = rollSignatureFor(c);
+          if (sig !== f.roll_match) return false;
         }
         if (f.has_special) {
           const on = !!c.has_special_payout_on_turn && !!String(c.special_payout_on_turn || "").trim();

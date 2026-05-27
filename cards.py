@@ -88,7 +88,9 @@ class Starter(Card):
 class Citizen(Card):
     def __init__(self, citizen_id, name, gold_cost, roll_match1, roll_match2, shadow_count, holy_count, soldier_count,
                  worker_count, gold_payout_on_turn, gold_payout_off_turn, strength_payout_on_turn,
-                 strength_payout_off_turn, magic_payout_on_turn, magic_payout_off_turn, has_special_payout_on_turn,
+                 strength_payout_off_turn, magic_payout_on_turn, magic_payout_off_turn,
+                 vp_payout_on_turn, vp_payout_off_turn,
+                 has_special_payout_on_turn,
                  has_special_payout_off_turn, special_payout_on_turn, special_payout_off_turn, special_citizen,
                  expansion, is_flipped=False):
         super().__init__()
@@ -107,6 +109,8 @@ class Citizen(Card):
         self.strength_payout_off_turn = strength_payout_off_turn
         self.magic_payout_on_turn = magic_payout_on_turn
         self.magic_payout_off_turn = magic_payout_off_turn
+        self.vp_payout_on_turn = _coerce_int(vp_payout_on_turn)
+        self.vp_payout_off_turn = _coerce_int(vp_payout_off_turn)
         self.has_special_payout_on_turn = has_special_payout_on_turn
         self.has_special_payout_off_turn = has_special_payout_off_turn
         self.special_payout_on_turn = special_payout_on_turn
@@ -142,6 +146,8 @@ class Citizen(Card):
                 "strength_payout_off_turn": self.strength_payout_off_turn,
                 "magic_payout_on_turn": self.magic_payout_on_turn,
                 "magic_payout_off_turn": self.magic_payout_off_turn,
+                "vp_payout_on_turn": self.vp_payout_on_turn,
+                "vp_payout_off_turn": self.vp_payout_off_turn,
                 "has_special_payout_on_turn": self.has_special_payout_on_turn,
                 "has_special_payout_off_turn": self.has_special_payout_off_turn,
                 "special_payout_on_turn": self.special_payout_on_turn,
@@ -166,6 +172,8 @@ class Citizen(Card):
                    strength_payout_off_turn=dict_["strength_payout_off_turn"],
                    magic_payout_on_turn=dict_["magic_payout_on_turn"],
                    magic_payout_off_turn=dict_["magic_payout_off_turn"],
+                   vp_payout_on_turn=dict_.get("vp_payout_on_turn", 0),
+                   vp_payout_off_turn=dict_.get("vp_payout_off_turn", 0),
                    has_special_payout_on_turn=dict_["has_special_payout_on_turn"],
                    has_special_payout_off_turn=dict_["has_special_payout_off_turn"],
                    special_payout_on_turn=dict_["special_payout_on_turn"],
