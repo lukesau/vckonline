@@ -390,20 +390,376 @@ async function initLobbyBackgroundCanvas(canvas) {
 }
 
 // ── Lobby modal when visiting without game_id / player_id ────────────────
+// Full preset labels live in the HTML <option> markup. The JS only needs
+// short labels for compact lobby browser/wait rows.
+const LOBBY_PRESET_SHORT_LABELS = {
+  current: 'Default',
+  base: 'Base Set',
+  test1: 'Test 1',
+  test2: 'Test 2',
+  random: 'Random',
+  draft: 'Draft',
+};
+
+// ── Draft mode client state ──────────────────────────────────────────────────
+let _draftPhaseKey = '';      // 'monsters' or 'citizens_1' etc — reset votes on change
+let _draftMonsterVotes = [];  // area names the player has locally selected (up to 5)
+let _draftCitizenVote = null; // citizen_id the player has locally selected
+let _draftVoteSubmitted = false;
+let _draftTimerInterval = null;
+let _draftTimerEnd = 0;
+
+function _stopDraftTimer() {
+  if (_draftTimerInterval) {
+    clearInterval(_draftTimerInterval);
+    _draftTimerInterval = null;
+  }
+}
+
+function _startDraftTimer(timerEl) {
+  _stopDraftTimer();
+  function tick() {
+    const secs = Math.max(0, Math.ceil(_draftTimerEnd - Date.now() / 1000));
+    if (timerEl) {
+      timerEl.textContent = secs;
+      timerEl.classList.toggle('draft-timer--urgent', secs <= 10);
+    }
+  }
+  tick();
+  _draftTimerInterval = setInterval(tick, 500);
+}
+
+function _getDraftPhaseKey(draft) {
+  if (!draft) return '';
+  if (draft.phase === 'monsters') return 'monsters';
+  if (draft.phase === 'citizens') return `citizens_${draft.current_roll}`;
+  return '';
+}
+
+function lobbyPresetShortLabel(preset) {
+  return LOBBY_PRESET_SHORT_LABELS[preset] || preset || 'Custom';
+}
+
+// Some players pick very long display names. In compact "meta" surfaces
+// inside the lobby modal (the comma-separated roster on each lobby
+// card, the owner name embedded in the in-lobby meta line, etc.) those
+// names would otherwise blow out the layout on mobile, so we cap them
+// fairly aggressively here. Player-row UIs render the full name and
+// rely on CSS ellipsis instead, since each row has its own line.
+const LOBBY_META_NAME_MAX = 8;
+function truncateLobbyName(name, max = LOBBY_META_NAME_MAX) {
+  const s = String(name == null ? '' : name);
+  return s.length > max ? s.slice(0, max) + '…' : s;
+}
+
+function handleDraftState(draft, selfId) {
+  const phaseKey = _getDraftPhaseKey(draft);
+  if (phaseKey !== _draftPhaseKey) {
+    _draftPhaseKey = phaseKey;
+    _draftMonsterVotes = [];
+    _draftCitizenVote = null;
+    _draftVoteSubmitted = false;
+    // Pre-fill from server's confirmed vote so a reconnecting player sees their submission
+    if (draft.phase === 'monsters' && draft.my_monster_votes && draft.my_monster_votes.length > 0) {
+      _draftMonsterVotes = [...draft.my_monster_votes];
+      _draftVoteSubmitted = true;
+    } else if (draft.phase === 'citizens' && draft.my_citizen_vote != null) {
+      _draftCitizenVote = draft.my_citizen_vote;
+      _draftVoteSubmitted = true;
+    }
+  } else {
+    if (draft.phase === 'monsters' && draft.my_monster_votes && draft.my_monster_votes.length > 0) {
+      _draftVoteSubmitted = true;
+    } else if (draft.phase === 'citizens' && draft.my_citizen_vote != null) {
+      _draftVoteSubmitted = true;
+    }
+  }
+
+  _draftTimerEnd = draft.timer_end || 0;
+
+  const titleEl = document.getElementById('draft-title');
+  const progressEl = document.getElementById('draft-progress');
+  const instrEl = document.getElementById('draft-instructions');
+  const lastResultEl = document.getElementById('draft-last-result');
+  const gridEl = document.getElementById('draft-grid');
+  const timerEl = document.getElementById('draft-timer');
+  const statusEl = document.getElementById('draft-vote-status');
+  const voteBtn = document.getElementById('draft-vote-btn');
+
+  if (!gridEl || !voteBtn) return;
+
+  _startDraftTimer(timerEl);
+
+  // Last result banner
+  if (lastResultEl) {
+    const lr = draft.last_result;
+    if (lr && lr.phase === 'monsters' && lr.selected && lr.selected.length) {
+      lastResultEl.textContent = `Monsters selected: ${lr.selected.join(', ')}`;
+    } else if (lr && lr.phase === 'citizens' && lr.winner_id != null) {
+      const roll = lr.roll;
+      // Find the citizen name from available data
+      const allC = draft.available_citizens || [];
+      const winner = allC.find(c => c.id === lr.winner_id);
+      const name = winner ? winner.name : `Citizen #${lr.winner_id}`;
+      lastResultEl.textContent = `Roll ${roll}: ${name} selected`;
+    } else {
+      lastResultEl.textContent = '';
+    }
+  }
+
+  if (draft.phase === 'monsters') {
+    if (titleEl) titleEl.textContent = 'Monster Draft';
+    if (progressEl) progressEl.textContent = `Select your top 5 monster stacks`;
+    if (instrEl) instrEl.textContent = _draftVoteSubmitted
+      ? 'Votes submitted — waiting for others or timer'
+      : 'Click up to 5 stacks to vote for them, then submit';
+    _renderMonsterGrid(draft, gridEl, selfId);
+    _updateDraftMonstersFooter(draft, statusEl, voteBtn, selfId);
+  } else if (draft.phase === 'citizens') {
+    const round = draft.citizen_draft_round || 1;
+    const total = draft.citizen_draft_total || 10;
+    const roll = draft.current_roll;
+    if (titleEl) titleEl.textContent = `Citizen Draft — Roll ${roll}`;
+    if (progressEl) progressEl.textContent = `Citizen slot ${round} of ${total}`;
+    if (instrEl) instrEl.textContent = _draftVoteSubmitted
+      ? 'Vote submitted — waiting for others or timer'
+      : `Choose which citizen fills the roll ${roll} slot`;
+    _renderCitizenGrid(draft, gridEl, selfId);
+    _updateDraftCitizensFooter(draft, statusEl, voteBtn, selfId);
+  }
+}
+
+function _openStackViewer(area) {
+  const cards = area.stack_cards || (area.front_card ? [area.front_card] : []);
+  const viewer = document.createElement('div');
+  viewer.className = 'draft-stack-viewer';
+
+  const panel = document.createElement('div');
+  panel.className = 'draft-stack-viewer-panel';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'draft-stack-viewer-close';
+  closeBtn.setAttribute('aria-label', 'Close');
+  closeBtn.textContent = '×';
+  closeBtn.addEventListener('click', () => viewer.remove());
+  panel.appendChild(closeBtn);
+
+  const title = document.createElement('h3');
+  title.className = 'draft-stack-viewer-title';
+  title.textContent = `${area.area} — full stack (${cards.length} card${cards.length !== 1 ? 's' : ''})`;
+  panel.appendChild(title);
+
+  const grid = document.createElement('div');
+  grid.className = 'draft-stack-viewer-grid';
+  cards.forEach((c, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'draft-stack-viewer-card';
+    const img = document.createElement('img');
+    img.src = `/card-image/monster/${c.id}`;
+    img.alt = c.name;
+    img.loading = 'lazy';
+    wrap.appendChild(img);
+    const lbl = document.createElement('div');
+    lbl.className = 'draft-stack-viewer-card-label';
+    lbl.textContent = i === 0 ? `${c.name} (top)` : c.name;
+    wrap.appendChild(lbl);
+    grid.appendChild(wrap);
+  });
+  panel.appendChild(grid);
+
+  viewer.appendChild(panel);
+  viewer.addEventListener('click', e => { if (e.target === viewer) viewer.remove(); });
+  document.body.appendChild(viewer);
+}
+
+function _renderMonsterGrid(draft, gridEl, selfId) {
+  const areas = draft.available_monsters || [];
+  gridEl.innerHTML = '';
+
+  areas.forEach(area => {
+    const wrap = document.createElement('div');
+    wrap.className = 'draft-card-wrap';
+
+    const card = document.createElement('div');
+    card.className = 'draft-card';
+    const selIdx = _draftMonsterVotes.indexOf(area.area);
+    if (selIdx !== -1) card.classList.add('draft-card--selected');
+    if (_draftVoteSubmitted) card.classList.add('draft-card--locked');
+
+    if (area.front_card) {
+      const img = document.createElement('img');
+      img.className = 'draft-card-img';
+      img.src = `/card-image/monster/${area.front_card.id}`;
+      img.alt = area.area;
+      img.loading = 'lazy';
+      card.appendChild(img);
+    } else {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'draft-card-img';
+      placeholder.style.cssText = 'display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px';
+      placeholder.textContent = area.area;
+      card.appendChild(placeholder);
+    }
+
+    const label = document.createElement('div');
+    label.className = 'draft-card-label';
+    label.textContent = area.area;
+    card.appendChild(label);
+
+    if (area.vote_count > 0) {
+      const badge = document.createElement('div');
+      badge.className = 'draft-vote-badge';
+      badge.textContent = area.vote_count;
+      card.appendChild(badge);
+    }
+
+    if (selIdx !== -1) {
+      const rank = document.createElement('div');
+      rank.className = 'draft-select-rank';
+      rank.textContent = `#${selIdx + 1}`;
+      card.appendChild(rank);
+    }
+
+    if (!_draftVoteSubmitted) {
+      card.addEventListener('click', () => {
+        const i = _draftMonsterVotes.indexOf(area.area);
+        if (i !== -1) {
+          _draftMonsterVotes.splice(i, 1);
+        } else if (_draftMonsterVotes.length < 5) {
+          _draftMonsterVotes.push(area.area);
+        }
+        _renderMonsterGrid(draft, gridEl, selfId);
+        const statusEl = document.getElementById('draft-vote-status');
+        const voteBtn = document.getElementById('draft-vote-btn');
+        _updateDraftMonstersFooter(draft, statusEl, voteBtn, selfId);
+      });
+    }
+
+    wrap.appendChild(card);
+
+    const stackBtn = document.createElement('button');
+    stackBtn.type = 'button';
+    stackBtn.className = 'draft-stack-btn';
+    const stackCount = (area.stack_cards || []).length;
+    stackBtn.textContent = `View stack (${stackCount})`;
+    stackBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      _openStackViewer(area);
+    });
+    wrap.appendChild(stackBtn);
+
+    gridEl.appendChild(wrap);
+  });
+}
+
+function _renderCitizenGrid(draft, gridEl, selfId) {
+  const citizens = draft.available_citizens || [];
+  gridEl.innerHTML = '';
+
+  citizens.forEach(c => {
+    const card = document.createElement('div');
+    card.className = 'draft-card';
+    const isSelected = _draftCitizenVote === c.id;
+    if (isSelected) card.classList.add('draft-card--selected');
+    if (_draftVoteSubmitted) card.classList.add('draft-card--locked');
+
+    const img = document.createElement('img');
+    img.className = 'draft-card-img';
+    img.src = `/card-image/citizen/${c.id}`;
+    img.alt = c.name;
+    img.loading = 'lazy';
+    card.appendChild(img);
+
+    const label = document.createElement('div');
+    label.className = 'draft-card-label';
+    label.textContent = c.name;
+    card.appendChild(label);
+
+    if (c.vote_count > 0) {
+      const badge = document.createElement('div');
+      badge.className = 'draft-vote-badge';
+      badge.textContent = c.vote_count;
+      card.appendChild(badge);
+    }
+
+    if (!_draftVoteSubmitted) {
+      card.addEventListener('click', () => {
+        _draftCitizenVote = c.id;
+        _renderCitizenGrid(draft, gridEl, selfId);
+        const statusEl = document.getElementById('draft-vote-status');
+        const voteBtn = document.getElementById('draft-vote-btn');
+        _updateDraftCitizensFooter(draft, statusEl, voteBtn, selfId);
+      });
+    }
+
+    gridEl.appendChild(card);
+  });
+}
+
+function _updateDraftMonstersFooter(draft, statusEl, voteBtn, selfId) {
+  const n = _draftMonsterVotes.length;
+  const submitted = draft.votes_submitted_count || 0;
+  const total = draft.total_players || 1;
+  if (statusEl) {
+    if (_draftVoteSubmitted) {
+      statusEl.textContent = `✓ Votes submitted (${submitted}/${total} players voted)`;
+    } else {
+      statusEl.textContent = `${n}/5 selected • ${submitted}/${total} players voted`;
+    }
+  }
+  if (voteBtn) {
+    voteBtn.textContent = 'Submit Votes';
+    voteBtn.disabled = _draftVoteSubmitted || n === 0 || !draft.am_participant;
+  }
+}
+
+function _updateDraftCitizensFooter(draft, statusEl, voteBtn, selfId) {
+  const submitted = draft.votes_submitted_count || 0;
+  const total = draft.total_players || 1;
+  if (statusEl) {
+    if (_draftVoteSubmitted) {
+      statusEl.textContent = `✓ Vote submitted (${submitted}/${total} players voted)`;
+    } else {
+      statusEl.textContent = `${submitted}/${total} players voted`;
+    }
+  }
+  if (voteBtn) {
+    voteBtn.textContent = 'Confirm Vote';
+    voteBtn.disabled = _draftVoteSubmitted || _draftCitizenVote == null || !draft.am_participant;
+  }
+}
+
 function initLobbyModal() {
   const overlay = document.getElementById('lobby-overlay');
   const connEl = document.getElementById('conn-status');
   const errEl = document.getElementById('lobby-error');
-  const stepJoin = document.getElementById('lobby-step-join');
+  const stepName = document.getElementById('lobby-step-name');
+  const stepBrowse = document.getElementById('lobby-step-browse');
   const stepWait = document.getElementById('lobby-step-wait');
   const nameInput = document.getElementById('lobby-display-name');
-  const joinBtn = document.getElementById('lobby-join-btn');
+  const continueNameBtn = document.getElementById('lobby-name-continue-btn');
+  const lobbyListEl = document.getElementById('lobby-list');
+  const lobbyListEmptyEl = document.getElementById('lobby-list-empty');
+  const createPresetSelect = document.getElementById('lobby-create-preset');
+  const createMinPlayersSelect = document.getElementById('lobby-create-min-players');
+  const createBtn = document.getElementById('lobby-create-btn');
+  const backToNameBtn = document.getElementById('lobby-back-to-name-btn');
+  const lobbySheet = overlay ? overlay.querySelector('.lobby-sheet') : null;
+  const waitMetaEl = document.getElementById('lobby-wait-meta');
+  const presetSelect = document.getElementById('lobby-preset-select');
+  const minPlayersSelect = document.getElementById('lobby-min-players-select');
   const readyBtn = document.getElementById('lobby-ready-btn');
   const leaveBtn = document.getElementById('lobby-leave-btn');
   const playerList = document.getElementById('lobby-player-list');
   const metaEl = document.getElementById('lobby-meta');
 
-  if (!overlay || !stepJoin || !stepWait || !joinBtn || !readyBtn || !leaveBtn || !playerList || !nameInput) {
+  const required = [
+    overlay, stepName, stepBrowse, stepWait, nameInput, continueNameBtn,
+    lobbyListEl, createPresetSelect, createMinPlayersSelect, createBtn,
+    presetSelect, minPlayersSelect, readyBtn, leaveBtn, playerList,
+  ];
+  if (required.some(el => !el)) {
     if (connEl) connEl.textContent = 'Missing game_id or player_id in URL';
     return;
   }
@@ -414,9 +770,19 @@ function initLobbyModal() {
   }
 
   let lobbyPlayerId = '';
+  let currentLobbyId = '';
   let lobbyWs = null;
   let lobbyWsReconnectTimer = null;
   let lastLobbySnapshot = null;
+  // In-lobby rename UX: the pencil next to the user's own row swaps the
+  // name span for an inline input. The flag survives WS broadcasts so a
+  // ready/unready by another player doesn't wipe an in-progress edit;
+  // the draft mirrors the input value for the same reason.
+  // `renameJustBegan` triggers focus+select on the next render only —
+  // subsequent broadcast-driven re-renders leave focus alone.
+  let editingSelfName = false;
+  let editingSelfNameDraft = '';
+  let renameJustBegan = false;
 
   function shutdownLobbySocket() {
     if (lobbyWs) {
@@ -537,6 +903,35 @@ function initLobbyModal() {
     enterGameFromLobby(gid, pid);
   }
 
+  function findLobbyById(snapshot, lobbyId) {
+    if (!snapshot || !lobbyId) return null;
+    return (snapshot.lobbies || []).find(l => l.lobby_id === lobbyId) || null;
+  }
+
+  function findLobbyOfPlayer(snapshot, pid) {
+    if (!snapshot || !pid) return null;
+    return (snapshot.lobbies || []).find(l =>
+      (l.members || []).some(m => idsMatch(m.player_id, pid)),
+    ) || null;
+  }
+
+  function showStep(step) {
+    stepName.classList.toggle('lobby-hidden', step !== 'name');
+    stepBrowse.classList.toggle('lobby-hidden', step !== 'browse');
+    stepWait.classList.toggle('lobby-hidden', step !== 'wait');
+    const stepDraftEl = document.getElementById('lobby-step-draft');
+    if (stepDraftEl) stepDraftEl.classList.toggle('lobby-hidden', step !== 'draft');
+    if (lobbySheet) lobbySheet.dataset.step = step;
+    if (step === 'name') {
+      try { nameInput.focus(); } catch (_) { /* ignore */ }
+    }
+    if (step !== 'wait' && step !== 'draft') {
+      editingSelfName = false;
+      editingSelfNameDraft = '';
+    }
+    if (step !== 'draft') _stopDraftTimer();
+  }
+
   function applyLobbyStatusPayload(data) {
     lastLobbySnapshot = data;
     if (data.in_game && data.game_id) {
@@ -544,30 +939,40 @@ function initLobbyModal() {
       if (pid) enterGameFromLobby(data.game_id, pid);
       return;
     }
+
     const selfId = lobbyPlayerId || vckStoredPlayerId() || '';
-    const inList = selfId && (data.lobby || []).some(x => idsMatch(x.player_id, selfId));
-    if (selfId && stepWait && !stepWait.classList.contains('lobby-hidden') && !inList) {
-      showLobbyError('You are no longer in this lobby. Join again.');
+    const myLobby = findLobbyOfPlayer(data, selfId);
+
+    if (selfId && currentLobbyId && !myLobby) {
+      showLobbyError('Your lobby has closed. Pick another or create a new one.');
       lobbyPlayerId = '';
+      currentLobbyId = '';
       vckClientPatch({ player_id: null });
       tearDownLobbyConnection();
       connectLobbyWs();
-      stepWait.classList.add('lobby-hidden');
-      stepJoin.classList.remove('lobby-hidden');
-      return;
+      showStep('browse');
+    } else if (myLobby) {
+      currentLobbyId = myLobby.lobby_id;
     }
+
     if (metaEl) {
-      metaEl.textContent =
-        typeof data.game_count === 'number'
-          ? `${data.game_count} active game${data.game_count === 1 ? '' : 's'} on this server`
-          : '';
+      const lc = (data.lobbies || []).length;
+      const gc = typeof data.game_count === 'number' ? data.game_count : 0;
+      metaEl.textContent = `${lc} open lobb${lc === 1 ? 'y' : 'ies'} • ${gc} active game${gc === 1 ? '' : 's'}`;
     }
-    renderLobbyRows(data.lobby || [], selfId);
-    const self = (data.lobby || []).find(x => idsMatch(x.player_id, selfId));
-    if (self) {
-      const ready = !!self.is_ready;
-      readyBtn.textContent = ready ? 'Cancel ready' : 'Ready';
-      readyBtn.classList.toggle('is-cancel', ready);
+
+    if (!stepBrowse.classList.contains('lobby-hidden')) {
+      renderLobbyList(data.lobbies || []);
+    }
+
+    if (data.draft && myLobby) {
+      handleDraftState(data.draft, selfId);
+      const stepDraftEl = document.getElementById('lobby-step-draft');
+      if (!stepDraftEl || stepDraftEl.classList.contains('lobby-hidden')) {
+        showStep('draft');
+      }
+    } else if (!stepWait.classList.contains('lobby-hidden') && myLobby) {
+      renderInLobby(myLobby, selfId);
     }
   }
 
@@ -585,82 +990,380 @@ function initLobbyModal() {
     return data;
   }
 
-  function renderLobbyRows(lobby, selfId) {
-    playerList.innerHTML = '';
-    lobby.forEach(p => {
+  function renderLobbyList(list) {
+    lobbyListEl.innerHTML = '';
+    if (!list.length) {
+      if (lobbyListEmptyEl) lobbyListEmptyEl.classList.remove('lobby-hidden');
+      return;
+    }
+    if (lobbyListEmptyEl) lobbyListEmptyEl.classList.add('lobby-hidden');
+    list.forEach(lb => {
       const li = document.createElement('li');
-      li.className = 'lobby-player-row' + (idsMatch(p.player_id, selfId) ? ' is-self' : '');
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'lobby-p-name';
-      nameSpan.textContent = p.name || 'Player';
-      const stSpan = document.createElement('span');
-      stSpan.className = 'lobby-p-status' + (p.is_ready ? ' is-ready' : '');
-      stSpan.textContent = p.is_ready ? 'Ready' : 'Waiting';
-      li.appendChild(nameSpan);
-      li.appendChild(stSpan);
-      playerList.appendChild(li);
+      li.className = 'lobby-list-row';
+      const info = document.createElement('div');
+      info.className = 'lobby-list-info';
+      const memberCount = (lb.members || []).length;
+      // The lobby-card roster is the most cramped surface (one line that
+      // has to fit several comma-separated names alongside a Join
+      // button on mobile widths), so cap each name harder than the
+      // default 8 used for in-lobby meta text.
+      const memberNames = (lb.members || [])
+        .map(m => truncateLobbyName(m.name || 'Player', 6))
+        .join(', ');
+      const minPlayers = Number(lb.min_players) || 2;
+      // Always show the raw N/M fraction, even when N > M. Lobbies can
+      // legitimately exceed the floor while waiting for everyone to
+      // ready up, and the "min N met" phrasing previously hid that.
+      const minLabel = `${memberCount}/${minPlayers} to start`;
+      const primary = document.createElement('div');
+      primary.className = 'lobby-list-name';
+      primary.textContent = `${lobbyPresetShortLabel(lb.preset)} • ${minLabel}`;
+      info.appendChild(primary);
+      if (memberNames) {
+        const roster = document.createElement('div');
+        roster.className = 'lobby-list-roster';
+        roster.textContent = memberNames;
+        info.appendChild(roster);
+      }
+      const joinBtn = document.createElement('button');
+      joinBtn.type = 'button';
+      joinBtn.className = 'lobby-btn lobby-btn-primary lobby-list-join-btn';
+      joinBtn.textContent = 'Join';
+      joinBtn.addEventListener('click', () => joinLobbyById(lb.lobby_id));
+      li.appendChild(info);
+      li.appendChild(joinBtn);
+      lobbyListEl.appendChild(li);
     });
   }
 
-  function showWaitUi() {
-    stepJoin.classList.add('lobby-hidden');
-    stepWait.classList.remove('lobby-hidden');
-    openOverlay();
-    sendLobbyIdentify();
+  function renderInLobby(lobby, selfId) {
+    const isOwner = idsMatch(lobby.owner_id, selfId);
+    const minPlayers = Number(lobby.min_players) || 2;
+    const memberCount = (lobby.members || []).length;
+    const floorLabel = `${memberCount}/${minPlayers} to start`;
+    if (waitMetaEl) {
+      const owner = (lobby.members || []).find(m => idsMatch(m.player_id, lobby.owner_id));
+      const ownerName = truncateLobbyName(owner ? (owner.name || 'Owner') : 'Owner');
+      const role = isOwner ? 'You are the owner' : `Owner: ${ownerName}`;
+      waitMetaEl.textContent = `${role} • ${lobbyPresetShortLabel(lobby.preset)} • ${floorLabel}`;
+    }
+    if (presetSelect) {
+      presetSelect.value = lobby.preset || 'current';
+      presetSelect.disabled = !isOwner;
+    }
+    if (minPlayersSelect) {
+      minPlayersSelect.value = String(minPlayers);
+      minPlayersSelect.disabled = !isOwner;
+    }
+    playerList.innerHTML = '';
+    let focusInputEl = null;
+    (lobby.members || []).forEach(m => {
+      const li = document.createElement('li');
+      const isSelf = idsMatch(m.player_id, selfId);
+      const isLobbyOwner = idsMatch(m.player_id, lobby.owner_id);
+      li.className = 'lobby-player-row' + (isSelf ? ' is-self' : '');
+      if (isSelf && editingSelfName) {
+        const form = document.createElement('div');
+        form.className = 'lobby-name-edit';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'lobby-name-edit-input';
+        input.maxLength = 40;
+        input.value = editingSelfNameDraft || (m.name || '');
+        input.placeholder = 'Display name';
+        input.setAttribute('aria-label', 'Display name');
+        input.addEventListener('input', () => { editingSelfNameDraft = input.value; });
+        input.addEventListener('keydown', ev => {
+          if (ev.key === 'Enter') { ev.preventDefault(); submitRenameSelf(); }
+          else if (ev.key === 'Escape') { ev.preventDefault(); cancelRenameSelf(); }
+        });
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'lobby-name-edit-btn lobby-name-edit-btn--primary';
+        saveBtn.textContent = 'Save';
+        saveBtn.addEventListener('click', submitRenameSelf);
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'lobby-name-edit-btn';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', cancelRenameSelf);
+        form.appendChild(input);
+        form.appendChild(saveBtn);
+        form.appendChild(cancelBtn);
+        li.appendChild(form);
+        focusInputEl = input;
+      } else {
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'lobby-p-name';
+        // Only the name text itself should ellipsize; the Owner tag and
+        // edit-pencil button (when present) live alongside it as
+        // unshrinkable siblings so they remain visible for long names.
+        const nameText = document.createElement('span');
+        nameText.className = 'lobby-p-name-text';
+        nameText.textContent = m.name || 'Player';
+        nameText.title = m.name || 'Player';
+        nameSpan.appendChild(nameText);
+        if (isLobbyOwner) {
+          const ownerTag = document.createElement('span');
+          ownerTag.className = 'lobby-owner-tag';
+          ownerTag.textContent = 'Owner';
+          nameSpan.appendChild(ownerTag);
+        }
+        if (isSelf) {
+          const editBtn = document.createElement('button');
+          editBtn.type = 'button';
+          editBtn.className = 'lobby-icon-btn lobby-icon-btn--inline';
+          editBtn.setAttribute('aria-label', 'Change display name');
+          editBtn.title = 'Change display name';
+          editBtn.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false" fill="currentColor"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>';
+          editBtn.addEventListener('click', () => beginRenameSelf(m.name || ''));
+          nameSpan.appendChild(editBtn);
+        }
+        li.appendChild(nameSpan);
+      }
+      const stSpan = document.createElement('span');
+      stSpan.className = 'lobby-p-status' + (m.is_ready ? ' is-ready' : '');
+      stSpan.textContent = m.is_ready ? 'Ready' : 'Waiting';
+      li.appendChild(stSpan);
+      playerList.appendChild(li);
+    });
+    if (focusInputEl && renameJustBegan) {
+      renameJustBegan = false;
+      setTimeout(() => {
+        try { focusInputEl.focus(); focusInputEl.select(); } catch (_) { /* ignore */ }
+      }, 0);
+    }
+    const me = (lobby.members || []).find(m => idsMatch(m.player_id, selfId));
+    if (me) {
+      const ready = !!me.is_ready;
+      readyBtn.textContent = ready ? 'Cancel ready' : 'Ready';
+      readyBtn.classList.toggle('is-cancel', ready);
+    }
   }
 
   async function tryResumeStoredPlayer() {
     const saved = vckStoredPlayerId();
     if (!saved) return;
     try {
-      const res = await fetch(`/api/lobby/status?player_id=${encodeURIComponent(saved)}`);
-      const data = await res.json();
-      if (!res.ok) return;
+      const data = await fetchLobbyPayload();
       if (data.in_game && data.game_id) {
         enterGameFromLobby(data.game_id, saved);
         return;
       }
-      const stillThere = (data.lobby || []).some(p => idsMatch(p.player_id, saved));
-      if (stillThere) {
+      const myLobby = findLobbyOfPlayer(data, saved);
+      if (myLobby) {
         lobbyPlayerId = saved;
-        showWaitUi();
+        currentLobbyId = myLobby.lobby_id;
+        showStep('wait');
+        renderInLobby(myLobby, saved);
+        sendLobbyIdentify();
+        return;
+      }
+      if (vckStoredDisplayName()) {
+        showStep('browse');
+        renderLobbyList(data.lobbies || []);
       }
     } catch (_) {
       /* ignore */
     }
   }
 
-  joinBtn.addEventListener('click', async () => {
+  function rememberDisplayName() {
     const name = nameInput.value.trim();
-    if (!name) {
+    if (!name) return '';
+    vckClientPatch({ display_name: name });
+    return name;
+  }
+
+  function beginRenameSelf(currentName) {
+    editingSelfName = true;
+    editingSelfNameDraft = currentName || '';
+    renameJustBegan = true;
+    showLobbyError('');
+    if (lastLobbySnapshot) applyLobbyStatusPayload(lastLobbySnapshot);
+  }
+
+  function cancelRenameSelf() {
+    editingSelfName = false;
+    editingSelfNameDraft = '';
+    showLobbyError('');
+    if (lastLobbySnapshot) applyLobbyStatusPayload(lastLobbySnapshot);
+  }
+
+  async function submitRenameSelf() {
+    const newName = (editingSelfNameDraft || '').trim();
+    if (!newName) {
       showLobbyError('Enter a display name.');
       return;
     }
+    const pid = lobbyPlayerId || vckStoredPlayerId();
+    if (!pid) return;
     showLobbyError('');
-    joinBtn.disabled = true;
+    try {
+      const res = await fetch('/api/lobby/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ player_id: pid, name: newName }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.detail != null ? String(data.detail) : 'Rename failed');
+      }
+      vckClientPatch({ display_name: newName });
+      if (nameInput) nameInput.value = newName;
+      editingSelfName = false;
+      editingSelfNameDraft = '';
+      // Server broadcasts the rename via WS, but render now in case the
+      // snapshot hasn't arrived yet.
+      if (lastLobbySnapshot) applyLobbyStatusPayload(lastLobbySnapshot);
+    } catch (e) {
+      showLobbyError(e.message || 'Rename failed.');
+    }
+  }
+
+  async function joinLobbyById(lobbyId) {
+    const name = rememberDisplayName();
+    if (!name) {
+      showLobbyError('Enter a display name first.');
+      showStep('name');
+      return;
+    }
+    showLobbyError('');
     try {
       const res = await fetch('/api/lobby/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name, lobby_id: lobbyId }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(data.detail != null ? String(data.detail) : res.statusText || 'Join failed');
       }
       lobbyPlayerId = data.player_id || '';
-      vckClientPatch({ player_id: lobbyPlayerId, display_name: name });
-      showWaitUi();
+      currentLobbyId = data.lobby_id || lobbyId;
+      vckClientPatch({ player_id: lobbyPlayerId });
+      showStep('wait');
+      sendLobbyIdentify();
     } catch (e) {
       showLobbyError(e.message || 'Could not join lobby.');
+    }
+  }
+
+  async function createLobby() {
+    const name = rememberDisplayName();
+    if (!name) {
+      showLobbyError('Enter a display name first.');
+      showStep('name');
+      return;
+    }
+    showLobbyError('');
+    createBtn.disabled = true;
+    try {
+      const preset = createPresetSelect.value || 'current';
+      const minPlayers = Number(createMinPlayersSelect.value) || 2;
+      const res = await fetch('/api/lobby/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, preset, min_players: minPlayers }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.detail != null ? String(data.detail) : res.statusText || 'Create failed');
+      }
+      lobbyPlayerId = data.player_id || '';
+      currentLobbyId = data.lobby_id || '';
+      vckClientPatch({ player_id: lobbyPlayerId });
+      showStep('wait');
+      sendLobbyIdentify();
+    } catch (e) {
+      showLobbyError(e.message || 'Could not create lobby.');
     } finally {
-      joinBtn.disabled = false;
+      createBtn.disabled = false;
+    }
+  }
+
+  continueNameBtn.addEventListener('click', async () => {
+    const name = rememberDisplayName();
+    if (!name) {
+      showLobbyError('Enter a display name.');
+      return;
+    }
+    showLobbyError('');
+    showStep('browse');
+    try {
+      const data = await fetchLobbyPayload();
+      lastLobbySnapshot = data;
+      renderLobbyList(data.lobbies || []);
+    } catch (e) {
+      showLobbyError(e.message || 'Could not load lobbies.');
     }
   });
 
   nameInput.addEventListener('keydown', ev => {
-    if (ev.key === 'Enter') joinBtn.click();
+    if (ev.key === 'Enter') continueNameBtn.click();
   });
+
+  createBtn.addEventListener('click', () => {
+    createLobby();
+  });
+
+  if (backToNameBtn) {
+    backToNameBtn.addEventListener('click', () => {
+      // Mirror the user's display name into the input so the title
+      // step shows what they last entered. We deliberately don't clear
+      // the stored name — they can edit and re-continue.
+      try {
+        const stored = vckStoredDisplayName();
+        if (stored) nameInput.value = stored;
+      } catch (_) { /* ignore */ }
+      showLobbyError('');
+      showStep('name');
+    });
+  }
+
+  if (presetSelect) {
+    presetSelect.addEventListener('change', async () => {
+      const pid = lobbyPlayerId || vckStoredPlayerId();
+      if (!pid) return;
+      const preset = presetSelect.value || 'current';
+      showLobbyError('');
+      try {
+        const res = await fetch('/api/lobby/preset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ player_id: pid, preset }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail != null ? String(data.detail) : res.statusText || 'Preset update failed');
+        }
+      } catch (e) {
+        showLobbyError(e.message || 'Could not change preset.');
+      }
+    });
+  }
+
+  if (minPlayersSelect) {
+    minPlayersSelect.addEventListener('change', async () => {
+      const pid = lobbyPlayerId || vckStoredPlayerId();
+      if (!pid) return;
+      const minPlayers = Number(minPlayersSelect.value) || 2;
+      showLobbyError('');
+      try {
+        const res = await fetch('/api/lobby/min_players', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ player_id: pid, min_players: minPlayers }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail != null ? String(data.detail) : res.statusText || 'Minimum players update failed');
+        }
+      } catch (e) {
+        showLobbyError(e.message || 'Could not change minimum players.');
+      }
+    });
+  }
 
   readyBtn.addEventListener('click', async () => {
     const pid = lobbyPlayerId || vckStoredPlayerId();
@@ -676,12 +1379,13 @@ function initLobbyModal() {
           return;
         }
       }
-      const self = (st.lobby || []).find(x => idsMatch(x.player_id, pid));
-      const endpoint = self && self.is_ready ? '/api/lobby/unready' : '/api/lobby/ready';
+      const myLobby = findLobbyOfPlayer(st, pid);
+      const me = myLobby ? (myLobby.members || []).find(x => idsMatch(x.player_id, pid)) : null;
+      const endpoint = me && me.is_ready ? '/api/lobby/unready' : '/api/lobby/ready';
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ player_id: pid, debug_starting_resources: false }),
+        body: JSON.stringify({ player_id: pid, debug_mode: false }),
       });
       const out = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -708,15 +1412,95 @@ function initLobbyModal() {
       /* still reset UI */
     }
     lobbyPlayerId = '';
+    currentLobbyId = '';
     vckClientPatch({ player_id: null });
     showLobbyError('');
     sendLobbyIdentify();
-    stepWait.classList.add('lobby-hidden');
-    stepJoin.classList.remove('lobby-hidden');
+    showStep('browse');
+    try {
+      const data = await fetchLobbyPayload();
+      lastLobbySnapshot = data;
+      renderLobbyList(data.lobbies || []);
+    } catch (_) {
+      /* ignore */
+    }
     leaveBtn.disabled = false;
   });
 
+  // ── Draft vote button ──────────────────────────────────────────────────
+  const draftVoteBtn = document.getElementById('draft-vote-btn');
+  if (draftVoteBtn) {
+    draftVoteBtn.addEventListener('click', async () => {
+      const pid = lobbyPlayerId || vckStoredPlayerId();
+      if (!pid) return;
+      if (_draftVoteSubmitted) return;
+
+      const st = lastLobbySnapshot;
+      const draft = st && st.draft;
+      if (!draft) return;
+
+      let vote;
+      if (draft.phase === 'monsters') {
+        if (_draftMonsterVotes.length === 0) return;
+        vote = [..._draftMonsterVotes];
+      } else if (draft.phase === 'citizens') {
+        if (_draftCitizenVote == null) return;
+        vote = _draftCitizenVote;
+      } else {
+        return;
+      }
+
+      draftVoteBtn.disabled = true;
+      showLobbyError('');
+      try {
+        const res = await fetch('/api/lobby/draft/vote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ player_id: pid, vote }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail != null ? String(data.detail) : 'Vote failed');
+        }
+        _draftVoteSubmitted = true;
+        const statusEl = document.getElementById('draft-vote-status');
+        if (statusEl) statusEl.textContent = '✓ Vote submitted — waiting for others or timer';
+        draftVoteBtn.disabled = true;
+      } catch (e) {
+        showLobbyError(e.message || 'Could not submit vote.');
+        draftVoteBtn.disabled = false;
+      }
+    });
+  }
+
+  // ── Draft leave button ─────────────────────────────────────────────────
+  const draftLeaveBtn = document.getElementById('draft-leave-btn');
+  if (draftLeaveBtn) {
+    draftLeaveBtn.addEventListener('click', async () => {
+      const pid = lobbyPlayerId || vckStoredPlayerId();
+      if (!pid) return;
+      draftLeaveBtn.disabled = true;
+      try {
+        await fetch(`/api/lobby/leave?player_id=${encodeURIComponent(pid)}`, { method: 'POST' });
+      } catch (_) { /* ignore */ }
+      _stopDraftTimer();
+      lobbyPlayerId = '';
+      currentLobbyId = '';
+      vckClientPatch({ player_id: null });
+      showLobbyError('');
+      sendLobbyIdentify();
+      showStep('browse');
+      try {
+        const data = await fetchLobbyPayload();
+        lastLobbySnapshot = data;
+        renderLobbyList(data.lobbies || []);
+      } catch (_) { /* ignore */ }
+      draftLeaveBtn.disabled = false;
+    });
+  }
+
   openOverlay();
+  showStep('name');
   const bgCanvas = document.getElementById('lobby-bg-canvas');
   if (bgCanvas) initLobbyBackgroundCanvas(bgCanvas).catch(() => {});
   connectLobbyWs();

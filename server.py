@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 import shortuuid
 
-from game import Game, LobbyMember, GameMember, load_game_data, GameObjectEncoder
+from game import Game, Lobby, LobbyMember, GameMember, load_game_data, GameObjectEncoder
 import json
 
 import build_game_js
@@ -102,6 +102,36 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
+# ── Lobby model ─────────────────────────────────────────────────────────────
+#
+# The server hosts many concurrent named lobbies; each lobby has an owner
+# (initially the creator), a preset that determines how the board is dealt
+# when the game starts, and a list of members. Members can move between
+# lobbies only by leaving + (re)joining. Inactive members and empty lobbies
+# are pruned by `_prune_stale_lobbies` after `_LOBBY_MEMBER_TIMEOUT_S`.
+
+# Allowed presets the owner may choose. `current` is the live "current
+# format" alias and presently points at the canonical Base Set deal in
+# `game_setup.py`; `base` is the same deal exposed as a stable preset so
+# that swapping `current` to a future format does not remove Base Set from
+# the dropdown. `random` deals from every implemented card across all
+# expansions (see `card_filters.keep_for_random`).
+_VALID_LOBBY_PRESETS = ("current", "base", "test1", "test2", "random", "draft")
+
+# Lobby min-players bounds. The lower bound matches the historical default
+# (the game has always required 2 players); the upper bound matches the
+# engine cap (5-player decks add is_extra monsters and a 6th citizen copy).
+_MIN_PLAYERS_FLOOR = 2
+_MIN_PLAYERS_CEIL = 5
+
+# Member idle timeout. The lobby is considered alive as long as it has at
+# least one member whose `last_active_time` is within this window.
+_LOBBY_MEMBER_TIMEOUT_S = 600
+
+# Display-name limits (defensive; the client also enforces shorter caps).
+_MAX_DISPLAY_NAME_LEN = 40
+
+
 class LobbyWsManager:
     """Push lobby snapshots to subscribed browsers (personalized by optional player_id)."""
 
@@ -117,7 +147,12 @@ class LobbyWsManager:
 
     def identify(self, websocket: WebSocket, player_id: Optional[str]):
         if websocket in self._connections:
-            self._connections[websocket] = player_id or None
+            pid = (player_id or "").strip() or None
+            self._connections[websocket] = pid
+            if pid:
+                _, member = _find_member(pid)
+                if member:
+                    member.last_active_time = time.time()
 
     async def send_snapshot(self, websocket: WebSocket):
         pid = self._connections.get(websocket)
@@ -154,34 +189,160 @@ class LobbyWsManager:
 lobby_ws_manager = LobbyWsManager()
 
 
-def build_lobby_status_dict(player_id: Optional[str] = None):
-    """Lobby list + active game count + optional in_game/game_id for this player."""
-    current_time = time.time()
-    global lobby
-    lobby = [p for p in lobby if current_time - p.last_active_time <= 60]
+def _validate_preset(preset: Optional[str]) -> str:
+    p = (preset or "").strip().lower()
+    if p not in _VALID_LOBBY_PRESETS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid preset '{preset}'. Allowed: {', '.join(_VALID_LOBBY_PRESETS)}",
+        )
+    return p
 
-    lobby_data = []
-    for member in lobby:
-        lobby_data.append({
-            "player_id": member.player_id,
-            "name": member.name,
-            "is_ready": member.is_ready,
-            "debug_starting_resources": bool(getattr(member, "debug_starting_resources", False)),
-        })
 
-    response = {
-        "lobby": lobby_data,
-        "game_count": sum(1 for g in games.values() if getattr(g, "phase", None) != "game_over"),
+def _validate_min_players(min_players, default=_MIN_PLAYERS_FLOOR) -> int:
+    if min_players is None or (isinstance(min_players, str) and not min_players.strip()):
+        return int(default)
+    try:
+        n = int(min_players)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"min_players must be an integer between {_MIN_PLAYERS_FLOOR} and {_MIN_PLAYERS_CEIL}",
+        )
+    if n < _MIN_PLAYERS_FLOOR or n > _MIN_PLAYERS_CEIL:
+        raise HTTPException(
+            status_code=400,
+            detail=f"min_players must be between {_MIN_PLAYERS_FLOOR} and {_MIN_PLAYERS_CEIL}",
+        )
+    return n
+
+
+def _normalize_display_name(name: Optional[str]) -> str:
+    s = (name or "").strip()
+    if not s:
+        raise HTTPException(status_code=400, detail="Display name required.")
+    return s[:_MAX_DISPLAY_NAME_LEN]
+
+
+def _find_member(player_id: str):
+    """Return (lobby, member) for `player_id`, or (None, None) if not found."""
+    pid = (player_id or "").strip()
+    if not pid:
+        return None, None
+    for lb in lobbies.values():
+        for m in lb.members:
+            if m.player_id == pid:
+                return lb, m
+    return None, None
+
+
+def _prune_stale_lobbies():
+    """Remove inactive members; delete empty lobbies. Transfer ownership if needed."""
+    cutoff = time.time() - _LOBBY_MEMBER_TIMEOUT_S
+    for lb in list(lobbies.values()):
+        kept = [m for m in lb.members if m.last_active_time >= cutoff]
+        if len(kept) != len(lb.members):
+            lb.members = kept
+            if not any(m.player_id == lb.owner_id for m in kept):
+                lb.owner_id = kept[0].player_id if kept else ""
+        if not lb.members:
+            _cancel_draft(lb.lobby_id)
+            lobbies.pop(lb.lobby_id, None)
+
+
+def _serialize_member(member: LobbyMember):
+    return {
+        "player_id": member.player_id,
+        "name": member.name,
+        "is_ready": bool(member.is_ready),
+        "debug_mode": bool(getattr(member, "debug_mode", False)),
     }
 
-    if player_id:
+
+def _serialize_lobby(lb: Lobby):
+    return {
+        "lobby_id": lb.lobby_id,
+        "owner_id": lb.owner_id,
+        "preset": lb.preset,
+        "min_players": int(getattr(lb, "min_players", _MIN_PLAYERS_FLOOR)),
+        "members": [_serialize_member(m) for m in lb.members],
+    }
+
+
+def _maybe_start_lobby_game(lb: Lobby):
+    """If every member of `lb` is ready and the floor is met, start a game.
+
+    The floor is `max(_MIN_PLAYERS_FLOOR, lb.min_players)` to defend against
+    older lobbies created before `min_players` existed. Returns the new
+    game_id if a game was started, `"draft_starting"` if the draft preset
+    triggered a draft launch, or None if conditions aren't met. On a normal
+    game start the lobby is removed from the lobbies dict.
+    """
+    floor = max(_MIN_PLAYERS_FLOOR, int(getattr(lb, "min_players", _MIN_PLAYERS_FLOOR)))
+    if len(lb.members) < floor:
+        return None
+    if not all(m.is_ready for m in lb.members):
+        return None
+
+    if lb.preset == "draft":
+        if lb.lobby_id not in _draft_states:
+            asyncio.create_task(_start_draft(lb))
+        return "draft_starting"
+
+    new_game_id = str(uuid.uuid4())
+    debug_mode = any(bool(getattr(m, "debug_mode", False)) for m in lb.members)
+
+    game_gamers = []
+    for m in lb.members:
+        gm = GameMember(m.player_id, m.name, new_game_id)
+        gamers.append(gm)
+        game_gamers.append(gm)
+
+    game_state = load_game_data(
+        new_game_id,
+        lb.preset,
+        game_gamers,
+        debug_mode=debug_mode,
+    )
+    new_game = Game(game_state)
+    new_game.last_active_time = time.time()
+    while new_game.advance_tick():
+        if getattr(new_game, "phase", None) == "action":
+            break
+    games[new_game_id] = new_game
+
+    lobbies.pop(lb.lobby_id, None)
+    return new_game_id
+
+
+def build_lobby_status_dict(player_id: Optional[str] = None):
+    """Lobby list + active game count + optional in_game/game_id/lobby_id for this player."""
+    _prune_stale_lobbies()
+
+    response = {
+        "lobbies": [_serialize_lobby(lb) for lb in lobbies.values()],
+        "game_count": sum(1 for g in games.values() if getattr(g, "phase", None) != "game_over"),
+        "valid_presets": list(_VALID_LOBBY_PRESETS),
+        "min_players_range": [_MIN_PLAYERS_FLOOR, _MIN_PLAYERS_CEIL],
+        "in_game": False,
+        "game_id": None,
+        "lobby_id": None,
+    }
+
+    pid = (player_id or "").strip()
+    if pid:
         for gamer in gamers:
-            if gamer.player_id == player_id:
+            if gamer.player_id == pid:
                 response["in_game"] = True
                 response["game_id"] = gamer.game_id
                 return response
+        lb, _ = _find_member(pid)
+        if lb:
+            response["lobby_id"] = lb.lobby_id
+            draft = _draft_states.get(lb.lobby_id)
+            if draft:
+                response["draft"] = _serialize_draft_state_for_player(draft, pid)
 
-    response["in_game"] = False
     return response
 
 
@@ -195,16 +356,334 @@ app.add_middleware(
 )
 
 # In-memory storage (simple for dev)
-lobby: List[LobbyMember] = []
+# Multiple concurrent lobbies; see _serialize_lobby / _prune_stale_lobbies.
+lobbies: Dict[str, Lobby] = {}
 games: Dict[str, Game] = {}
 gamers: List[GameMember] = []
 
 _GAME_SHUTDOWN_DELAY_S = 30
 
+# ── Draft mode ───────────────────────────────────────────────────────────────
+#
+# When the "draft" preset is selected, all players readying up triggers a
+# pre-game draft phase instead of an immediate game start. Monsters are voted
+# on first (players pick top 5 stacks), then citizens one roll-slot at a time.
+# Dukes and domains remain randomised. Each phase has a 30-second timer; the
+# server advances immediately if all players vote before time runs out.
+
+_DRAFT_MONSTER_VOTE_SECONDS = 120
+_DRAFT_CITIZEN_VOTE_SECONDS = 30
+_draft_states: Dict[str, dict] = {}
+_draft_timer_tasks: Dict[str, asyncio.Task] = {}
+
+
+def _serialize_monster_area_for_draft(area: str, rows: list, vote_count: int) -> dict:
+    if not rows:
+        return {"area": area, "front_card": None, "stack_cards": [], "vote_count": vote_count}
+    sorted_rows = sorted(rows, key=lambda r: int(r.get("monster_order", 0)))
+    front = sorted_rows[0]
+    def _card_dict(r):
+        return {
+            "id": int(r["id_monsters"]),
+            "name": r["name"],
+            "strength_cost": int(r.get("strength_cost", 0)),
+            "magic_cost": int(r.get("magic_cost", 0)),
+            "vp_reward": int(r.get("vp_reward", 0)),
+            "gold_reward": int(r.get("gold_reward", 0)),
+            "strength_reward": int(r.get("strength_reward", 0)),
+            "magic_reward": int(r.get("magic_reward", 0)),
+            "has_special_reward": bool(r.get("has_special_reward", 0)),
+            "special_reward": r.get("special_reward"),
+            "has_special_cost": bool(r.get("has_special_cost", 0)),
+            "special_cost": r.get("special_cost"),
+            "monster_type": r.get("monster_type"),
+            "expansion": r.get("expansion"),
+        }
+    return {
+        "area": area,
+        "front_card": _card_dict(front),
+        "stack_cards": [_card_dict(r) for r in sorted_rows],
+        "vote_count": vote_count,
+    }
+
+
+def _serialize_citizen_for_draft(row: dict, vote_count: int) -> dict:
+    return {
+        "id": int(row["id_citizens"]),
+        "name": row["name"],
+        "roll_match1": int(row["roll_match1"]),
+        "roll_match2": int(row.get("roll_match2") or 0),
+        "gold_cost": int(row.get("gold_cost", 0)),
+        "gold_payout_on_turn": int(row.get("gold_payout_on_turn", 0)),
+        "gold_payout_off_turn": int(row.get("gold_payout_off_turn", 0)),
+        "strength_payout_on_turn": int(row.get("strength_payout_on_turn", 0)),
+        "strength_payout_off_turn": int(row.get("strength_payout_off_turn", 0)),
+        "magic_payout_on_turn": int(row.get("magic_payout_on_turn", 0)),
+        "magic_payout_off_turn": int(row.get("magic_payout_off_turn", 0)),
+        "has_special_payout_on_turn": bool(row.get("has_special_payout_on_turn", 0)),
+        "has_special_payout_off_turn": bool(row.get("has_special_payout_off_turn", 0)),
+        "special_payout_on_turn": row.get("special_payout_on_turn"),
+        "special_payout_off_turn": row.get("special_payout_off_turn"),
+        "expansion": row.get("expansion"),
+        "vote_count": vote_count,
+    }
+
+
+def _serialize_draft_state_for_player(state: dict, player_id: Optional[str]) -> dict:
+    pid = (player_id or "").strip()
+    phase = state["phase"]
+
+    monster_vote_counts: Dict[str, int] = {}
+    for choices in state["votes_monsters"].values():
+        for area in choices[:5]:
+            monster_vote_counts[area] = monster_vote_counts.get(area, 0) + 1
+
+    citizen_vote_counts: Dict[int, int] = {}
+    for cid in state["votes_citizens"].values():
+        citizen_vote_counts[int(cid)] = citizen_vote_counts.get(int(cid), 0) + 1
+
+    available_monsters = []
+    available_citizens = []
+
+    if phase == "monsters":
+        for area, rows in state["monster_areas"].items():
+            available_monsters.append(
+                _serialize_monster_area_for_draft(area, rows, monster_vote_counts.get(area, 0))
+            )
+    elif phase == "citizens":
+        current_roll = state.get("current_roll")
+        if current_roll is not None:
+            for row in state["citizens_by_roll"].get(current_roll, []):
+                cid = int(row["id_citizens"])
+                available_citizens.append(
+                    _serialize_citizen_for_draft(row, citizen_vote_counts.get(cid, 0))
+                )
+
+    return {
+        "phase": phase,
+        "current_roll": state.get("current_roll"),
+        "timer_end": state.get("timer_end", 0),
+        "available_monsters": available_monsters,
+        "available_citizens": available_citizens,
+        "my_monster_votes": list(state["votes_monsters"].get(pid, [])),
+        "my_citizen_vote": state["votes_citizens"].get(pid),
+        "selected_monster_areas": list(state.get("selected_monster_areas", [])),
+        "selected_citizens": {str(k): v for k, v in state.get("selected_citizens", {}).items()},
+        "citizen_draft_round": len(state.get("selected_citizens", {})) + (1 if phase == "citizens" else 0),
+        "citizen_draft_total": len(state.get("citizen_rolls_all", [])),
+        "votes_submitted_count": (
+            len(state["votes_monsters"]) if phase == "monsters" else len(state["votes_citizens"])
+        ),
+        "total_players": len(state["player_ids"]),
+        "am_participant": pid in state["player_ids"],
+        "last_result": state.get("last_result"),
+    }
+
+
+def _tally_monster_votes(state: dict) -> list:
+    import random as _r
+    vote_counts: Dict[str, int] = {}
+    for choices in state["votes_monsters"].values():
+        for area in choices[:5]:
+            vote_counts[area] = vote_counts.get(area, 0) + 1
+    areas_scored = [(area, vote_counts.get(area, 0)) for area in state["monster_areas"]]
+    _r.shuffle(areas_scored)
+    areas_scored.sort(key=lambda x: x[1], reverse=True)
+    return [a[0] for a in areas_scored[:5]]
+
+
+def _tally_citizen_votes(state: dict) -> Optional[int]:
+    import random as _r
+    vote_counts: Dict[int, int] = {}
+    for cid in state["votes_citizens"].values():
+        vote_counts[int(cid)] = vote_counts.get(int(cid), 0) + 1
+    current_roll = state.get("current_roll")
+    if not current_roll:
+        return None
+    available = state["citizens_by_roll"].get(current_roll, [])
+    if not available:
+        return None
+    if not vote_counts:
+        return int(_r.choice(available)["id_citizens"])
+    max_votes = max(vote_counts.values())
+    winners = [cid for cid, cnt in vote_counts.items() if cnt == max_votes]
+    return _r.choice(winners)
+
+
+async def _run_draft_timer(lobby_id: str, timer_end: float):
+    delay = max(0.0, timer_end - time.time())
+    await asyncio.sleep(delay)
+    await _advance_draft(lobby_id)
+
+
+async def _start_draft(lb: "Lobby"):
+    from game_setup import load_draft_card_pool
+    lobby_id = lb.lobby_id
+    n_players = len(lb.members)
+    debug_mode = any(bool(getattr(m, "debug_mode", False)) for m in lb.members)
+
+    try:
+        monsters_by_area, citizens_by_roll = load_draft_card_pool(n_players)
+    except Exception as e:
+        print(f"[draft] Failed to load card pool for lobby {lobby_id}: {e}")
+        for m in lb.members:
+            m.is_ready = False
+        await lobby_ws_manager.broadcast_lobby()
+        return
+
+    expected_rolls = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11]
+    available_rolls = [r for r in expected_rolls if citizens_by_roll.get(r)]
+
+    if len(monsters_by_area) < 5:
+        print(f"[draft] Not enough monster areas ({len(monsters_by_area)} < 5) for lobby {lobby_id}")
+        for m in lb.members:
+            m.is_ready = False
+        await lobby_ws_manager.broadcast_lobby()
+        return
+
+    if len(available_rolls) < 10:
+        print(f"[draft] Not all 10 citizen rolls covered for lobby {lobby_id}: {available_rolls}")
+        for m in lb.members:
+            m.is_ready = False
+        await lobby_ws_manager.broadcast_lobby()
+        return
+
+    timer_end = time.time() + _DRAFT_MONSTER_VOTE_SECONDS
+    _draft_states[lobby_id] = {
+        "lobby_id": lobby_id,
+        "n_players": n_players,
+        "debug_mode": debug_mode,
+        "phase": "monsters",
+        "monster_areas": monsters_by_area,
+        "votes_monsters": {},
+        "selected_monster_areas": [],
+        "citizen_rolls_all": list(available_rolls),
+        "citizen_rolls": list(available_rolls),
+        "current_roll": None,
+        "citizens_by_roll": citizens_by_roll,
+        "votes_citizens": {},
+        "selected_citizens": {},
+        "timer_end": timer_end,
+        "player_ids": [m.player_id for m in lb.members],
+        "last_result": None,
+    }
+
+    await lobby_ws_manager.broadcast_lobby()
+    task = asyncio.create_task(_run_draft_timer(lobby_id, timer_end))
+    _draft_timer_tasks[lobby_id] = task
+
+
+async def _advance_draft(lobby_id: str):
+    state = _draft_states.get(lobby_id)
+    if not state:
+        return
+
+    task = _draft_timer_tasks.pop(lobby_id, None)
+    if task and not task.done():
+        task.cancel()
+
+    phase = state["phase"]
+
+    if phase == "monsters":
+        selected = _tally_monster_votes(state)
+        state["selected_monster_areas"] = selected
+        state["last_result"] = {"phase": "monsters", "selected": selected}
+        rolls = state["citizen_rolls"]
+        if not rolls:
+            await _finish_draft(lobby_id)
+            return
+        state["current_roll"] = rolls[0]
+        state["citizen_rolls"] = rolls[1:]
+        state["phase"] = "citizens"
+        state["votes_citizens"] = {}
+
+    elif phase == "citizens":
+        winner_id = _tally_citizen_votes(state)
+        current_roll = state["current_roll"]
+        if winner_id is not None:
+            state["selected_citizens"][current_roll] = winner_id
+        state["last_result"] = {"phase": "citizens", "roll": current_roll, "winner_id": winner_id}
+        rolls = state["citizen_rolls"]
+        if not rolls:
+            await _finish_draft(lobby_id)
+            return
+        state["current_roll"] = rolls[0]
+        state["citizen_rolls"] = rolls[1:]
+        state["votes_citizens"] = {}
+    else:
+        return
+
+    timer_end = time.time() + _DRAFT_CITIZEN_VOTE_SECONDS
+    state["timer_end"] = timer_end
+    await lobby_ws_manager.broadcast_lobby()
+    task = asyncio.create_task(_run_draft_timer(lobby_id, timer_end))
+    _draft_timer_tasks[lobby_id] = task
+
+
+async def _finish_draft(lobby_id: str):
+    state = _draft_states.pop(lobby_id, None)
+    if not state:
+        return
+    lb = lobbies.get(lobby_id)
+    if not lb:
+        return
+
+    draft_selections = {
+        "monster_areas": state["selected_monster_areas"],
+        "citizens": state["selected_citizens"],
+    }
+    debug_mode = state["debug_mode"]
+    new_game_id = str(uuid.uuid4())
+
+    game_gamers_list = []
+    for m in lb.members:
+        gm = GameMember(m.player_id, m.name, new_game_id)
+        gamers.append(gm)
+        game_gamers_list.append(gm)
+
+    try:
+        game_state = load_game_data(
+            new_game_id,
+            "draft",
+            game_gamers_list,
+            debug_mode=debug_mode,
+            draft_selections=draft_selections,
+        )
+        new_game = Game(game_state)
+        new_game.last_active_time = time.time()
+        while new_game.advance_tick():
+            if getattr(new_game, "phase", None) == "action":
+                break
+        games[new_game_id] = new_game
+        lobbies.pop(lobby_id, None)
+        pid_list = [g.player_id for g in gamers if g.game_id == new_game_id]
+        await lobby_ws_manager.broadcast_game_started(new_game_id, pid_list)
+        await lobby_ws_manager.broadcast_lobby()
+    except Exception as e:
+        print(f"[draft] Failed to start game for lobby {lobby_id}: {e}")
+        gamers[:] = [g for g in gamers if g.game_id != new_game_id]
+        for m in lb.members:
+            m.is_ready = False
+        await lobby_ws_manager.broadcast_lobby()
+
+
+def _cancel_draft(lobby_id: str):
+    task = _draft_timer_tasks.pop(lobby_id, None)
+    if task and not task.done():
+        task.cancel()
+    _draft_states.pop(lobby_id, None)
+
 
 # Request/Response models
+class CreateLobbyRequest(BaseModel):
+    name: str
+    preset: Optional[str] = "current"
+    min_players: Optional[int] = None
+
+
 class JoinLobbyRequest(BaseModel):
     name: str
+    lobby_id: str
 
 
 class RenameRequest(BaseModel):
@@ -214,7 +693,17 @@ class RenameRequest(BaseModel):
 
 class ReadyRequest(BaseModel):
     player_id: str
-    debug_starting_resources: bool = False
+    debug_mode: bool = False
+
+
+class SetPresetRequest(BaseModel):
+    player_id: str
+    preset: str
+
+
+class SetMinPlayersRequest(BaseModel):
+    player_id: str
+    min_players: int
 
 
 class AbandonGameRequest(BaseModel):
@@ -276,115 +765,254 @@ def resolve_action_payment(req: GameActionRequest):
 
 
 # Lobby endpoints
+@app.post("/api/lobby/create")
+async def create_lobby(request: CreateLobbyRequest):
+    """Create a new lobby, joining as its owner.
+
+    Body: `{name, preset?, min_players?}`. The owner picks the preset
+    that determines how the board is dealt at game start; only the owner
+    may change it later (see `/api/lobby/preset`). Lobbies are nameless —
+    clients identify them by `lobby_id` and surface them via their
+    metadata (preset, member count/list, min-players floor).
+    """
+    display_name = _normalize_display_name(request.name)
+    preset = _validate_preset(request.preset or "current")
+    min_players = _validate_min_players(request.min_players, default=_MIN_PLAYERS_FLOOR)
+
+    player_id = str(shortuuid.uuid())
+    lobby_id = str(shortuuid.uuid())
+
+    member = LobbyMember(display_name, player_id, lobby_id=lobby_id)
+    member.last_active_time = time.time()
+
+    lb = Lobby(
+        lobby_id=lobby_id,
+        owner_id=player_id,
+        preset=preset,
+        min_players=min_players,
+    )
+    lb.created_at = time.time()
+    lb.members.append(member)
+    lobbies[lobby_id] = lb
+
+    await lobby_ws_manager.broadcast_lobby()
+    return {"player_id": player_id, "lobby_id": lobby_id, "message": "Lobby created"}
+
+
 @app.post("/api/lobby/join")
 async def join_lobby(request: JoinLobbyRequest):
-    """Join the lobby with a player name"""
+    """Join an existing lobby by `lobby_id`."""
+    display_name = _normalize_display_name(request.name)
+    lobby_id = (request.lobby_id or "").strip()
+    if not lobby_id:
+        raise HTTPException(status_code=400, detail="lobby_id required")
+
+    lb = lobbies.get(lobby_id)
+    if not lb:
+        raise HTTPException(status_code=404, detail="Lobby not found")
+
     player_id = str(shortuuid.uuid())
-    player = LobbyMember(request.name, player_id)
-    player.last_active_time = time.time()
-    lobby.append(player)
+    member = LobbyMember(display_name, player_id, lobby_id=lobby_id)
+    member.last_active_time = time.time()
+    lb.members.append(member)
+
     await lobby_ws_manager.broadcast_lobby()
-    return {"player_id": player_id, "message": "Joined lobby"}
+    return {"player_id": player_id, "lobby_id": lobby_id, "message": "Joined lobby"}
 
 
 @app.post("/api/lobby/rename")
 async def rename_player(request: RenameRequest):
-    """Rename a player in the lobby"""
-    for player in lobby:
-        if player.player_id == request.player_id:
-            player.name = request.name
-            player.last_active_time = time.time()
-            await lobby_ws_manager.broadcast_lobby()
-            return {"message": "Player renamed"}
-    raise HTTPException(status_code=404, detail="Player not found in lobby")
+    """Rename a player in their current lobby."""
+    new_name = _normalize_display_name(request.name)
+    _, member = _find_member(request.player_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Player not found in any lobby")
+    member.name = new_name
+    member.last_active_time = time.time()
+    await lobby_ws_manager.broadcast_lobby()
+    return {"message": "Player renamed"}
 
 
 @app.post("/api/lobby/leave")
 async def leave_lobby(player_id: str):
-    """Leave the lobby"""
-    global lobby
-    lobby = [p for p in lobby if p.player_id != player_id]
+    """Leave the player's current lobby. Transfers ownership or closes the lobby if empty."""
+    lb, member = _find_member(player_id)
+    if not lb:
+        # Idempotent: already gone is fine.
+        return {"message": "Not in a lobby"}
+    lb.members = [m for m in lb.members if m.player_id != member.player_id]
+    if lb.owner_id == member.player_id:
+        lb.owner_id = lb.members[0].player_id if lb.members else ""
+    if not lb.members:
+        lobbies.pop(lb.lobby_id, None)
+    elif lb.lobby_id in _draft_states:
+        _cancel_draft(lb.lobby_id)
+        for m in lb.members:
+            m.is_ready = False
     await lobby_ws_manager.broadcast_lobby()
     return {"message": "Left lobby"}
 
 
+@app.post("/api/lobby/preset")
+async def set_lobby_preset(request: SetPresetRequest):
+    """Set the lobby's board preset. Only the lobby owner may call this."""
+    preset = _validate_preset(request.preset)
+    lb, member = _find_member(request.player_id)
+    if not lb or not member:
+        raise HTTPException(status_code=404, detail="Player not found in any lobby")
+    if lb.owner_id != member.player_id:
+        raise HTTPException(status_code=403, detail="Only the lobby owner may change the preset")
+    if lb.lobby_id in _draft_states:
+        raise HTTPException(status_code=409, detail="Cannot change preset while a draft is in progress")
+    lb.preset = preset
+    member.last_active_time = time.time()
+    # Changing the preset should reset readiness so members re-confirm.
+    for m in lb.members:
+        m.is_ready = False
+    await lobby_ws_manager.broadcast_lobby()
+    return {"message": "Preset updated", "preset": preset}
+
+
+@app.post("/api/lobby/min_players")
+async def set_lobby_min_players(request: SetMinPlayersRequest):
+    """Set the lobby's minimum player floor (2..5). Only the lobby owner may call this.
+
+    The game will not auto-start until the lobby has at least this many members
+    and all of them are ready. Defaults to 2 (historical behavior). Resets every
+    member's ready flag so they re-confirm under the new floor.
+    """
+    floor = _validate_min_players(request.min_players)
+    lb, member = _find_member(request.player_id)
+    if not lb or not member:
+        raise HTTPException(status_code=404, detail="Player not found in any lobby")
+    if lb.owner_id != member.player_id:
+        raise HTTPException(status_code=403, detail="Only the lobby owner may change min_players")
+    lb.min_players = floor
+    member.last_active_time = time.time()
+    for m in lb.members:
+        m.is_ready = False
+    await lobby_ws_manager.broadcast_lobby()
+    return {"message": "min_players updated", "min_players": floor}
+
+
 @app.post("/api/lobby/ready")
 async def set_ready(request: ReadyRequest):
-    """Mark player as ready"""
-    for player in lobby:
-        if player.player_id == request.player_id:
-            player.is_ready = True
-            player.debug_starting_resources = bool(request.debug_starting_resources)
-            player.last_active_time = time.time()
-            
-            # Check if all players are ready
-            ready_count = sum(1 for p in lobby if p.is_ready)
-            if ready_count == len(lobby) and len(lobby) >= 2:
-                # Start game
-                new_game_id = str(uuid.uuid4())
-                players_to_remove = []
-                
-                for p in lobby:
-                    if p.is_ready:
-                        gamer = GameMember(p.player_id, p.name, new_game_id)
-                        gamers.append(gamer)
-                        players_to_remove.append(p)
-                debug_starting_resources = any(bool(getattr(p, "debug_starting_resources", False)) for p in players_to_remove)
-                
-                # Remove ready players from lobby
-                for p in players_to_remove:
-                    lobby.remove(p)
-                
-                # Create game
-                try:
-                    # Get only the gamers for this new game
-                    game_gamers = [g for g in gamers if g.game_id == new_game_id]
-                    game_state = load_game_data(
-                        new_game_id,
-                        "current",
-                        game_gamers,
-                        debug_starting_resources=debug_starting_resources,
-                    )
-                    new_game = Game(game_state)
-                    new_game.last_active_time = time.time()
-                    # Auto-run the start-of-game roll/harvest so the first state is actionable.
-                    while new_game.advance_tick():
-                        if getattr(new_game, "phase", None) == "action":
-                            break
-                    games[new_game_id] = new_game
-                    pid_list = [g.player_id for g in game_gamers]
-                    await lobby_ws_manager.broadcast_game_started(new_game_id, pid_list)
-                    await lobby_ws_manager.broadcast_lobby()
-                    return {
-                        "message": "Game started",
-                        "game_id": new_game_id,
-                        "players": [{"player_id": g.player_id, "name": g.name} for g in game_gamers]
-                    }
-                except Exception as e:
-                    raise HTTPException(status_code=500, detail=f"Failed to create game: {str(e)}")
-            
-            await lobby_ws_manager.broadcast_lobby()
-            return {"message": "Player ready", "all_ready": ready_count == len(lobby)}
-    
-    raise HTTPException(status_code=404, detail="Player not found in lobby")
+    """Mark the player ready. If every member of their lobby is ready (>=2 players), start a game."""
+    lb, member = _find_member(request.player_id)
+    if not lb or not member:
+        raise HTTPException(status_code=404, detail="Player not found in any lobby")
+
+    member.is_ready = True
+    member.debug_mode = bool(request.debug_mode)
+    member.last_active_time = time.time()
+
+    try:
+        new_game_id = _maybe_start_lobby_game(lb)
+    except Exception as exc:
+        # Roll the ready flag back so the player can retry without being stuck "ready" in a half-broken lobby.
+        member.is_ready = False
+        raise HTTPException(status_code=500, detail=f"Failed to create game: {exc}")
+
+    if new_game_id == "draft_starting":
+        await lobby_ws_manager.broadcast_lobby()
+        return {"message": "Draft starting", "draft_starting": True}
+
+    if new_game_id:
+        pid_list = [g.player_id for g in gamers if g.game_id == new_game_id]
+        await lobby_ws_manager.broadcast_game_started(new_game_id, pid_list)
+        await lobby_ws_manager.broadcast_lobby()
+        return {
+            "message": "Game started",
+            "game_id": new_game_id,
+            "players": [{"player_id": g.player_id, "name": g.name} for g in gamers if g.game_id == new_game_id],
+        }
+
+    await lobby_ws_manager.broadcast_lobby()
+    return {
+        "message": "Player ready",
+        "all_ready": all(m.is_ready for m in lb.members),
+    }
 
 
 @app.post("/api/lobby/unready")
 async def set_unready(request: ReadyRequest):
-    """Mark player as not ready"""
-    for player in lobby:
-        if player.player_id == request.player_id:
-            player.is_ready = False
-            player.last_active_time = time.time()
-            await lobby_ws_manager.broadcast_lobby()
-            return {"message": "Player unready"}
-    raise HTTPException(status_code=404, detail="Player not found in lobby")
+    """Mark the player not ready."""
+    _, member = _find_member(request.player_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Player not found in any lobby")
+    member.is_ready = False
+    member.last_active_time = time.time()
+    await lobby_ws_manager.broadcast_lobby()
+    return {"message": "Player unready"}
 
 
 @app.get("/api/lobby/status")
 async def get_lobby_status(player_id: Optional[str] = None):
-    """Get lobby status. If player_id provided, also check if player is in a game."""
-    return build_lobby_status_dict(player_id)
+    """Return the list of lobbies plus per-player in_game/lobby_id metadata."""
+    pid = (player_id or "").strip()
+    if pid:
+        _, member = _find_member(pid)
+        if member:
+            member.last_active_time = time.time()
+    return build_lobby_status_dict(pid)
+
+
+class DraftVoteRequest(BaseModel):
+    player_id: str
+    vote: Optional[object] = None  # list of area names (monsters) or int citizen_id
+
+
+@app.post("/api/lobby/draft/vote")
+async def submit_draft_vote(request: DraftVoteRequest):
+    """Submit a draft vote. `vote` is a list of area names for the monster phase,
+    or a citizen id (integer) for the citizen phase."""
+    pid = (request.player_id or "").strip()
+    if not pid:
+        raise HTTPException(status_code=400, detail="player_id required")
+    lb, member = _find_member(pid)
+    if not lb or not member:
+        raise HTTPException(status_code=404, detail="Player not found in any lobby")
+    member.last_active_time = time.time()
+
+    state = _draft_states.get(lb.lobby_id)
+    if not state:
+        raise HTTPException(status_code=409, detail="No active draft in this lobby")
+    if pid not in state["player_ids"]:
+        raise HTTPException(status_code=403, detail="Not a draft participant")
+
+    phase = state["phase"]
+    vote = request.vote
+
+    if phase == "monsters":
+        if not isinstance(vote, list):
+            raise HTTPException(status_code=400, detail="Monster vote must be a list of area names")
+        valid_areas = set(state["monster_areas"].keys())
+        validated = [a for a in vote if a in valid_areas][:5]
+        state["votes_monsters"][pid] = validated
+    elif phase == "citizens":
+        try:
+            cid = int(vote)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Citizen vote must be a citizen id (integer)")
+        current_roll = state.get("current_roll")
+        if current_roll is None:
+            raise HTTPException(status_code=409, detail="No citizen round active")
+        available_ids = {int(r["id_citizens"]) for r in state["citizens_by_roll"].get(current_roll, [])}
+        if cid not in available_ids:
+            raise HTTPException(status_code=400, detail="Invalid citizen choice")
+        state["votes_citizens"][pid] = cid
+    else:
+        raise HTTPException(status_code=409, detail="Draft is not in an active voting phase")
+
+    await lobby_ws_manager.broadcast_lobby()
+
+    n_players = len(state["player_ids"])
+    if phase == "monsters" and len(state["votes_monsters"]) >= n_players:
+        await _advance_draft(lb.lobby_id)
+    elif phase == "citizens" and len(state["votes_citizens"]) >= n_players:
+        await _advance_draft(lb.lobby_id)
+
+    return {"message": "Vote submitted"}
 
 
 @app.get("/api/lobby/background-card-urls")

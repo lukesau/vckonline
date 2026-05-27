@@ -7,8 +7,8 @@ let playerId = localStorage.getItem('playerId') || '';
             let finalizeRollInFlight = false;
             let autoHarvestInFlight = false;
 
-            function getDebugStartingResourcesEnabled() {
-                return localStorage.getItem('debugStartingResourcesEnabled') === 'true';
+            function getDebugModeEnabled() {
+                return localStorage.getItem('debugModeEnabled') === 'true';
             }
 
             function getAutoHarvestEnabled() {
@@ -17,19 +17,19 @@ let playerId = localStorage.getItem('playerId') || '';
                 return v === 'true';
             }
 
-            function syncDebugStartingResourcesUiFromStorage() {
-                const el = document.getElementById('debugStartingResourcesEnabled');
+            function syncDebugModeUiFromStorage() {
+                const el = document.getElementById('debugModeEnabled');
                 if (!el) return;
-                el.checked = getDebugStartingResourcesEnabled();
+                el.checked = getDebugModeEnabled();
             }
 
-            function wireDebugStartingResourcesUi() {
-                const el = document.getElementById('debugStartingResourcesEnabled');
+            function wireDebugModeUi() {
+                const el = document.getElementById('debugModeEnabled');
                 if (!el) return;
                 el.addEventListener('change', () => {
-                    localStorage.setItem('debugStartingResourcesEnabled', String(!!el.checked));
+                    localStorage.setItem('debugModeEnabled', String(!!el.checked));
                 });
-                syncDebugStartingResourcesUiFromStorage();
+                syncDebugModeUiFromStorage();
             }
 
             function syncAutoHarvestUiFromStorage() {
@@ -52,58 +52,6 @@ let playerId = localStorage.getItem('playerId') || '';
                 if (!Number.isFinite(x)) return 1;
                 return Math.max(1, Math.min(6, Math.trunc(x)));
             }
-
-            function getDiceRigSettings() {
-                const enabled = localStorage.getItem('diceRigEnabled') === 'true';
-                const d1 = clampDie(localStorage.getItem('diceRigDie1') || 1);
-                const d2 = clampDie(localStorage.getItem('diceRigDie2') || 1);
-                return { enabled, d1, d2 };
-            }
-
-            function setDiceRigSettings(next) {
-                localStorage.setItem('diceRigEnabled', String(!!next.enabled));
-                localStorage.setItem('diceRigDie1', String(clampDie(next.d1)));
-                localStorage.setItem('diceRigDie2', String(clampDie(next.d2)));
-            }
-
-            function syncDiceRigUiFromStorage() {
-                const enabledEl = document.getElementById('diceOverrideEnabled');
-                const d1El = document.getElementById('diceOverrideDie1');
-                const d2El = document.getElementById('diceOverrideDie2');
-                if (!enabledEl || !d1El || !d2El) return;
-                const s = getDiceRigSettings();
-                enabledEl.checked = !!s.enabled;
-                d1El.value = String(s.d1);
-                d2El.value = String(s.d2);
-                d1El.disabled = !s.enabled;
-                d2El.disabled = !s.enabled;
-            }
-
-            function wireDiceRigUi() {
-                const enabledEl = document.getElementById('diceOverrideEnabled');
-                const d1El = document.getElementById('diceOverrideDie1');
-                const d2El = document.getElementById('diceOverrideDie2');
-                if (!enabledEl || !d1El || !d2El) return;
-
-                const onChange = () => {
-                    setDiceRigSettings({
-                        enabled: enabledEl.checked,
-                        d1: d1El.value,
-                        d2: d2El.value,
-                    });
-                    syncDiceRigUiFromStorage();
-                    // If we're currently waiting on a pending roll, apply immediately.
-                    if (lastGameState) maybeFinalizePendingRoll(lastGameState);
-                };
-
-                enabledEl.addEventListener('change', onChange);
-                d1El.addEventListener('change', onChange);
-                d2El.addEventListener('change', onChange);
-                d1El.addEventListener('input', onChange);
-                d2El.addEventListener('input', onChange);
-
-                syncDiceRigUiFromStorage();
-            }
             // Poll handle used while a concurrent (non-ordered) prompt is active so
             // every browser session sees other players' progress in near-real-time.
             // Intentionally NOT an unconditional global poll: the standard-action panel
@@ -114,8 +62,7 @@ let playerId = localStorage.getItem('playerId') || '';
             if (playerId) {
                 document.getElementById('playerId').textContent = 'Player ID: ' + playerId;
             }
-            wireDiceRigUi();
-            wireDebugStartingResourcesUi();
+            wireDebugModeUi();
             wireAutoHarvestUi();
 
             function openVisualGameClientTab(gameId) {
@@ -126,19 +73,22 @@ let playerId = localStorage.getItem('playerId') || '';
                 window.open(`${location.origin}/?${q}`, '_blank', 'noopener,noreferrer');
             }
             
-            async function joinLobby() {
+            async function createLobby() {
                 const name = document.getElementById('playerName').value;
                 if (!name) {
-                    alert('Please enter a name');
+                    alert('Please enter a display name');
                     return;
                 }
+                const preset = document.getElementById('createLobbyPreset').value || 'current';
+                const minPlayers = Number(document.getElementById('createLobbyMinPlayers').value) || 2;
                 try {
-                    const response = await fetch('/api/lobby/join', {
+                    const response = await fetch('/api/lobby/create', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({name: name})
+                        body: JSON.stringify({name: name, preset: preset, min_players: minPlayers})
                     });
                     const data = await response.json();
+                    if (!response.ok) throw new Error(data.detail || 'Create failed');
                     playerId = data.player_id;
                     localStorage.setItem('playerId', playerId);
                     document.getElementById('playerId').textContent = 'Player ID: ' + playerId;
@@ -147,54 +97,180 @@ let playerId = localStorage.getItem('playerId') || '';
                     alert('Error: ' + error.message);
                 }
             }
-            
-            async function getLobbyStatus() {
+
+            async function joinLobbyById(lobbyId) {
+                const name = document.getElementById('playerName').value;
+                if (!name) {
+                    alert('Please enter a display name first');
+                    return;
+                }
+                try {
+                    const response = await fetch('/api/lobby/join', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({name: name, lobby_id: lobbyId})
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.detail || 'Join failed');
+                    playerId = data.player_id;
+                    localStorage.setItem('playerId', playerId);
+                    document.getElementById('playerId').textContent = 'Player ID: ' + playerId;
+                    getLobbyStatus();
+                } catch (error) {
+                    alert('Error: ' + error.message);
+                }
+            }
+
+            async function leaveLobby() {
                 if (!playerId) return;
                 try {
-                    const response = await fetch(`/api/lobby/status?player_id=${playerId}`);
-                    const data = await response.json();
-                    
-                    let html = '<h3>Players in Lobby:</h3>';
-                    data.lobby.forEach(p => {
-                        const debugTag = p.debug_starting_resources ? ' <span class="mini">(debug 100/100/100)</span>' : '';
-                        html += `<div class="lobby-player ${p.is_ready ? 'ready' : ''}">
-                            ${p.name}${debugTag} - ${p.is_ready ? 'Ready' : 'Not Ready'}
-                            ${p.player_id === playerId ? '<button onclick="toggleReady()">Toggle Ready</button>' : ''}
-                        </div>`;
+                    await fetch('/api/lobby/leave?player_id=' + encodeURIComponent(playerId), {method: 'POST'});
+                } catch (_) { /* ignore */ }
+                playerId = '';
+                localStorage.removeItem('playerId');
+                document.getElementById('playerId').textContent = '';
+                getLobbyStatus();
+            }
+
+            async function setLobbyPreset(preset) {
+                if (!playerId) return;
+                try {
+                    const response = await fetch('/api/lobby/preset', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({player_id: playerId, preset: preset})
                     });
-                    html += `<p>Active games: ${data.game_count}</p>`;
-                    if (data.in_game) {
-                        html += `<p><strong>You are in game: ${data.game_id}</strong></p>`;
-                        if (data.game_id && data.game_id !== currentGameId) {
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.detail || 'Preset update failed');
+                    getLobbyStatus();
+                } catch (error) {
+                    alert('Error: ' + error.message);
+                }
+            }
+
+            async function setLobbyMinPlayers(minPlayers) {
+                if (!playerId) return;
+                try {
+                    const response = await fetch('/api/lobby/min_players', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({player_id: playerId, min_players: Number(minPlayers) || 2})
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.detail || 'Min players update failed');
+                    getLobbyStatus();
+                } catch (error) {
+                    alert('Error: ' + error.message);
+                }
+            }
+
+            function findMyLobby(lobbies) {
+                if (!Array.isArray(lobbies) || !playerId) return null;
+                for (const lb of lobbies) {
+                    if (Array.isArray(lb.members) && lb.members.some(m => m.player_id === playerId)) return lb;
+                }
+                return null;
+            }
+
+            async function getLobbyStatus() {
+                try {
+                    const url = playerId
+                        ? `/api/lobby/status?player_id=${encodeURIComponent(playerId)}`
+                        : '/api/lobby/status';
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.detail || 'Status failed');
+
+                    if (data.in_game && data.game_id) {
+                        document.getElementById('lobbyStatus').innerHTML =
+                            `<p><strong>You are in game: ${data.game_id}</strong></p>`;
+                        if (data.game_id !== currentGameId) {
                             openVisualGameClientTab(data.game_id);
                             currentGameId = data.game_id;
                             localStorage.setItem('gameId', currentGameId);
-                            // Fetch immediately when we first learn the game id
                             getGameState(false);
                         }
-                    } else {
-                        // If server says we're not in a game, clear any stale id
-                        if (currentGameId) {
-                            currentGameId = '';
-                            localStorage.removeItem('gameId');
-                            stopGamePollingIntervals();
-                        }
+                        return;
                     }
+                    if (currentGameId) {
+                        currentGameId = '';
+                        localStorage.removeItem('gameId');
+                        stopGamePollingIntervals();
+                    }
+
+                    const lobbies = Array.isArray(data.lobbies) ? data.lobbies : [];
+                    const myLobby = findMyLobby(lobbies);
+                    let html = `<p>${lobbies.length} open lobb${lobbies.length === 1 ? 'y' : 'ies'} • ${data.game_count || 0} active game${data.game_count === 1 ? '' : 's'}</p>`;
+                    if (!lobbies.length) {
+                        html += '<p class="mini">No open lobbies. Create one above.</p>';
+                    }
+                    lobbies.forEach(lb => {
+                        const isMine = !!(myLobby && myLobby.lobby_id === lb.lobby_id);
+                        const isOwner = isMine && lb.owner_id === playerId;
+                        const escapedId = lb.lobby_id.replace(/"/g, '&quot;');
+                        const minPlayers = Number(lb.min_players) || 2;
+                        const minLabel = lb.members.length >= minPlayers
+                            ? `min ${minPlayers}`
+                            : `${lb.members.length}/${minPlayers} to start`;
+                        let card = `<div class="lobby-card${isMine ? ' is-mine' : ''}">`;
+                        card += '<div class="lobby-card-header">';
+                        card += `<div><span class="lobby-card-title">Preset: ${lb.preset}</span>`;
+                        if (isMine) card += ' <span class="lobby-self-tag">You</span>';
+                        card += `</div>`;
+                        card += '<div class="lobby-card-sub">';
+                        card += `${lb.members.length} player${lb.members.length === 1 ? '' : 's'} • ${minLabel}`;
+                        card += '</div>';
+                        if (!isMine) {
+                            card += `<button onclick="joinLobbyById('${escapedId}')">Join</button>`;
+                        }
+                        card += '</div>';
+                        if (isOwner) {
+                            const presetOpts = ['current', 'base', 'test1', 'test2', 'random']
+                                .map(v => `<option value="${v}"${v === lb.preset ? ' selected' : ''}>${v}</option>`)
+                                .join('');
+                            const minOpts = [2, 3, 4, 5]
+                                .map(v => `<option value="${v}"${v === minPlayers ? ' selected' : ''}>${v}</option>`)
+                                .join('');
+                            card += `<div style="margin-top:6px;">Owner preset: <select onchange="setLobbyPreset(this.value)">${presetOpts}</select>`;
+                            card += ` &nbsp; Min players: <select onchange="setLobbyMinPlayers(this.value)">${minOpts}</select></div>`;
+                        }
+                        card += '<ul class="lobby-card-members">';
+                        lb.members.forEach(m => {
+                            const isMember = m.player_id === playerId;
+                            const ownerBadge = m.player_id === lb.owner_id ? ' <span class="lobby-owner-tag">Owner</span>' : '';
+                            const debugTag = m.debug_mode ? ' <span class="mini">(debug)</span>' : '';
+                            card += `<li class="lobby-player ${m.is_ready ? 'ready' : ''}">`;
+                            card += `${m.name || 'Player'}${ownerBadge}${debugTag} — ${m.is_ready ? 'Ready' : 'Not Ready'}`;
+                            if (isMember) card += ' <button onclick="toggleReady()">Toggle ready</button>';
+                            card += '</li>';
+                        });
+                        card += '</ul>';
+                        card += '</div>';
+                        html += card;
+                    });
                     document.getElementById('lobbyStatus').innerHTML = html;
                 } catch (error) {
                     console.error('Error:', error);
                 }
             }
-            
+
             async function toggleReady() {
                 if (!playerId) return;
+                let endpoint = '/api/lobby/ready';
                 try {
-                    const response = await fetch('/api/lobby/ready', {
+                    const probe = await fetch(`/api/lobby/status?player_id=${encodeURIComponent(playerId)}`);
+                    const ps = await probe.json();
+                    const lb = findMyLobby(ps.lobbies || []);
+                    const me = lb ? lb.members.find(m => m.player_id === playerId) : null;
+                    if (me && me.is_ready) endpoint = '/api/lobby/unready';
+                } catch (_) { /* fall through to /ready */ }
+                try {
+                    const response = await fetch(endpoint, {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
                             player_id: playerId,
-                            debug_starting_resources: getDebugStartingResourcesEnabled(),
+                            debug_mode: getDebugModeEnabled(),
                         })
                     });
                     const data = await response.json();
@@ -202,7 +278,6 @@ let playerId = localStorage.getItem('playerId') || '';
                         currentGameId = data.game_id;
                         localStorage.setItem('gameId', currentGameId);
                         openVisualGameClientTab(data.game_id);
-                        // Immediately fetch state so the Game section fills in
                         getGameState(false);
                     }
                     getLobbyStatus();
@@ -214,7 +289,6 @@ let playerId = localStorage.getItem('playerId') || '';
             function applyGameStateClientUpdate(data) {
                 lastGameState = data;
                 renderDice(data);
-                syncDiceRigUiFromStorage();
                 maybeFinalizePendingRoll(data);
                 const pre = document.getElementById('gameState');
                 if (pre) pre.textContent = JSON.stringify(data, null, 2);
@@ -257,21 +331,15 @@ let playerId = localStorage.getItem('playerId') || '';
                 if (reqAction !== 'finalize_roll') return;
                 if (reqId !== playerId) return;
 
+                // Don't auto-finalize when the player owns roll modifiers; the
+                // prompt should wait for them to choose to spend or keep.
                 const rolled1 = clampDie(gameState.rolled_die_one ?? gameState.die_one ?? 1);
                 const rolled2 = clampDie(gameState.rolled_die_two ?? gameState.die_two ?? 1);
-                const s = getDiceRigSettings();
-                if (!s.enabled) {
-                    const player = Array.isArray(gameState?.player_list)
-                        ? gameState.player_list.find(p => (p?.player_id || '') === playerId)
-                        : null;
-                    const opts = listRollSetOneDieOptions(player, rolled1, rolled2, gameState.turn_number);
-                    if (opts.length > 0) {
-                        // Do not auto-finalize when roll modifiers are available.
-                        return;
-                    }
-                }
-                const final1 = s.enabled ? clampDie(s.d1) : rolled1;
-                const final2 = s.enabled ? clampDie(s.d2) : rolled2;
+                const player = Array.isArray(gameState?.player_list)
+                    ? gameState.player_list.find(p => (p?.player_id || '') === playerId)
+                    : null;
+                const opts = listRollSetOneDieOptions(player, rolled1, rolled2, gameState.turn_number);
+                if (opts.length > 0) return;
 
                 finalizeRollInFlight = true;
                 try {
@@ -281,8 +349,8 @@ let playerId = localStorage.getItem('playerId') || '';
                         body: JSON.stringify({
                             player_id: playerId,
                             action_type: 'finalize_roll',
-                            die_one: final1,
-                            die_two: final2
+                            die_one: rolled1,
+                            die_two: rolled2
                         })
                     });
                     const payload = await res.json();
@@ -330,6 +398,10 @@ let playerId = localStorage.getItem('playerId') || '';
             }
 
             function parseRollSetOneDieEffects(player, turnNumber) {
+                // Mirrors the engine's _parse_roll_set_one_die_kv: three modes
+                // (target=N | subtract=N | add=N) and an optional cost spec.
+                // Emits one entry per effect tagged with `mode`; the per-die
+                // candidate values are computed in listRollSetOneDieOptions.
                 const out = [];
                 const domains = Array.isArray(player?.owned_domains) ? player.owned_domains : [];
                 domains.forEach((d) => {
@@ -348,16 +420,32 @@ let playerId = localStorage.getItem('playerId') || '';
                         const v = p.slice(eq + 1).trim();
                         kv[k] = v;
                     }
-                    const target = Number(kv.target);
+                    const domainName = (d?.name || 'Domain').toString();
+                    const domainId = (d?.domain_id != null) ? Number(d.domain_id) : null;
                     const costSpec = (kv.cost || '').toString().trim().toLowerCase();
-                    if (!Number.isFinite(target) || target < 1 || target > 6 || !costSpec) return;
-                    out.push({ domainName: (d?.name || 'Domain').toString(), target, costSpec });
+                    if (kv.target) {
+                        const target = Number(kv.target);
+                        if (Number.isFinite(target) && target >= 1 && target <= 6) {
+                            out.push({ domainName, domainId, mode: 'target', target, costSpec });
+                        }
+                        return;
+                    }
+                    for (const modeKey of ['subtract', 'add']) {
+                        if (!kv[modeKey]) continue;
+                        const delta = Number(kv[modeKey]);
+                        if (Number.isFinite(delta) && delta > 0) {
+                            out.push({ domainName, domainId, mode: modeKey, delta, costSpec });
+                        }
+                        return;
+                    }
                 });
                 return out;
             }
 
             function rollEffectCostGold(player, costSpec) {
                 const spec = (costSpec || '').toString().trim().toLowerCase();
+                // Empty cost = free (e.g. Palace of the Dawn's `subtract=1`).
+                if (!spec) return 0;
                 if (spec.startsWith('g:')) {
                     const n = Number(spec.slice(2));
                     if (!Number.isFinite(n) || n < 0) return null;
@@ -373,18 +461,52 @@ let playerId = localStorage.getItem('playerId') || '';
                 return null;
             }
 
-            function listRollSetOneDieOptions(player, rolled1, rolled2, turnNumber) {
+            function listRollSetOneDieOptions(player, rolled1, rolled2, turnNumber, opts) {
+                // `opts.budgetGold` (optional): override the gold-affordability
+                // check (used by stage-2 rendering to subtract the staged
+                // first modifier's cost from the player's pool).
+                // `opts.excludeDomainId` (optional): drop effects sourced from
+                // this domain (engine forbids the same card firing twice in
+                // one roll phase).
+                // `opts.die` (optional, 1 or 2): restrict to options that
+                // modify only this die number.
                 const effects = parseRollSetOneDieEffects(player, turnNumber);
-                const gold = Number(player?.gold_score || 0);
+                const opts_ = opts || {};
+                const budget = Number.isFinite(Number(opts_.budgetGold))
+                    ? Number(opts_.budgetGold)
+                    : Number(player?.gold_score || 0);
+                const excludeDomainId = (opts_.excludeDomainId != null) ? Number(opts_.excludeDomainId) : null;
+                const onlyDie = (opts_.die === 1 || opts_.die === 2) ? opts_.die : null;
                 const options = [];
+                // `target` in the returned option is the resolved FINAL die value
+                // after applying this effect, regardless of which parser mode
+                // produced it. Renderers can treat all options uniformly.
+                const pushIfValid = (die, rolled, candidate, e, costGold) => {
+                    if (!Number.isFinite(candidate)) return;
+                    if (candidate < 1 || candidate > 6) return;
+                    if (Number(candidate) === Number(rolled)) return;
+                    if (onlyDie !== null && die !== onlyDie) return;
+                    options.push({
+                        die,
+                        target: candidate,
+                        costGold,
+                        domainName: e.domainName,
+                        domainId: e.domainId,
+                    });
+                };
                 effects.forEach((e) => {
+                    if (excludeDomainId !== null && Number(e.domainId) === excludeDomainId) return;
                     const costGold = rollEffectCostGold(player, e.costSpec);
-                    if (costGold === null || gold < costGold) return;
-                    if (Number(rolled1) !== Number(e.target)) {
-                        options.push({ die: 1, target: Number(e.target), costGold, domainName: e.domainName });
-                    }
-                    if (Number(rolled2) !== Number(e.target)) {
-                        options.push({ die: 2, target: Number(e.target), costGold, domainName: e.domainName });
+                    if (costGold === null || budget < costGold) return;
+                    if (e.mode === 'target') {
+                        pushIfValid(1, rolled1, Number(e.target), e, costGold);
+                        pushIfValid(2, rolled2, Number(e.target), e, costGold);
+                    } else if (e.mode === 'subtract') {
+                        pushIfValid(1, rolled1, Number(rolled1) - Number(e.delta), e, costGold);
+                        pushIfValid(2, rolled2, Number(rolled2) - Number(e.delta), e, costGold);
+                    } else if (e.mode === 'add') {
+                        pushIfValid(1, rolled1, Number(rolled1) + Number(e.delta), e, costGold);
+                        pushIfValid(2, rolled2, Number(rolled2) + Number(e.delta), e, costGold);
                     }
                 });
                 return options;
@@ -422,7 +544,25 @@ let playerId = localStorage.getItem('playerId') || '';
                     console.error(e);
                 } finally {
                     finalizeRollInFlight = false;
+                    resetFinalizeRollStaging();
                 }
+            }
+
+            // Two-stage flow state for the finalize_roll prompt. Stage 1 picks
+            // the first modifier (or keep). Picking one stashes it here and
+            // re-renders into stage 2, which offers Confirm-with-just-this-one,
+            // Back, and any second-modifier buttons scoped to the OTHER die /
+            // a different source domain / remaining gold budget.
+            let stagedFirstModifier = null;
+            let stagedFirstModifierForRoll = null;
+
+            function resetFinalizeRollStaging() {
+                stagedFirstModifier = null;
+                stagedFirstModifierForRoll = null;
+            }
+
+            function stagedRollKey(rolled1, rolled2) {
+                return rolled1 + ',' + rolled2;
             }
 
             function refreshTableauActionButtons(gameState) {
@@ -1172,16 +1312,6 @@ let playerId = localStorage.getItem('playerId') || '';
 
                 renderGameLog(gameState);
 
-                // Update rig hint text.
-                const hintEl = document.getElementById('dicePanelHint');
-                if (hintEl) {
-                    const s = getDiceRigSettings();
-                    const msg = s.enabled
-                        ? `Enabled: will finalize as ${clampDie(s.d1)} + ${clampDie(s.d2)} (graphic still shows the rolled dice).`
-                        : `Disabled: roll finalizes as the rolled dice.`;
-                    hintEl.textContent = msg;
-                }
-
                 if (effectsEl) {
                     const players = Array.isArray(gameState?.player_list) ? gameState.player_list : [];
                     const activePlayerId = (gameState?.active_player_id || '').toString();
@@ -1516,6 +1646,34 @@ let playerId = localStorage.getItem('playerId') || '';
                 `;
             }
 
+            // Globals so inline onclicks in the two-stage prompt HTML can find
+            // them. We pass data via the button's data-* attributes (rather
+            // than baking values into the onclick string) so domain names with
+            // quotes, backslashes, or HTML can't break attribute parsing.
+            // `stageFirstModifierClickFromBtn` stashes the chosen first option
+            // and re-renders into stage 2; `stageBackClick` clears the staging
+            // and re-renders stage 1. Both rely on `lastGameState` for the
+            // re-render input.
+            window.stageFirstModifierClickFromBtn = function (btn) {
+                if (!btn || !btn.dataset) return;
+                const rolled1 = clampDie(lastGameState?.rolled_die_one ?? lastGameState?.die_one ?? 1);
+                const rolled2 = clampDie(lastGameState?.rolled_die_two ?? lastGameState?.die_two ?? 1);
+                const did = btn.dataset.domainId;
+                stagedFirstModifier = {
+                    die: Number(btn.dataset.die),
+                    target: Number(btn.dataset.target),
+                    costGold: Number(btn.dataset.costGold),
+                    domainId: (did === '' || did === undefined) ? null : Number(did),
+                    domainName: String(btn.dataset.domainName || ''),
+                };
+                stagedFirstModifierForRoll = stagedRollKey(rolled1, rolled2);
+                if (lastGameState) renderFinalizeRollPrompt(lastGameState);
+            };
+            window.stageBackClick = function () {
+                resetFinalizeRollStaging();
+                if (lastGameState) renderFinalizeRollPrompt(lastGameState);
+            };
+
             function renderFinalizeRollPrompt(gameState) {
                 const panel = document.getElementById('choicePanel');
                 if (!panel) return;
@@ -1535,27 +1693,67 @@ let playerId = localStorage.getItem('playerId') || '';
                 const player = Array.isArray(gameState?.player_list)
                     ? gameState.player_list.find(p => (p?.player_id || '') === playerId)
                     : null;
-                const options = listRollSetOneDieOptions(player, rolled1, rolled2, gameState.turn_number);
-                const keepBtn = `<button onclick="sendFinalizeRollChoice(${rolled1}, ${rolled2})">Keep ${rolled1} + ${rolled2}</button>`;
-                const modBtns = options.map((o) => {
-                    const fromVal = (o.die === 1) ? rolled1 : rolled2;
-                    const d1 = (o.die === 1) ? o.target : rolled1;
-                    const d2 = (o.die === 2) ? o.target : rolled2;
-                    return `<button onclick="sendFinalizeRollChoice(${d1}, ${d2})">Set die ${o.die}: ${fromVal} → ${o.target} (pay ${o.costGold}g via ${escapeHtml(o.domainName)})</button>`;
-                }).join(' ');
-                const note = options.length
-                    ? '<div class="mini" style="margin-top:6px;">Choose a roll modifier or keep the rolled dice.</div>'
-                    : '<div class="mini" style="margin-top:6px;">No roll modifiers available; finalize to continue.</div>';
+
+                const rollKey = stagedRollKey(rolled1, rolled2);
+                if (stagedFirstModifierForRoll !== rollKey) resetFinalizeRollStaging();
+                const staged = stagedFirstModifier;
+
+                let buttonsHtml = '';
+                let noteHtml = '';
+                let stagedLine = '';
+
+                if (!staged) {
+                    const options = listRollSetOneDieOptions(player, rolled1, rolled2, gameState.turn_number);
+                    const keepBtn = `<button onclick="sendFinalizeRollChoice(${rolled1}, ${rolled2})">Keep ${rolled1} + ${rolled2}</button>`;
+                    const modBtns = options.map((o) => {
+                        const fromVal = (o.die === 1) ? rolled1 : rolled2;
+                        const didAttr = (o.domainId === null || o.domainId === undefined) ? '' : Number(o.domainId);
+                        return `<button data-die="${o.die}" data-target="${o.target}" data-cost-gold="${o.costGold}" data-domain-id="${didAttr}" data-domain-name="${escapeHtml(o.domainName)}" onclick="stageFirstModifierClickFromBtn(this)">Set die ${o.die}: ${fromVal} → ${o.target} (pay ${o.costGold}g via ${escapeHtml(o.domainName)})</button>`;
+                    }).join(' ');
+                    buttonsHtml = keepBtn + ' ' + modBtns;
+                    noteHtml = options.length
+                        ? '<div class="mini" style="margin-top:6px;">Choose a roll modifier (or keep). You can chain a second modifier on the other die.</div>'
+                        : '<div class="mini" style="margin-top:6px;">No roll modifiers available; finalize to continue.</div>';
+                } else {
+                    const stagedFromVal = staged.die === 1 ? rolled1 : rolled2;
+                    const d1AfterFirst = staged.die === 1 ? staged.target : rolled1;
+                    const d2AfterFirst = staged.die === 2 ? staged.target : rolled2;
+                    stagedLine =
+                        `<div style="margin:6px 0;">Staged: <strong>Die ${staged.die}: ${stagedFromVal} → ${staged.target}</strong>` +
+                        ` (${staged.costGold}g via ${escapeHtml(staged.domainName)}). ` +
+                        `Result so far: <strong>${d1AfterFirst} + ${d2AfterFirst} = ${d1AfterFirst + d2AfterFirst}</strong>.</div>`;
+
+                    const confirmBtn = `<button onclick="sendFinalizeRollChoice(${d1AfterFirst}, ${d2AfterFirst})">Confirm ${d1AfterFirst} + ${d2AfterFirst}</button>`;
+
+                    const otherDie = staged.die === 1 ? 2 : 1;
+                    const remainingGold = Math.max(0, Number(player?.gold_score || 0) - Number(staged.costGold || 0));
+                    const stage2Options = listRollSetOneDieOptions(
+                        player, rolled1, rolled2, gameState.turn_number,
+                        { die: otherDie, excludeDomainId: staged.domainId, budgetGold: remainingGold }
+                    );
+                    const chainBtns = stage2Options.map((o) => {
+                        const fromVal = (o.die === 1) ? rolled1 : rolled2;
+                        const d1 = (o.die === 1) ? o.target : d1AfterFirst;
+                        const d2 = (o.die === 2) ? o.target : d2AfterFirst;
+                        return `<button onclick="sendFinalizeRollChoice(${d1}, ${d2})">+ Die ${o.die}: ${fromVal} → ${o.target} (pay ${o.costGold}g via ${escapeHtml(o.domainName)}) → ${d1} + ${d2}</button>`;
+                    }).join(' ');
+                    const backBtn = `<button onclick="stageBackClick()">Back</button>`;
+
+                    buttonsHtml = confirmBtn + ' ' + chainBtns + ' ' + backBtn;
+                    noteHtml = stage2Options.length
+                        ? '<div class="mini" style="margin-top:6px;">Optionally chain a second modifier on the other die, or confirm with just the first.</div>'
+                        : '<div class="mini" style="margin-top:6px;">No second modifier available - confirm to apply just the staged change.</div>';
+                }
 
                 panel.innerHTML = `
                     <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
                         <div style="font-weight:700;margin-bottom:8px;">Finalize Roll</div>
                         <div style="margin-bottom:8px;">Rolled: <strong>${rolled1} + ${rolled2}</strong></div>
+                        ${stagedLine}
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                            ${keepBtn}
-                            ${modBtns}
+                            ${buttonsHtml}
                         </div>
-                        ${note}
+                        ${noteHtml}
                     </div>
                 `;
             }

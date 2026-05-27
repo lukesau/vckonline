@@ -50,6 +50,96 @@ This function currently assumes local DB connectivity via `127.0.0.1:3306` (typi
 
 See `docs/database.md` for DB setup and stored procedure installation.
 
+### Debug mode (`debug_mode`)
+
+When the lobby's "Debug mode" checkbox is on, `load_game_data` is called
+with `debug_mode=True` and each player receives, in addition to the
+normal starting hand:
+
+- 100 gold / 100 strength / 100 magic instead of the printed starting pool
+- One copy of every accessible board citizen (one citizen per roll-match
+  stack, popped off the top so the next card down becomes accessible)
+- A fresh copy of every roll-modifier domain listed in
+  `DEBUG_ROLL_MODIFIER_DOMAIN_IDS` (Foxgrove Palisade, The Desert Orchid,
+  Palace of the Dawn). These are pulled with a direct
+  `SELECT * FROM domains WHERE id_domains IN (...)` and added to each
+  player's `owned_domains`. The grant itself is "illegal" relative to the
+  printed game (every player owns three uniques), but the same IDs are
+  also filtered out of the random board deal so nobody can purchase a
+  second copy on top of the grant.
+
+Because that filter would shrink the curated `test1` / `test2` domain
+pools below the 15 cards the board needs (test1 includes ids 1 and 2;
+test2 ranges 9..24 LIMIT 15 includes 19), debug mode also overrides only
+those presets' domain query to `select_random_domains` so the filter
+always has headroom. Other presets keep their configured domain pool.
+Citizens and monsters still come from the preset's respective procs.
+
+The roll-modifier domains plug into the same `_apply_roll_modification`
+path real game-built domains use (no engine special-casing), so a debug
+player can steer up to ONE die per modifier via the standard
+`finalize_roll` prompt. Per-modifier reachable final values are: 6 (via
+Foxgrove, 2g), 1 (via Desert Orchid, 1g per owned holy citizen), and
+rolled-1 (via Palace of the Dawn, free). The engine allows up to two
+modifiers per roll provided they target different dice and are sourced
+from different cards — so a debug player can apply at most two of the
+three granted domains per roll, "discarding" the third. See the
+rigged-dice + doubles tables below for the complete reachable pairings.
+
+#### Rigged dice (`DEBUG_DIE_ONE_VALUES`, `DEBUG_DIE_TWO_VALUES`)
+
+In debug mode `Game.roll_phase()` does not call `random.randint(1, 6)`
+for the dice. It picks each die out of constrained value sets defined in
+`game_setup.py`:
+
+```
+DEBUG_DIE_ONE_VALUES = (2, 3)
+DEBUG_DIE_TWO_VALUES = (4, 5)
+```
+
+The split is chosen so that the three granted roll-modifier domains can
+collectively reach every value 1..6 on at least one die. The flag is
+stored on the `Game` object as `self.debug_mode` (initialised from
+`game_state["debug_mode"]`) and is also re-emitted by `GameObjectEncoder`
+so clients can show a "this game is rigged" indicator if desired.
+Everything downstream of the RNG (`pending_roll`, `finalize_roll`,
+`_apply_roll_modification`, harvest matching, `roll_events`) is
+unchanged — only the source distribution of `d1` / `d2` differs.
+
+Reachability per natural roll (each cell lists the final dice you can
+finalise into, given the one-modifier-per-roll constraint):
+
+| Natural   | Keep      | Foxgrove (=6, 2g) | Desert Orchid (=1) | Palace (-1) |
+|-----------|-----------|-------------------|--------------------|-------------|
+| (2, 4)    | (2, 4)    | (6, 4) / (2, 6)   | (1, 4) / (2, 1)    | (1, 4) / (2, 3) |
+| (2, 5)    | (2, 5)    | (6, 5) / (2, 6)   | (1, 5) / (2, 1)    | (1, 5) / (2, 4) |
+| (3, 4)    | (3, 4)    | (6, 4) / (3, 6)   | (1, 4) / (3, 1)    | (2, 4) / (3, 3) |
+| (3, 5)    | (3, 5)    | (6, 5) / (3, 6)   | (1, 5) / (3, 1)    | (2, 5) / (3, 4) |
+
+##### Doubles in debug mode
+
+`self.roll_events` and `self.die_one == self.die_two` both read off the
+FINAL (post-modification) dice, so the starter `activation_trigger
+doubles` leg and `roll.on_event doubles ...` passives agree on whether
+the roll counted as doubles. In debug mode the rigged value sets `{2,3}`
+and `{4,5}` are disjoint, so natural doubles can never happen — every
+doubles in debug mode has to come through a modifier:
+
+| Natural | → Final | Cost   | Modifier(s)                                                |
+|---------|---------|--------|------------------------------------------------------------|
+| (3, 4)  | (3, 3)  | 0g     | Palace `subtract=1` on die 2 (single modifier)             |
+| (2, 4)  | (1, 1)  | 0g + H | Palace `subtract=1` on die 1 + Desert Orchid on die 2      |
+| (2, 5)  | (1, 1)  | 0g + H | Palace `subtract=1` on die 1 + Desert Orchid on die 2      |
+
+(H = the player's owned-holy-citizen count, charged as gold for Desert
+Orchid.) Everything else is unreachable: Foxgrove (`target=6`) on both
+dice would require the same card twice (rejected), Desert Orchid
+(`target=1`) on both dice ditto, Palace on both dice ditto, and no
+single-modifier path other than `(3, 4) → (3, 3)` finishes on a
+matching pair. So doubles in debug mode is gated on rolling one of those
+three natural pairs and burning the right modifier(s); it's NOT
+on-demand.
+
 ## Actions & phases
 
 The server routes map `action_type` strings to methods on `Game`.
@@ -59,6 +149,61 @@ Common paths:
 - `roll_phase()` rolls two dice and computes a sum
 - `harvest_phase()` pays out from owned starters/citizens for all players based on the roll
 - `hire_citizen(...)`, `build_domain(...)`, `slay_monster(...)` mutate board stacks and player resources
+
+### Roll finalization and dice modification
+
+After `roll_phase()` runs, the engine enters `roll_pending` with
+`action_required.action = "finalize_roll"` for the active player. The client
+calls `finalize_roll(player_id, die_one=..., die_two=...)` to either keep the
+rolled dice or apply one or two dice-modifying effects (e.g. Foxgrove
+Palisade's `roll.set_one_die`). `_apply_roll_modification` validates the
+proposed `(fd1, fd2)` against the player's owned `roll.set_one_die` domains
+and, if legal, charges gold and writes one game-log line per applied
+modifier.
+
+The rule is "up to one modifier per CHANGED die":
+
+- **0 dice changed**: trivially legal, no effects applied.
+- **1 die changed**: exactly one matching, affordable effect from the
+  player's tableau is charged and logged.
+- **2 dice changed**: two matching effects sourced by DIFFERENT owned
+  domains. Each card's text says "during your Roll Phase, you may ...
+  change one die", i.e. one activation per phase per card, so the engine
+  refuses to fire the same `domain_id` against both dice (see
+  `_roll_modifier_same_source`). The combined gold cost (sum of both
+  individual costs) must be affordable; charges land in a single
+  finalize_roll transaction.
+
+Unmatched / impossible / unaffordable combinations raise
+`ValueError("Illegal roll modification")`. Costs are resolved from the
+player's pre-modification state — fine in practice because no currently
+supported `roll.set_one_die` cost spec depends on anything that mutates
+between picks (only static gold or per-owned-role counts, neither of
+which change mid-roll).
+
+The two clients (`static/game/src/05-prompts.js` and
+`static/dev-client/dev-client.js`) drive `finalize_roll` through a
+two-stage prompt: stage 1 lists every legal `(die, modifier)` option (the
+unchanged classic UI). Picking one stashes it locally as the "first
+modifier" and re-renders into stage 2, which shows the staged choice, a
+Confirm button (submits using just the first modifier), a Back button,
+and any legal second-modifier buttons scoped to the OTHER die / a
+different source domain / the player's remaining gold budget. Picking a
+stage-2 button submits both modifiers in one `finalize_roll` call. The
+engine validates whatever final `(fd1, fd2)` arrives independently of
+the client's UI sequencing.
+
+Two important invariants:
+
+- `self.roll_events` is computed from the FINAL (post-modification) dice via
+  `_compute_roll_events`. Anything that wants to know "did doubles happen
+  this turn?" reads `roll_events`. A player who spent modifiers to land on
+  e.g. doubles legitimately triggered the event — `roll_events`,
+  `self.die_one == self.die_two`, and `_apply_board_event_roll_effects` all
+  agree on what "the roll" was.
+- `_apply_board_event_roll_effects(fd1, fd2)` fires Event-card roll effects
+  against the FINAL dice. A roll modifier can therefore legitimately steer
+  into or out of an Event trigger (same reasoning as above).
 
 ### “choose …” actions
 

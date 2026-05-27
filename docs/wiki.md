@@ -53,7 +53,7 @@ If the DB is unreachable, `/api/wiki/cards` returns `503` with a `detail` descri
 
 ## Unimplemented detection
 
-A row is flagged as `is_unimplemented` when one of its `has_*` flags is truthy but the matching text column is `NULL` or whitespace-only. The convention across the codebase is that the `has_*` boolean gates whether the engine will try to resolve an effect string, so a flagged row with no text is an authored stub that has not been filled in yet. The wiki computes this in `wiki_data.py` so the client just renders the badge.
+A row is flagged as `is_unimplemented` when one of its `has_*` flags is truthy but the matching text column is `NULL` or whitespace-only. The convention across the codebase is that the `has_*` boolean gates whether the engine will try to resolve an effect string, so a flagged row with no text is an authored stub that has not been filled in yet. The predicates live in `card_filters.py` and are imported by both `wiki_data.py` (to render the badge) and `game_setup.py` (to filter the `random` preset's card pool — see `docs/database.md`), so a card the wiki shows as Unimplemented is the same card the random preset refuses to deal.
 
 | Card type | Trigger columns |
 |-----------|-----------------|

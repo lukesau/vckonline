@@ -9,6 +9,9 @@ DELIMITER //
 DROP PROCEDURE IF EXISTS select_base1_citizens //
 DROP PROCEDURE IF EXISTS select_base1_monsters //
 DROP PROCEDURE IF EXISTS select_base1_domains //
+DROP PROCEDURE IF EXISTS select_base_citizens //
+DROP PROCEDURE IF EXISTS select_base_monsters //
+DROP PROCEDURE IF EXISTS select_base_dukes //
 DROP PROCEDURE IF EXISTS select_base2_citizens //
 DROP PROCEDURE IF EXISTS select_base2_monsters //
 DROP PROCEDURE IF EXISTS select_base2_domains //
@@ -17,6 +20,10 @@ DROP PROCEDURE IF EXISTS select_random_domains //
 DROP PROCEDURE IF EXISTS select_random_dukes //
 DROP PROCEDURE IF EXISTS select_test1_domains //
 DROP PROCEDURE IF EXISTS select_test2_domains //
+DROP PROCEDURE IF EXISTS select_all_monsters //
+DROP PROCEDURE IF EXISTS select_all_citizens //
+DROP PROCEDURE IF EXISTS select_base_events //
+DROP PROCEDURE IF EXISTS select_all_events //
 
 -- Base 1 Citizens
 CREATE PROCEDURE select_base1_citizens()
@@ -28,6 +35,18 @@ END //
 CREATE PROCEDURE select_base1_monsters()
 BEGIN
     SELECT * FROM monsters WHERE expansion = "base1";
+END //
+
+-- Base Citizens
+CREATE PROCEDURE select_base_citizens()
+BEGIN
+    SELECT * FROM citizens WHERE expansion IN ('base1', 'base2');
+END //
+
+-- Base Monsters
+CREATE PROCEDURE select_base_monsters()
+BEGIN
+    SELECT * FROM monsters WHERE expansion IN ('base1', 'base2');
 END //
 
 -- Base 2 Citizens
@@ -48,6 +67,12 @@ END //
 CREATE PROCEDURE select_base_domains()
 BEGIN
     SELECT * FROM domains WHERE expansion = 'base' ORDER BY RAND();
+END //
+
+-- Base Dukes
+CREATE PROCEDURE select_base_dukes()
+BEGIN
+    SELECT * FROM dukes WHERE expansion = 'base' ORDER BY RAND();
 END //
 
 -- Random Domains (returns all rows; caller trims to what it needs after bans)
@@ -83,6 +108,36 @@ BEGIN
     WHERE id_domains BETWEEN 9 AND 24
     ORDER BY RAND()
     LIMIT 15;
+END //
+
+-- All monsters across every expansion. The `random` preset's Python
+-- post-filter (card_filters.keep_for_random) drops unimplemented or
+-- imageless rows; the area-pick (5 of N) and stack assembly stay in
+-- game_setup.py.
+CREATE PROCEDURE select_all_monsters()
+BEGIN
+    SELECT * FROM monsters;
+END //
+
+-- All citizens across every expansion. The `random` preset's Python
+-- post-filter drops unimplemented/imageless rows, then
+-- _choose_one_citizen_per_roll picks one row per roll_match1.
+CREATE PROCEDURE select_all_citizens()
+BEGIN
+    SELECT * FROM citizens;
+END //
+
+-- Base-set events. Used by `current` / `base` / `test1` / `test2`.
+CREATE PROCEDURE select_base_events()
+BEGIN
+    SELECT * FROM events WHERE expansion = 'base' ORDER BY id_events;
+END //
+
+-- All events across every expansion. Used by the `random` preset.
+-- Python post-filter drops unimplemented/imageless rows.
+CREATE PROCEDURE select_all_events()
+BEGIN
+    SELECT * FROM events ORDER BY id_events;
 END //
 
 DELIMITER ;

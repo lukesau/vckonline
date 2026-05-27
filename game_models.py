@@ -105,12 +105,37 @@ class Player:
 
 
 class LobbyMember:
-    def __init__(self, player_name, player_id):
+    def __init__(self, player_name, player_id, lobby_id=None):
         self.name = player_name
         self.player_id = player_id
+        self.lobby_id = lobby_id
         self.is_ready = False
-        self.debug_starting_resources = False
+        self.debug_mode = False
         self.last_active_time = 0
+
+
+class Lobby:
+    """A gathering of LobbyMembers waiting to start a game.
+
+    Lobbies are nameless — they are identified internally by `lobby_id`
+    and surfaced to clients by their metadata (preset, member count,
+    member names, min-players floor). `preset` is the `load_game_data`
+    preset that will be used when the lobby starts a game. The owner
+    (initially the creator) is the only member allowed to change the
+    preset; if the owner leaves while other members remain, ownership
+    transfers to the next member.
+    """
+
+    def __init__(self, lobby_id, owner_id, preset="current", min_players=2):
+        self.lobby_id = lobby_id
+        self.owner_id = owner_id
+        self.preset = preset
+        # Owner-controlled floor on lobby size before the game can auto-start.
+        # Defaults to 2 (the historical behavior). Engine cap is 5 (5-player
+        # decks add is_extra monsters and a 6th citizen copy).
+        self.min_players = int(min_players or 2)
+        self.members = []
+        self.created_at = 0
 
 
 class GameMember:

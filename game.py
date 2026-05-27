@@ -3,8 +3,8 @@ import random
 from constants import *
 from cards import *
 import threading
-from game_models import Player, LobbyMember, GameMember
-from game_setup import load_game_data
+from game_models import Player, Lobby, LobbyMember, GameMember
+from game_setup import DEBUG_DIE_ONE_VALUES, DEBUG_DIE_TWO_VALUES, load_game_data
 from game_serialization import SummaryEncoder, GameObjectEncoder
 
 
@@ -224,6 +224,13 @@ def _new_concurrent_action(kind, participant_ids, data=None):
 class Game:
     def __init__(self, game_state):
         self.game_id = game_state['game_id']
+        # When True the game was started from the lobby with the "Debug mode"
+        # toggle on. Currently this flag (a) makes `roll_phase` pick dice out
+        # of `DEBUG_DIE_ONE_VALUES` / `DEBUG_DIE_TWO_VALUES` instead of
+        # `random.randint(1, 6)`, and (b) is set up-front by `load_game_data`
+        # (extra starting resources, citizens, and roll-modifier domains).
+        # See `docs/game.md` "Debug mode" section.
+        self.debug_mode = bool(game_state.get('debug_mode', False))
         self.player_list = game_state['player_list']
         self.monster_grid = game_state['monster_grid']
         self.monster_stack_areas = list(game_state.get('monster_stack_areas') or [])
@@ -239,9 +246,10 @@ class Game:
         self.rolled_die_two = game_state.get('rolled_die_two', self.die_two)
         self.rolled_die_sum = game_state.get('rolled_die_sum', self.die_sum)
         # Tokens describing notable things about the most recent finalized roll
-        # (e.g. "doubles"). Computed from the NATURAL rolled dice in finalize_roll,
-        # then read by `roll.on_event ...` passives and any later-phase card that
-        # cares about what got rolled this turn. Persists until the next finalize_roll.
+        # (e.g. "doubles"). Computed from the FINAL dice in finalize_roll,
+        # then read by `roll.on_event ...` passives and any later-phase card
+        # that cares about what got rolled this turn. Persists until the next
+        # finalize_roll.
         self.roll_events = list(game_state.get('roll_events') or [])
         self.exhausted_count = game_state['exhausted_count']
         self.exhausted_stack = list(game_state.get('exhausted_stack') or [])
@@ -618,9 +626,19 @@ class Game:
         self.advance_tick()
 
     def roll_phase(self):
-        # Roll the RNG dice first (display value).
-        d1 = random.randint(1, 6)
-        d2 = random.randint(1, 6)
+        # Roll the RNG dice first (display value). In debug mode the value
+        # sets are constrained (see DEBUG_DIE_ONE_VALUES / DEBUG_DIE_TWO_VALUES
+        # in game_setup.py) so the granted roll-modifier domains can steer
+        # each die to any value 1..6. Everything downstream of this point
+        # (pending_roll, finalize_roll, _apply_roll_modification, harvest
+        # matching, roll_events) is unchanged -- only the source distribution
+        # of d1/d2 differs.
+        if self.debug_mode:
+            d1 = random.choice(DEBUG_DIE_ONE_VALUES)
+            d2 = random.choice(DEBUG_DIE_TWO_VALUES)
+        else:
+            d1 = random.randint(1, 6)
+            d2 = random.randint(1, 6)
         ds = d1 + d2
         self.rolled_die_one = d1
         self.rolled_die_two = d2
@@ -664,11 +682,14 @@ class Game:
         self.die_two = fd2
         self.die_sum = fd1 + fd2
 
-        # Compute roll-event tokens from the NATURAL dice (pre-modification) so that
-        # roll-modifying passives (Palace of the Dawn, Foxgrove, ...) can never
-        # manufacture or erase an "event" like doubles. Anything that wants to know
-        # "what just happened on the dice" should read self.roll_events.
-        self.roll_events = self._compute_roll_events(rd1, rd2)
+        # Compute roll-event tokens from the FINAL dice (post-modification).
+        # A player who spends modifiers to land on doubles legitimately
+        # triggered doubles for this roll; the engine treats final-dice
+        # doubles the same as a naturally-rolled pair. Same reasoning as why
+        # the starter `activation_trigger doubles` leg reads
+        # `self.die_one == self.die_two` -- both views agree on what "the
+        # roll" was.
+        self.roll_events = self._compute_roll_events(fd1, fd2)
         self._apply_roll_on_event_passives()
         self._apply_board_event_roll_effects(fd1, fd2)
 
@@ -822,6 +843,11 @@ class Game:
             if not spec:
                 continue
             spec["domain_name"] = getattr(d, "name", "Domain")
+            # domain_id identifies the source card; used by
+            # _apply_roll_modification to forbid the same card firing twice in
+            # one roll phase (each card text says "during your Roll Phase, you
+            # may ... change one die", i.e. one activation per phase per card).
+            spec["domain_id"] = getattr(d, "domain_id", None)
             yield spec
 
     def _parse_roll_set_one_die_kv(self, kv):
@@ -873,66 +899,125 @@ class Game:
         return None
 
     def _apply_roll_modification(self, player, rd1, rd2, fd1, fd2):
+        """Validate `(rd1, rd2) -> (fd1, fd2)` against this player's owned
+        roll-modifier domains and, if legal, charge gold and write a log line
+        for each applied modifier.
+
+        Up to one modifier per CHANGED die is allowed:
+          - 0 changes  -> trivially legal (no effects applied)
+          - 1 change   -> exactly one matching, affordable effect applied
+          - 2 changes  -> two matching effects applied, sourced by DIFFERENT
+                          owned domains (each card's "during your Roll Phase,
+                          you may ... change one die" text caps at one
+                          activation per phase per card). Total gold cost
+                          (sum of both costs) must be affordable.
+
+        Costs are resolved up-front from the player's pre-modification state.
+        That's fine because no `roll.set_one_die` cost spec we currently
+        support depends on anything that mutates between picks (only static
+        gold or per-owned-role counts, neither of which change mid-roll).
+        """
         changed1 = (fd1 != rd1)
         changed2 = (fd2 != rd2)
-        if changed1 == changed2:
-            return False
-        new_value = fd1 if changed1 else fd2
-        old_value = rd1 if changed1 else rd2
-        for effect in self._iter_roll_set_one_die_effects(player):
-            mode = effect.get("mode")
-            if mode == "target":
-                if int(effect.get("target", 0) or 0) != int(new_value):
-                    continue
-            elif mode == "subtract":
-                if int(new_value) != int(old_value) - int(effect.get("delta", 0) or 0):
-                    continue
-            elif mode == "add":
-                if int(new_value) != int(old_value) + int(effect.get("delta", 0) or 0):
-                    continue
-            else:
-                continue
-            if int(new_value) < 1 or int(new_value) > 6:
-                continue
-            cost = self._resolve_roll_effect_cost(player, effect.get("cost_spec"))
-            if cost is None:
-                continue
-            g = int(cost.get("gold", 0) or 0)
-            if int(getattr(player, "gold_score", 0) or 0) < g:
-                continue
-            before = self._player_scores_line(player)
-            if g:
-                player.gold_score = int(player.gold_score) - g
-            after = self._player_scores_line(player)
-            if g:
-                self._log_game_event(
-                    f"{self._player_label(player.player_id)} used {effect.get('domain_name')} "
-                    f"(pay {g} gold) during roll: die {old_value} -> {new_value}; scores {before} -> {after}"
-                )
-            else:
-                self._log_game_event(
-                    f"{self._player_label(player.player_id)} used {effect.get('domain_name')} "
-                    f"during roll: die {old_value} -> {new_value}"
-                )
+        if not changed1 and not changed2:
             return True
+
+        effects = list(self._iter_roll_set_one_die_effects(player))
+
+        def candidates(old, new):
+            """Return [(effect, gold_cost)] entries that legally produce old->new."""
+            out = []
+            for eff in effects:
+                mode = eff.get("mode")
+                if mode == "target":
+                    if int(eff.get("target", 0) or 0) != int(new):
+                        continue
+                elif mode == "subtract":
+                    if int(new) != int(old) - int(eff.get("delta", 0) or 0):
+                        continue
+                elif mode == "add":
+                    if int(new) != int(old) + int(eff.get("delta", 0) or 0):
+                        continue
+                else:
+                    continue
+                if int(new) < 1 or int(new) > 6:
+                    continue
+                cost = self._resolve_roll_effect_cost(player, eff.get("cost_spec"))
+                if cost is None:
+                    continue
+                out.append((eff, int(cost.get("gold", 0) or 0)))
+            return out
+
+        available_gold = int(getattr(player, "gold_score", 0) or 0)
+
+        if changed1 ^ changed2:
+            old, new = (rd1, fd1) if changed1 else (rd2, fd2)
+            for eff, g in candidates(old, new):
+                if available_gold < g:
+                    continue
+                self._charge_and_log_roll_modifier(player, eff, g, old, new)
+                return True
+            return False
+
+        # Both dice changed: need two effects sourced by distinct domains.
+        cands1 = candidates(rd1, fd1)
+        cands2 = candidates(rd2, fd2)
+        for eff1, g1 in cands1:
+            for eff2, g2 in cands2:
+                if self._roll_modifier_same_source(eff1, eff2):
+                    continue
+                if available_gold < g1 + g2:
+                    continue
+                self._charge_and_log_roll_modifier(player, eff1, g1, rd1, fd1)
+                self._charge_and_log_roll_modifier(player, eff2, g2, rd2, fd2)
+                return True
         return False
 
-    def _compute_roll_events(self, rolled_die_one, rolled_die_two):
-        """Return the list of event tokens for the given natural dice.
+    def _roll_modifier_same_source(self, eff_a, eff_b):
+        """Two yielded effect specs come from the same owned-domain card iff
+        their `domain_id`s match (or, as a fallback for synthetic specs that
+        don't carry one, their `domain_name`s do)."""
+        ida = eff_a.get("domain_id")
+        idb = eff_b.get("domain_id")
+        if ida is not None and idb is not None:
+            return ida == idb
+        return (eff_a.get("domain_name") or "") == (eff_b.get("domain_name") or "")
+
+    def _charge_and_log_roll_modifier(self, player, effect, gold_cost, old_value, new_value):
+        before = self._player_scores_line(player)
+        if gold_cost:
+            player.gold_score = int(player.gold_score) - gold_cost
+        after = self._player_scores_line(player)
+        if gold_cost:
+            self._log_game_event(
+                f"{self._player_label(player.player_id)} used {effect.get('domain_name')} "
+                f"(pay {gold_cost} gold) during roll: die {old_value} -> {new_value}; scores {before} -> {after}"
+            )
+        else:
+            self._log_game_event(
+                f"{self._player_label(player.player_id)} used {effect.get('domain_name')} "
+                f"during roll: die {old_value} -> {new_value}"
+            )
+
+    def _compute_roll_events(self, die_one, die_two):
+        """Return the list of event tokens for the given FINAL dice.
 
         Centralizes "what happened on the dice this roll" so that any listener
-        (roll-phase passives now, harvest/action effects later) can ask the same
-        question without re-deriving things like "were the dice doubles?".
+        (roll-phase passives now, harvest/action effects later) can ask the
+        same question without re-deriving things like "were the dice
+        doubles?". Called from `finalize_roll` against the post-modification
+        dice so the answer agrees with `self.die_one == self.die_two` and
+        with whatever the player ultimately committed to.
 
         Currently emitted tokens:
-          doubles    -- both natural dice were equal (1..6)
+          doubles    -- both final dice were equal (1..6)
 
         Future tokens (e.g. "sum.N", "die.N", "snake_eyes") can be added here.
         """
         events = []
         try:
-            d1 = int(rolled_die_one or 0)
-            d2 = int(rolled_die_two or 0)
+            d1 = int(die_one or 0)
+            d2 = int(die_two or 0)
         except (TypeError, ValueError):
             return events
         if 1 <= d1 <= 6 and 1 <= d2 <= 6 and d1 == d2:
@@ -945,10 +1030,10 @@ class Game:
         Grammar: `roll.on_event <event-token> <g|s|m|v> <int>`. Currently supported
         event tokens are whatever `_compute_roll_events` emits (e.g. "doubles").
 
-        Reads `self.roll_events`, which is populated in `finalize_roll` from the
-        NATURAL rolled dice. That keeps roll-modifier passives (Palace, Foxgrove)
-        from being able to manufacture or erase a trigger, regardless of which
-        listener is asking.
+        Reads `self.roll_events`, which is populated in `finalize_roll` from
+        the FINAL dice (post-modification). A player who spent roll modifiers
+        to land on e.g. doubles legitimately triggered the event; the engine
+        treats the final dice as the source of truth.
         """
         events = set(getattr(self, "roll_events", None) or [])
         if not events:

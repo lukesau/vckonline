@@ -54,27 +54,106 @@
     <div class="lobby-sheet" role="dialog" aria-modal="true" aria-labelledby="lobby-title">
       <div class="lobby-brand">
         <h1 id="lobby-title" class="lobby-title">Valeria Card Kingdoms Online</h1>
-        <p class="lobby-tagline">Free Valeria Card Kingdoms multiplayer in your browser. No account needed. Join the lobby and ready up when your group is here.</p>
-        <p class="lobby-attribution">Based on the board game <a href="https://www.dailymagicgames.com/collections/valeria-card-kingdoms-expansions-and-accessories" target="_blank" rel="noopener noreferrer">Valeria Card Kingdoms by Daily Magic Games</a>. Playing IRL? Try the <a href="/counter">token counter</a>.</p>
+        <div class="lobby-brand-prose">
+          <p class="lobby-tagline">Free Valeria Card Kingdoms multiplayer in your browser. No account needed. Join the lobby and ready up when your group is here.</p>
+          <p class="lobby-attribution">Based on the board game <a href="https://www.dailymagicgames.com/collections/valeria-card-kingdoms-expansions-and-accessories" target="_blank" rel="noopener noreferrer">Valeria Card Kingdoms by Daily Magic Games</a>. Playing IRL? Try the <a href="/counter">token counter</a>.</p>
+        </div>
         <div class="lobby-rulebook-row">
-          <a href="/static/game/b0-valeria-card-kingdoms-rulebook.pdf" class="lobby-btn lobby-btn-ghost lobby-rulebook-link" target="_blank" rel="noopener noreferrer">Open rulebook (PDF)</a>
-          <a href="/wiki" class="lobby-btn lobby-btn-ghost lobby-rulebook-link" target="_blank" rel="noopener noreferrer">Browse card wiki</a>
+          <a href="/static/game/b0-valeria-card-kingdoms-rulebook.pdf" class="lobby-btn lobby-btn-ghost lobby-rulebook-link" target="_blank" rel="noopener noreferrer">Rulebook</a>
+          <a href="/wiki" class="lobby-btn lobby-btn-ghost lobby-rulebook-link" target="_blank" rel="noopener noreferrer">Card Wiki</a>
         </div>
       </div>
       <div id="lobby-error" class="lobby-error lobby-hidden" role="alert"></div>
-      <div id="lobby-step-join" class="lobby-step">
+      <div id="lobby-step-name" class="lobby-step">
         <label class="lobby-label" for="lobby-display-name">Display name</label>
         <div class="lobby-join-row">
           <input id="lobby-display-name" class="lobby-input" type="text" maxlength="40" placeholder="Your name" autocomplete="nickname" />
-          <button type="button" id="lobby-join-btn" class="lobby-btn lobby-btn-primary">Join lobby</button>
+          <button type="button" id="lobby-name-continue-btn" class="lobby-btn lobby-btn-primary">Continue</button>
+        </div>
+      </div>
+      <div id="lobby-step-browse" class="lobby-step lobby-hidden">
+        <ul id="lobby-list" class="lobby-list" aria-label="Open lobbies"></ul>
+        <p id="lobby-list-empty" class="lobby-list-empty lobby-hidden">No open lobbies yet. Create the first one below.</p>
+        <div class="lobby-create-card">
+          <h2 class="lobby-create-title">Create a lobby</h2>
+          <div class="lobby-field">
+            <label class="lobby-label" for="lobby-create-preset">Preset</label>
+            <select id="lobby-create-preset" class="lobby-input">
+              <option value="current">Default (Base Set)</option>
+              <option value="base">Base Set</option>
+              <option value="test1">Test 1</option>
+              <option value="test2">Test 2</option>
+              <option value="random">Random (all implemented cards)</option>
+              <option value="draft">Draft (vote on monsters &amp; citizens)</option>
+            </select>
+          </div>
+          <div class="lobby-field">
+            <label class="lobby-label" for="lobby-create-min-players">Min players</label>
+            <select id="lobby-create-min-players" class="lobby-input">
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </div>
+          <div class="lobby-create-actions">
+            <button type="button" id="lobby-back-to-name-btn" class="lobby-btn lobby-btn-ghost lobby-create-back">Back</button>
+            <button type="button" id="lobby-create-btn" class="lobby-btn lobby-btn-primary lobby-create-submit">Create lobby</button>
+          </div>
         </div>
       </div>
       <div id="lobby-step-wait" class="lobby-step lobby-hidden">
-        <p class="lobby-hint">Need at least two players. Everyone taps ready to start.</p>
+        <p id="lobby-wait-meta" class="lobby-wait-meta"></p>
+        <div class="lobby-preset-row">
+          <div class="lobby-field">
+            <label class="lobby-label" for="lobby-preset-select">Preset</label>
+            <select id="lobby-preset-select" class="lobby-input">
+              <option value="current">Default (Base Set)</option>
+              <option value="base">Base Set</option>
+              <option value="test1">Test 1</option>
+              <option value="test2">Test 2</option>
+              <option value="random">Random (all implemented cards)</option>
+              <option value="draft">Draft (vote on monsters &amp; citizens)</option>
+            </select>
+          </div>
+          <div class="lobby-field">
+            <label class="lobby-label" for="lobby-min-players-select">Min players</label>
+            <select id="lobby-min-players-select" class="lobby-input">
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </div>
+        </div>
         <ul id="lobby-player-list" class="lobby-player-list"></ul>
         <div class="lobby-actions">
           <button type="button" id="lobby-ready-btn" class="lobby-btn lobby-btn-ready">Ready</button>
           <button type="button" id="lobby-leave-btn" class="lobby-btn lobby-btn-ghost">Leave</button>
+        </div>
+      </div>
+      <div id="lobby-step-draft" class="lobby-step lobby-hidden">
+        <div class="draft-header">
+          <div class="draft-header-main">
+            <h2 class="draft-title" id="draft-title">Draft</h2>
+            <div class="draft-progress" id="draft-progress"></div>
+          </div>
+          <div class="draft-timer-wrap">
+            <svg class="draft-timer-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8.5" r="5.5"/><path d="M8 6v3l2 1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 1h4M8 1v2" stroke-linecap="round"/></svg>
+            <div class="draft-timer" id="draft-timer">30</div>
+          </div>
+        </div>
+        <div class="draft-subheader">
+          <p class="draft-instructions" id="draft-instructions"></p>
+          <div class="draft-last-result" id="draft-last-result"></div>
+        </div>
+        <div class="draft-grid" id="draft-grid"></div>
+        <div class="draft-actions">
+          <span class="draft-vote-status" id="draft-vote-status"></span>
+          <button type="button" class="lobby-btn lobby-btn-primary" id="draft-vote-btn" disabled>Submit Votes</button>
+        </div>
+        <div class="lobby-actions" style="margin-top:8px;justify-content:flex-end">
+          <button type="button" id="draft-leave-btn" class="lobby-btn lobby-btn-ghost" style="padding:8px 14px;font-size:14px">Leave</button>
         </div>
       </div>
       <div class="lobby-footer">

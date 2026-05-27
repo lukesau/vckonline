@@ -89,6 +89,7 @@ class GameObjectEncoder(JSONEncoder):
             shutdown = getattr(obj, "shutdown", None)
             return {
                 "game_id": obj.game_id,
+                "debug_mode": bool(getattr(obj, "debug_mode", False)),
                 "player_list": obj.player_list,
                 "monster_grid": obj.monster_grid,
                 "citizen_grid": obj.citizen_grid,

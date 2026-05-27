@@ -188,6 +188,10 @@ function domainPassiveOnBuildTurnCooldown(domain, turnNumber) {
 }
 
 function parseRollSetOneDieEffects(player, turnNumber) {
+  // Mirrors the engine's _parse_roll_set_one_die_kv: three modes
+  // (target=N | subtract=N | add=N) and an optional cost spec.
+  // Emits one entry per effect tagged with `mode`; the per-die candidate
+  // values are computed in listRollSetOneDieOptions.
   const out = [];
   const domains = Array.isArray(player?.owned_domains) ? player.owned_domains : [];
   domains.forEach(d => {
@@ -206,16 +210,32 @@ function parseRollSetOneDieEffects(player, turnNumber) {
       const v = p.slice(eq + 1).trim();
       kv[k] = v;
     }
-    const target = Number(kv.target);
+    const domainName = (d?.name || 'Domain').toString();
+    const domainId = (d?.domain_id != null) ? Number(d.domain_id) : null;
     const costSpec = (kv.cost || '').toString().trim().toLowerCase();
-    if (!Number.isFinite(target) || target < 1 || target > 6 || !costSpec) return;
-    out.push({ domainName: (d?.name || 'Domain').toString(), target, costSpec });
+    if (kv.target) {
+      const target = Number(kv.target);
+      if (Number.isFinite(target) && target >= 1 && target <= 6) {
+        out.push({ domainName, domainId, mode: 'target', target, costSpec });
+      }
+      return;
+    }
+    for (const modeKey of ['subtract', 'add']) {
+      if (!kv[modeKey]) continue;
+      const delta = Number(kv[modeKey]);
+      if (Number.isFinite(delta) && delta > 0) {
+        out.push({ domainName, domainId, mode: modeKey, delta, costSpec });
+      }
+      return;
+    }
   });
   return out;
 }
 
 function rollEffectCostGold(player, costSpec) {
   const spec = (costSpec || '').toString().trim().toLowerCase();
+  // Empty cost = free (e.g. Palace of the Dawn's `subtract=1`).
+  if (!spec) return 0;
   if (spec.startsWith('g:')) {
     const n = Number(spec.slice(2));
     if (!Number.isFinite(n) || n < 0) return null;
@@ -231,18 +251,52 @@ function rollEffectCostGold(player, costSpec) {
   return null;
 }
 
-function listRollSetOneDieOptions(player, rolled1, rolled2, turnNumber) {
+function listRollSetOneDieOptions(player, rolled1, rolled2, turnNumber, opts) {
+  // `opts.budgetGold` (optional): override the affordability check (used by
+  // stage-2 rendering after a first modifier has been staged so we only show
+  // second-modifier options the player can still afford on top of the first).
+  // `opts.excludeDomainId` (optional): skip effects sourced from this domain
+  // (used by stage 2 to enforce the engine's distinct-source rule).
+  // `opts.die` (optional): restrict to options that modify only this die
+  // number (used by stage 2 so the second click always lands on the
+  // unmanipulated die).
   const effects = parseRollSetOneDieEffects(player, turnNumber);
-  const gold = Number(player?.gold_score || 0);
+  const opts_ = opts || {};
+  const budget = Number.isFinite(Number(opts_.budgetGold))
+    ? Number(opts_.budgetGold)
+    : Number(player?.gold_score || 0);
+  const excludeDomainId = (opts_.excludeDomainId != null) ? Number(opts_.excludeDomainId) : null;
+  const onlyDie = (opts_.die === 1 || opts_.die === 2) ? opts_.die : null;
   const options = [];
+  // `target` in the returned option is the resolved FINAL die value after
+  // applying this effect, regardless of which parser mode produced it, so
+  // renderers can treat all options uniformly.
+  const pushIfValid = (die, rolled, candidate, e, costGold) => {
+    if (!Number.isFinite(candidate)) return;
+    if (candidate < 1 || candidate > 6) return;
+    if (Number(candidate) === Number(rolled)) return;
+    if (onlyDie !== null && die !== onlyDie) return;
+    options.push({
+      die,
+      target: candidate,
+      costGold,
+      domainName: e.domainName,
+      domainId: e.domainId,
+    });
+  };
   effects.forEach(e => {
+    if (excludeDomainId !== null && Number(e.domainId) === excludeDomainId) return;
     const costGold = rollEffectCostGold(player, e.costSpec);
-    if (costGold === null || gold < costGold) return;
-    if (Number(rolled1) !== Number(e.target)) {
-      options.push({ die: 1, target: Number(e.target), costGold, domainName: e.domainName });
-    }
-    if (Number(rolled2) !== Number(e.target)) {
-      options.push({ die: 2, target: Number(e.target), costGold, domainName: e.domainName });
+    if (costGold === null || budget < costGold) return;
+    if (e.mode === 'target') {
+      pushIfValid(1, rolled1, Number(e.target), e, costGold);
+      pushIfValid(2, rolled2, Number(e.target), e, costGold);
+    } else if (e.mode === 'subtract') {
+      pushIfValid(1, rolled1, Number(rolled1) - Number(e.delta), e, costGold);
+      pushIfValid(2, rolled2, Number(rolled2) - Number(e.delta), e, costGold);
+    } else if (e.mode === 'add') {
+      pushIfValid(1, rolled1, Number(rolled1) + Number(e.delta), e, costGold);
+      pushIfValid(2, rolled2, Number(rolled2) + Number(e.delta), e, costGold);
     }
   });
   return options;
@@ -260,7 +314,29 @@ async function sendFinalizeRollChoice(d1, d2) {
     });
   } finally {
     finalizeRollInFlight = false;
+    resetFinalizeRollStaging();
   }
+}
+
+// Two-stage flow state for the finalize_roll modal. The modal lets the
+// active player optionally apply up to one roll modifier per die (engine
+// rule: each owned domain can only fire once per roll phase, so the two
+// modifiers must come from different cards). Stage 1 shows every legal
+// (die, modifier) option. Picking one stashes it in `stagedFirstModifier`
+// and re-renders into stage 2, which shows: the staged choice, a Confirm
+// button (submits using just the first modifier), and another row of
+// options scoped to the OTHER die / OTHER source domain / remaining gold
+// budget. Picking a stage-2 option submits both modifiers at once.
+let stagedFirstModifier = null;
+let stagedFirstModifierForRoll = null;
+
+function resetFinalizeRollStaging() {
+  stagedFirstModifier = null;
+  stagedFirstModifierForRoll = null;
+}
+
+function stagedRollKey(rolled1, rolled2) {
+  return `${rolled1},${rolled2}`;
 }
 
 /** Affordable roll.set_one_die choices for the player who must finalize (may be empty). */
@@ -665,7 +741,9 @@ function renderFinalizeRollPrompt(state) {
   }
 
   const you = playerById(state, PLAYER_ID);
-  const options = listRollSetOneDieOptions(you, rolled1, rolled2, state.turn_number);
+  const rollKey = stagedRollKey(rolled1, rolled2);
+  if (stagedFirstModifierForRoll !== rollKey) resetFinalizeRollStaging();
+  const staged = stagedFirstModifier;
 
   const diceLine = mk('prompt-modal-dice-line');
   diceLine.appendChild(makeDie(rolled1));
@@ -675,30 +753,88 @@ function renderFinalizeRollPrompt(state) {
   body.appendChild(diceLine);
 
   const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
-  foot.appendChild(promptButton(`Keep ${rolled1} + ${rolled2}`, () => {
-    openActionConfirmModal({
-      title: 'Finalize roll?',
-      message: `Keep dice as ${rolled1} + ${rolled2} (total ${rolled1 + rolled2}).`,
-      onConfirm: () => sendFinalizeRollChoice(rolled1, rolled2),
-    });
-  }));
-  options.forEach(o => {
-    const fromVal = o.die === 1 ? rolled1 : rolled2;
-    const d1 = o.die === 1 ? o.target : rolled1;
-    const d2 = o.die === 2 ? o.target : rolled2;
-    foot.appendChild(promptButton(
-      `Die ${o.die}: ${fromVal} → ${o.target} (${o.costGold}g · ${o.domainName})`,
-      () => openActionConfirmModal({
-        title: 'Finalize roll?',
-        message: `Change die ${o.die} from ${fromVal} to ${o.target} (${o.costGold} gold, ${o.domainName}). Resulting dice: ${d1} + ${d2}.`,
-        onConfirm: () => sendFinalizeRollChoice(d1, d2),
-      }),
-    ));
-  });
 
-  const hint = mk('prompt-modal-note');
-  hint.textContent = 'Choose a roll modifier or keep the rolled dice.';
-  body.appendChild(hint);
+  if (!staged) {
+    // Stage 1: first modifier (or keep).
+    const options = listRollSetOneDieOptions(you, rolled1, rolled2, state.turn_number);
+    foot.appendChild(promptButton(`Keep ${rolled1} + ${rolled2}`, () => {
+      openActionConfirmModal({
+        title: 'Finalize roll?',
+        message: `Keep dice as ${rolled1} + ${rolled2} (total ${rolled1 + rolled2}).`,
+        onConfirm: () => sendFinalizeRollChoice(rolled1, rolled2),
+      });
+    }));
+    options.forEach(o => {
+      const fromVal = o.die === 1 ? rolled1 : rolled2;
+      foot.appendChild(promptButton(
+        `Die ${o.die}: ${fromVal} → ${o.target} (${o.costGold}g · ${o.domainName})`,
+        () => {
+          stagedFirstModifier = { ...o };
+          stagedFirstModifierForRoll = rollKey;
+          renderFinalizeRollPrompt(state);
+        },
+      ));
+    });
+
+    const hint = mk('prompt-modal-note');
+    hint.textContent = 'Choose a roll modifier (or keep). You can chain a second modifier on the other die.';
+    body.appendChild(hint);
+  } else {
+    // Stage 2: staged first modifier; offer Confirm (apply only the staged
+    // change), Back (clear staging), and any legal second-modifier buttons
+    // scoped to the OTHER die / different source / remaining gold budget.
+    const stagedFromVal = staged.die === 1 ? rolled1 : rolled2;
+    const d1AfterFirst = staged.die === 1 ? staged.target : rolled1;
+    const d2AfterFirst = staged.die === 2 ? staged.target : rolled2;
+
+    const stagedNote = mk('prompt-modal-note');
+    stagedNote.appendChild(document.createTextNode('Staged: '));
+    const stagedStrong = document.createElement('strong');
+    stagedStrong.textContent = `Die ${staged.die}: ${stagedFromVal} → ${staged.target}`;
+    stagedNote.appendChild(stagedStrong);
+    stagedNote.appendChild(document.createTextNode(
+      ` (${staged.costGold}g · ${staged.domainName}). Result so far: `,
+    ));
+    const stagedResult = document.createElement('strong');
+    stagedResult.textContent = `${d1AfterFirst} + ${d2AfterFirst} = ${d1AfterFirst + d2AfterFirst}`;
+    stagedNote.appendChild(stagedResult);
+    stagedNote.appendChild(document.createTextNode('.'));
+    body.appendChild(stagedNote);
+
+    foot.appendChild(promptButton(`Confirm ${d1AfterFirst} + ${d2AfterFirst}`, () => {
+      sendFinalizeRollChoice(d1AfterFirst, d2AfterFirst);
+    }));
+
+    const otherDie = staged.die === 1 ? 2 : 1;
+    const remainingGold = Math.max(0, Number(you?.gold_score || 0) - Number(staged.costGold || 0));
+    const stage2Options = listRollSetOneDieOptions(
+      you, rolled1, rolled2, state.turn_number,
+      { die: otherDie, excludeDomainId: staged.domainId, budgetGold: remainingGold },
+    );
+    stage2Options.forEach(o => {
+      const fromVal = o.die === 1 ? rolled1 : rolled2;
+      const d1 = o.die === 1 ? o.target : d1AfterFirst;
+      const d2 = o.die === 2 ? o.target : d2AfterFirst;
+      const totalGold = Number(staged.costGold || 0) + Number(o.costGold || 0);
+      const btn = promptButton(
+        `+ Die ${o.die}: ${fromVal} → ${o.target} (${o.costGold}g · ${o.domainName}) → ${d1} + ${d2}`,
+        () => sendFinalizeRollChoice(d1, d2),
+      );
+      btn.title = `Apply both modifiers (total ${totalGold}g).`;
+      foot.appendChild(btn);
+    });
+
+    foot.appendChild(promptButton('Back', () => {
+      resetFinalizeRollStaging();
+      renderFinalizeRollPrompt(state);
+    }, true));
+
+    const hint = mk('prompt-modal-note');
+    hint.textContent = stage2Options.length
+      ? 'Optionally chain a second modifier on the other die, or confirm with just the first.'
+      : 'No second modifier available — confirm to apply just the staged change.';
+    body.appendChild(hint);
+  }
 
   appendPromptResourcesPanel(body, state);
 

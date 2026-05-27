@@ -194,8 +194,12 @@ def test_database_connection():
     required_procedures = [
         'select_base1_citizens',
         'select_base1_monsters',
+        'select_base_citizens',
+        'select_base_monsters',
         'select_base2_citizens',
         'select_base2_monsters',
+        'select_base_domains',
+        'select_base_dukes',
         'select_random_domains',
         'select_random_dukes',
         'select_test1_domains',
@@ -219,8 +223,12 @@ def test_database_connection():
             print("   These can be created from the SQL files in the sql/ directory:")
             print("   - select_base1_citizens_sp.sql")
             print("   - select_base1_monsters_sp.sql")
+            print("   - select_base_citizens_sp.sql")
+            print("   - select_base_monsters_sp.sql")
             print("   - select_base2_citizens_sp.sql")
             print("   - select_base2_monsters_sp.sql")
+            print("   - select_base_domains_sp.sql")
+            print("   - select_base_dukes_sp.sql")
             print("   - select_random_domains_sp.sql")
             print("   - select_random_dukes_sp.sql")
             print("   - select_test1_domains_sp.sql")
@@ -256,8 +264,12 @@ def test_database_connection():
     procedure_tests = [
         ('select_base1_citizens', 'Citizens'),
         ('select_base1_monsters', 'Monsters'),
+        ('select_base_citizens', 'Citizens'),
+        ('select_base_monsters', 'Monsters'),
         ('select_base2_citizens', 'Citizens'),
         ('select_base2_monsters', 'Monsters'),
+        ('select_base_domains', 'Domains'),
+        ('select_base_dukes', 'Dukes'),
         ('select_random_domains', 'Domains'),
         ('select_random_dukes', 'Dukes'),
         ('select_test1_domains', 'Domains'),

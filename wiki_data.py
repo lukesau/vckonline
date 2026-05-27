@@ -14,56 +14,12 @@ the client can render a small badge, but they are not filtered out.
 
 from cards import Citizen, Domain, Duke, Monster, Starter
 from banned_cards import banned_domain_ids, banned_duke_ids
-
-
-def _is_empty_special(value):
-    """Treat NULL or whitespace-only strings as missing."""
-    if value is None:
-        return True
-    return not str(value).strip()
-
-
-def _is_unimplemented_citizen(row):
-    """A citizen is unimplemented if it has a flagged special whose text is empty.
-
-    Mirrors the convention used by the harvest engine: when has_special_payout_*
-    is truthy the corresponding special_payout_* string is expected to be a
-    non-empty effect string. An empty/null string with the flag set means the
-    effect has not been authored yet.
-    """
-    if row["has_special_payout_on_turn"] and _is_empty_special(row["special_payout_on_turn"]):
-        return True
-    if row["has_special_payout_off_turn"] and _is_empty_special(row["special_payout_off_turn"]):
-        return True
-    return False
-
-
-def _is_unimplemented_monster(row):
-    if row["has_special_reward"] and _is_empty_special(row["special_reward"]):
-        return True
-    if row["has_special_cost"] and _is_empty_special(row["special_cost"]):
-        return True
-    return False
-
-
-def _is_unimplemented_domain(row):
-    if row["has_passive_effect"] and _is_empty_special(row["passive_effect"]):
-        return True
-    if row["has_activation_effect"] and _is_empty_special(row["activation_effect"]):
-        return True
-    return False
-
-
-def _is_unimplemented_event(row):
-    if row["has_roll_effect"] and _is_empty_special(row["roll_effect"]):
-        return True
-    if row["has_activation_effect"] and _is_empty_special(row["activation_effect"]):
-        return True
-    if row["has_passive_effect"] and _is_empty_special(row["passive_effect"]):
-        return True
-    if row["has_special_reward"] and _is_empty_special(row["special_reward"]):
-        return True
-    return False
+from card_filters import (
+    is_unimplemented_citizen as _is_unimplemented_citizen,
+    is_unimplemented_monster as _is_unimplemented_monster,
+    is_unimplemented_domain as _is_unimplemented_domain,
+    is_unimplemented_event as _is_unimplemented_event,
+)
 
 
 def _connect():

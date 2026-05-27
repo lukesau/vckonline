@@ -544,9 +544,9 @@ function evaluateMarketCardContext(card, state) {
       pratchettHint = pratchettActive && baseCost !== effectiveGold ? `base ${baseCost}g − 1 (Pratchett's Plateau)` : '';
     } else if (card.monster_id != null) {
       evalRes = canAffordCost(actingPlayer, {
-        gold: 0,
-        strength: Number(top.strength_cost || 0),
-        magicMin: Number(top.magic_cost || 0),
+        gold:     Number(top.extra_gold_cost     || 0),
+        strength: Number(top.strength_cost       || 0) + Number(top.extra_strength_cost || 0),
+        magicMin: Number(top.magic_cost          || 0) + Number(top.extra_magic_cost    || 0),
       });
     } else if (card.event_id != null) {
       evalRes = canAffordCost(actingPlayer, {
@@ -850,8 +850,11 @@ function effectiveMarketCardCosts(card, ctx) {
       out.goldTip = `base ${base}g − 1 (Pratchett's Plateau) = ${out.gold}g`;
     }
   } else if (card.monster_id != null && ctx.top) {
-    out.strength = Number(ctx.top.strength_cost || 0);
-    out.magic = Number(ctx.top.magic_cost || 0);
+    out.strength = Number(ctx.top.strength_cost || 0) + Number(ctx.top.extra_strength_cost || 0);
+    out.magic    = Number(ctx.top.magic_cost    || 0) + Number(ctx.top.extra_magic_cost    || 0);
+    if (Number(ctx.top.extra_gold_cost || 0) > 0) {
+      out.gold = Number(ctx.top.extra_gold_cost || 0);
+    }
   }
   return out;
 }
