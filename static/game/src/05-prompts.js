@@ -1905,6 +1905,124 @@ function renderBonusResourcePrompt(state) {
   });
 }
 
+function renderGrantDomainRewardPrompt(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const opts = Array.isArray(prc?.options) ? prc.options : [];
+  const sourceName = (prc?.source_name || 'Effect').toString();
+
+  const body = mk('prompt-modal-body');
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} to choose a free domain from "${sourceName}".`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({
+      title: `${sourceName}: free domain`,
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const sub = mk('prompt-modal-note');
+  sub.textContent = `Choose a domain to acquire for free (from "${sourceName}").`;
+  body.appendChild(sub);
+  appendPromptResourcesPanel(body, state);
+
+  const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
+  opts.forEach((o, idx) => {
+    const nm = (o?.name || '?').toString();
+    foot.appendChild(promptButton(nm, () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: `grant_domain ${idx + 1}`,
+      },
+      {
+        title: 'Take domain?',
+        message: `Acquire "${nm}" for free from "${sourceName}".`,
+      },
+    )));
+  });
+
+  openPromptOverlayShell({
+    title: `${sourceName}: choose a free domain`,
+    dismissible: false,
+    bodyEl: body,
+    footerEl: foot,
+  });
+}
+
+function renderBuildDomainPrompt(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const opts = Array.isArray(prc?.options) ? prc.options : [];
+
+  const body = mk('prompt-modal-body');
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — may build a domain.`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({
+      title: 'Ararmartin Ridge: may build a Domain',
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const sub = mk('prompt-modal-note');
+  sub.textContent = 'Choose a domain to build (paying its Gold cost), or decline.';
+  body.appendChild(sub);
+  appendPromptResourcesPanel(body, state);
+
+  const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
+  opts.forEach((o, idx) => {
+    const nm = (o?.name || '?').toString();
+    const gc = Number(o?.gold_cost || 0);
+    const label = gc > 0 ? `${nm} (${gc} Gold)` : `${nm} (free)`;
+    foot.appendChild(promptButton(label, () => confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: `build_domain_pick ${idx + 1}`,
+      },
+      {
+        title: 'Build domain?',
+        message: gc > 0 ? `Build "${nm}" for ${gc} Gold.` : `Build "${nm}" for free.`,
+      },
+    )));
+  });
+
+  foot.appendChild(promptButton('Decline (skip)', () => confirmAndPostGameAction(
+    {
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: 'skip',
+    },
+    {
+      title: 'Skip domain build?',
+      message: 'Decline the optional domain build from Ararmartin Ridge.',
+      confirmLabel: 'Skip',
+    },
+  ), true));
+
+  openPromptOverlayShell({
+    title: 'Ararmartin Ridge: may build a Domain',
+    dismissible: false,
+    bodyEl: body,
+    footerEl: foot,
+  });
+}
+
 function renderUnknownRequired(state, reqAction, reqId) {
   const body = mk('prompt-modal-body');
   const note = mk('prompt-modal-note');
@@ -1983,6 +2101,16 @@ function renderPromptModal(state) {
 
   if (reqAction === 'event_slay_cost_choice') {
     renderEventSlayCostPrompt(state);
+    return;
+  }
+
+  if (reqAction === 'choose_domain_reward') {
+    renderGrantDomainRewardPrompt(state);
+    return;
+  }
+
+  if (reqAction === 'choose_domain_to_build') {
+    renderBuildDomainPrompt(state);
     return;
   }
 

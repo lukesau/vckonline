@@ -369,6 +369,7 @@ class Game:
                 or aa.startswith("choose_owned")
                 or aa == "domain_self_convert"
                 or aa == "event_slay_cost_choice"
+                or aa == "choose_domain_to_build"
             ):
                 return False
 
@@ -580,6 +581,7 @@ class Game:
                 "domain_self_convert",
                 "choose_monster_slay",
                 "slay_monster_payment",
+                "choose_domain_to_build",
             ) or aa.startswith("choose ") or aa.startswith("choose_player") or aa.startswith(
                 "choose_monster"
             ) or aa.startswith("choose_owned")
@@ -2102,6 +2104,56 @@ class Game:
         )
         self._apply_domain_activation_effect(player, acquired)
 
+    def _execute_build_domain_activation_payout(self, player_id):
+        """Offer the active player an optional free domain build (Ararmartin Ridge)."""
+        player = self._player_by_id(player_id)
+        if not player:
+            return [-9999, 0, 0, 0]
+        have = self._player_citizen_role_totals(player)
+        has_pratchett = self._player_has_action_effect_flag(player, "action.pratchettsplateau")
+        options = []
+        for stack_idx, domain_stack in enumerate(self.domain_grid):
+            if not domain_stack:
+                continue
+            top = domain_stack[-1]
+            if getattr(top, "domain_id", None) is None:
+                continue
+            if not getattr(top, "is_accessible", False) or not getattr(top, "is_visible", True):
+                continue
+            # Role requirement check (citizens only, matching build_domain logic).
+            req_shadow = int(getattr(top, "shadow_count", 0) or 0)
+            req_holy = int(getattr(top, "holy_count", 0) or 0)
+            req_soldier = int(getattr(top, "soldier_count", 0) or 0)
+            req_worker = int(getattr(top, "worker_count", 0) or 0)
+            if have["shadow"] < req_shadow or have["holy"] < req_holy or \
+               have["soldier"] < req_soldier or have["worker"] < req_worker:
+                continue
+            gold_cost = int(getattr(top, "gold_cost", 0) or 0)
+            if has_pratchett:
+                gold_cost = max(0, gold_cost - 1)
+            if int(getattr(player, "gold_score", 0) or 0) < gold_cost:
+                continue
+            options.append({
+                "stack_idx": stack_idx,
+                "domain_id": int(getattr(top, "domain_id", 0)),
+                "name": getattr(top, "name", "Domain"),
+                "gold_cost": gold_cost,
+            })
+        if not options:
+            self._log_game_event(
+                f"{self._player_label(player_id)} gained +3 Gold from \"Ararmartin Ridge\" "
+                f"(no affordable domains available to build)."
+            )
+            return [0, 0, 0, 0]
+        self.pending_required_choice = {
+            "kind": "domain_build_opportunity",
+            "player_id": player_id,
+            "options": options,
+        }
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "choose_domain_to_build"
+        return [0, 0, 0, 0]
+
     def _execute_banish_center_payout(self, command, player_id):
         """Parse `banish_center <kind> [optional]` and prompt for a center-stack card.
 
@@ -2487,6 +2539,8 @@ class Game:
             return self._execute_take_owned_payout(raw, player_id)
         if low == "<domains>" or low.startswith("<domains"):
             return self._execute_grant_domain_payout(player_id)
+        if low == "build_domain":
+            return self._execute_build_domain_activation_payout(player_id)
         if low == "concurrent_flip_one_citizen":
             self._begin_concurrent_flip_one_citizen(player_id)
             return [0, 0, 0, 0]
@@ -4532,6 +4586,40 @@ class Game:
                 self.action_required["id"] = self.game_id
                 self._apply_grant_domain_choice(player_id, stack_idx_dr)
                 self._resume_after_domain_activation_follow_up()
+                return
+
+            if current_required == "choose_domain_to_build":
+                prc_db = getattr(self, "pending_required_choice", None) or {}
+                if prc_db.get("kind") != "domain_build_opportunity" or prc_db.get("player_id") != player_id:
+                    return
+                act_db = (action or "").strip().lower()
+                if act_db == "skip":
+                    self.pending_required_choice = None
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} declined to build a domain (Ararmartin Ridge)."
+                    )
+                    self._resume_after_domain_activation_follow_up()
+                    return
+                if not act_db.startswith("build_domain_pick "):
+                    return
+                opts_db = list(prc_db.get("options") or [])
+                try:
+                    sel_db = int(act_db.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if sel_db < 0 or sel_db >= len(opts_db):
+                    return
+                chosen = opts_db[sel_db]
+                domain_id_db = chosen["domain_id"]
+                gold_cost_db = int(chosen.get("gold_cost", 0))
+                self.pending_required_choice = None
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self.build_domain(player_id, domain_id_db, gp=gold_cost_db)
+                if not (self.action_required.get("action") and self.action_required.get("id") != self.game_id):
+                    self._resume_after_domain_activation_follow_up()
                 return
 
             prc0 = getattr(self, "pending_required_choice", None) or {}
