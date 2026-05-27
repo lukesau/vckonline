@@ -502,6 +502,7 @@ function evaluateMarketCardContext(card, state) {
   const tn = Number(state?.turn_number);
   const emeraldActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.emeraldstronghold', tn) : false;
   const pratchettActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.pratchettsplateau', tn) : false;
+  const shilinaActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.newshilinatower', tn) : false;
 
   const loc = state ? findMarketStack(card, state) : null;
   let blockReason = '';
@@ -534,7 +535,19 @@ function evaluateMarketCardContext(card, state) {
       baseCost = Number(top.gold_cost || 0);
       surcharge = emeraldActive ? 0 : ownedNameCount(actingPlayer, top.name);
       scaledCost = baseCost + surcharge;
-      evalRes = canAffordCost(actingPlayer, { gold: scaledCost, strength: 0, magicMin: 0 });
+      if (shilinaActive) {
+        const G = Number(actingPlayer?.gold_score || 0);
+        const S = Number(actingPlayer?.strength_score || 0);
+        const M = Number(actingPlayer?.magic_score || 0);
+        const ok = G + S + M >= scaledCost;
+        const payGold = Math.min(G, scaledCost);
+        const rem1 = scaledCost - payGold;
+        const payStrength = Math.min(S, rem1);
+        const payMagic = Math.max(0, scaledCost - payGold - payStrength);
+        evalRes = { ok, payGold, payStrength, payMagic };
+      } else {
+        evalRes = canAffordCost(actingPlayer, { gold: scaledCost, strength: 0, magicMin: 0 });
+      }
       dupHint = surcharge ? `base ${baseCost}g + ${surcharge} duplicate(s)` : '';
       emeraldHint = (!surcharge && emeraldActive) ? 'Emerald Stronghold: no duplicate surcharge.' : '';
     } else if (card.domain_id != null) {
@@ -573,6 +586,7 @@ function evaluateMarketCardContext(card, state) {
     reqId,
     emeraldActive,
     pratchettActive,
+    shilinaActive,
     loc,
     top,
     stackSize,
@@ -649,6 +663,7 @@ function appendMarketActionUI(infoEl, card, ctx) {
   const fx = [];
   if (ctx.emeraldActive) fx.push('Emerald Stronghold: ignore citizen duplicate surcharge');
   if (ctx.pratchettActive) fx.push("Pratchett's Plateau: domains cost 1 less gold");
+  if (ctx.shilinaActive) fx.push('New Shilina Tower: may pay Citizen cost with Strength');
   if (fx.length) {
     const fb = mk('market-effects-banner');
     fb.textContent = `Active: ${fx.join(' · ')}`;
@@ -684,7 +699,11 @@ function appendMarketActionUI(infoEl, card, ctx) {
     primaryLabel = 'Hire citizen';
     payWrap.dataset.citizenId = String(card.citizen_id);
     payWrap.appendChild(mkPayField('', 'pay-g', 0, Gmax, pay.payGold ?? 0, inputsDisabled, 'Gold payment', 'gold', Gmax));
-    payWrap.appendChild(mkPayField('', 'pay-s', 0, 0, 0, true, 'Citizens use gold and magic', 'strength', Smax));
+    if (ctx.shilinaActive) {
+      payWrap.appendChild(mkPayField('', 'pay-s', 0, Smax, pay.payStrength ?? 0, inputsDisabled, 'Strength payment (New Shilina Tower)', 'strength', Smax));
+    } else {
+      payWrap.appendChild(mkPayField('', 'pay-s', 0, 0, 0, true, 'Citizens use gold and magic', 'strength', Smax));
+    }
     payWrap.appendChild(mkPayField('', 'pay-m', 0, Mmax, pay.payMagic ?? 0, inputsDisabled, 'Magic payment', 'magic', Mmax));
   } else if (card.domain_id != null) {
     primaryLabel = 'Build domain';

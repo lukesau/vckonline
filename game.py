@@ -15,22 +15,32 @@ def _n(x, default=0):
         return default
 
 
-def _validate_hire_or_domain_gold_payment(player, scaled_gold_cost, gp, sp, mp):
+def _validate_hire_or_domain_gold_payment(player, scaled_gold_cost, gp, sp, mp, allow_strength=False):
     gp, sp, mp = _n(gp), _n(sp), _n(mp)
     if gp < 0 or sp < 0 or mp < 0:
         raise ValueError("Invalid payment (negative amounts).")
-    if sp != 0:
+    if sp != 0 and not allow_strength:
         raise ValueError("Strength cannot be spent on hiring citizens or building domains.")
     scaled_gold_cost = int(scaled_gold_cost or 0)
-    if scaled_gold_cost > 0 and mp > 0 and gp < 1:
-        raise ValueError("Must pay at least 1 gold to use magic as wild.")
-    total = gp + mp
-    if total < scaled_gold_cost:
-        raise ValueError("Payment does not cover the gold cost.")
-    if total != scaled_gold_cost:
-        raise ValueError("Payment must exactly match the gold cost.")
-    if int(getattr(player, "gold_score", 0)) < gp or int(getattr(player, "magic_score", 0)) < mp:
-        raise ValueError("Insufficient resources.")
+    if allow_strength:
+        total = gp + sp + mp
+        if total < scaled_gold_cost:
+            raise ValueError("Payment does not cover the gold cost.")
+        if total != scaled_gold_cost:
+            raise ValueError("Payment must exactly match the gold cost.")
+        if int(getattr(player, "gold_score", 0)) < gp or int(getattr(player, "magic_score", 0)) < mp \
+                or int(getattr(player, "strength_score", 0)) < sp:
+            raise ValueError("Insufficient resources.")
+    else:
+        if scaled_gold_cost > 0 and mp > 0 and gp < 1:
+            raise ValueError("Must pay at least 1 gold to use magic as wild.")
+        total = gp + mp
+        if total < scaled_gold_cost:
+            raise ValueError("Payment does not cover the gold cost.")
+        if total != scaled_gold_cost:
+            raise ValueError("Payment must exactly match the gold cost.")
+        if int(getattr(player, "gold_score", 0)) < gp or int(getattr(player, "magic_score", 0)) < mp:
+            raise ValueError("Insufficient resources.")
 
 
 def _citizen_has_steal(citizen, on_turn):
@@ -1846,6 +1856,12 @@ class Game:
         opponents = [p for p in self.player_list if p.player_id != player_id]
         if not opponents:
             return [0, 0, 0, 0]
+        opponents = [p for p in opponents if not self._player_has_steal_immunity(p)]
+        if not opponents:
+            self._log_game_event(
+                f"{self._player_label(player_id)} could not steal — all opponents are immune."
+            )
+            return [0, 0, 0, 0]
         victim_options = []
         for opp in opponents:
             opp_name = getattr(opp, "name", None) or f"Player {opp.player_id}"
@@ -3496,6 +3512,8 @@ class Game:
         opts = []
         for p in self.player_list:
             if p.player_id == active_pid:
+                continue
+            if take_or_pay == "take" and self._player_has_steal_immunity(p):
                 continue
             tup = self._player_resource_tuple(p)
             if take_or_pay == "take" and tup[ri] < res_n:
@@ -5335,6 +5353,16 @@ class Game:
             totals["worker"] += int(getattr(c, "worker_count", 0) or 0)
         return totals
 
+    def _player_has_steal_immunity(self, player):
+        """True if the player owns a domain granting immunity to steal/take effects."""
+        for d in list(getattr(player, "owned_domains", []) or []):
+            if self._domain_recurring_passive_on_build_turn_cooldown(d):
+                continue
+            raw = (getattr(d, "passive_effect", None) or "")
+            if str(raw).strip().lower() == "immunity.steal":
+                return True
+        return False
+
     def _player_has_action_effect_flag(self, player, flag_name):
         target = (flag_name or "").strip().lower()
         if not target:
@@ -5399,11 +5427,13 @@ class Game:
             scaled_cost = int(getattr(top, "gold_cost", 0) or 0) + int(owned_same_name)
             if self._player_has_action_effect_flag(player, "action.defiantridge"):
                 scaled_cost = max(0, scaled_cost - 1)
-            _validate_hire_or_domain_gold_payment(player, scaled_cost, gp, sp, mp)
+            has_shilina = self._player_has_action_effect_flag(player, "action.newshilinatower")
+            _validate_hire_or_domain_gold_payment(player, scaled_cost, gp, sp, mp, allow_strength=has_shilina)
 
             before = self._player_scores_line(player)
             player.gold_score = player.gold_score - gp
             player.magic_score = player.magic_score - mp
+            player.strength_score = player.strength_score - sp
             hired = citizen_stack.pop(-1)
             self._citizen_set_flipped(hired, False)
             player.owned_citizens.append(hired)
