@@ -3178,10 +3178,15 @@ class Game:
             if self._start_action_end_domain_sequence(self.current_player_id()):
                 return
 
-    def _prompt_or_apply_self_convert(self, raw, player, domain=None):
+    def _prompt_or_apply_self_convert(self, raw, player, domain=None, context="domain_activation"):
         """
         Activation self_convert: optional effects prompt confirm/decline when affordable.
         Non-optional applies immediately when affordable.
+
+        `context` is stored in pending_required_choice so the resolution handler
+        knows how to resume after the player confirms or skips:
+          "domain_activation"  — default; calls _resume_after_domain_activation_follow_up
+          "action_end_queue"   — pops the queue item and drains the next entry
         """
         payout = [0, 0, 0, 0]
         kv = _parse_domain_effect_kv(raw)
@@ -3208,6 +3213,7 @@ class Game:
                 "player_id": player.player_id,
                 "kv": kv,
                 "domain_name": domain_name,
+                "context": context,
             }
             return [0, 0, 0, 0]
         if not can_pay:
@@ -3363,6 +3369,44 @@ class Game:
     def _apply_action_start_domain_passives(self, player):
         """Fire any owned-domain passives keyed to 'action.start' for the active player."""
         self._apply_action_event_gain_passives(player, "start")
+        # Handle optional blocking passives (self_convert, wild exchange) that need a prompt.
+        # Process at most one blocking passive — the first owned domain that fires.
+        if not player or getattr(self, "phase", None) != "action":
+            return
+        for d in list(getattr(player, "owned_domains", []) or []):
+            if self._domain_recurring_passive_on_build_turn_cooldown(d):
+                continue
+            raw = (getattr(d, "passive_effect", None) or "").strip()
+            if not raw:
+                continue
+            parts = raw.split()
+            if not parts or parts[0].lower() != "action.start":
+                continue
+            rest = raw[len(parts[0]):].strip()
+            rest_low = rest.lower()
+            if rest_low.startswith("manipulate_resources"):
+                kv = _parse_domain_effect_kv(rest)
+                if (kv.get("mode") or "").strip().lower() == "self_convert":
+                    self._prompt_or_apply_self_convert(rest, player, d, context="domain_activation")
+                    if (self.action_required or {}).get("action") == "domain_self_convert":
+                        return
+            elif rest_low.startswith("exchange") and "wild" in rest_low:
+                self._execute_action_start_wild_gain_exchange(rest, player, d)
+                if (self.action_required or {}).get("action") == "harvest_wild_gain_exchange":
+                    return
+
+    def _execute_action_start_wild_gain_exchange(self, command, player, domain):
+        """Fire a `exchange <res> N wild M` passive at action.start.
+
+        Delegates to the existing wild-gain exchange machinery but stamps the
+        pending_required_choice with context="action_start" so the resolution
+        handler resumes the action phase instead of harvest.
+        """
+        result = self._execute_wild_gain_exchange_payout(command, player.player_id)
+        prc = getattr(self, "pending_required_choice", None)
+        if prc and prc.get("kind") == "harvest_wild_gain_exchange":
+            prc["context"] = "action_start"
+            prc["domain_name"] = getattr(domain, "name", "Domain")
 
     def _collect_action_end_manipulate_queue(self, active_player):
         out = []
@@ -3373,7 +3417,7 @@ class Game:
             if not kv:
                 continue
             mode = (kv.get("mode") or "").strip().lower()
-            if mode not in ("take_from_player", "pay_to_player"):
+            if mode not in ("take_from_player", "pay_to_player", "self_convert"):
                 continue
             out.append({
                 "domain_name": getattr(d, "name", "Domain"),
@@ -3432,6 +3476,24 @@ class Game:
                 return False
             mode = item["mode"]
             kv = item["kv"]
+            # self_convert items (Rime Temple, Switch Wind Fortress): prompt player to
+            # optionally trade one resource for another. Skip silently if unaffordable.
+            if mode == "self_convert":
+                pay_k, pay_n = _parse_resource_kv(kv.get("pay", ""))
+                can_pay = bool(pay_k) and self._player_can_afford_self_convert_resources(active, pay_k, pay_n)
+                if not can_pay:
+                    self.pending_action_end_queue.pop(0)
+                    continue
+                self.action_required["id"] = active_pid
+                self.action_required["action"] = "domain_self_convert"
+                self.pending_required_choice = {
+                    "kind": "domain_self_convert",
+                    "player_id": active_pid,
+                    "kv": kv,
+                    "domain_name": item.get("domain_name", "Domain"),
+                    "context": "action_end_queue",
+                }
+                return True
             gain_k, gain_n_from_kv = _parse_resource_kv(kv.get("gain", ""))
             optional = str(kv.get("optional", "")).strip().lower() in ("true", "1", "yes")
             vp_pay_may_decline = mode == "pay_to_player" and gain_k == "v" and gain_n_from_kv > 0
@@ -4426,7 +4488,10 @@ class Game:
                 self.action_required["action"] = ""
                 self.action_required["id"] = self.game_id
                 self._apply_wild_gain_exchange_choice(player_id, res_wg, prc_wg)
-                self._maybe_resume_harvest_prompt()
+                if prc_wg.get("context") == "action_start":
+                    self._resume_after_domain_activation_follow_up()
+                else:
+                    self._maybe_resume_harvest_prompt()
                 return
 
             if current_required == "harvest_wild_cost_exchange":
@@ -4606,8 +4671,17 @@ class Game:
                 act = (action or "").strip().lower()
                 if player_id != prc0.get("player_id"):
                     return
+                ctx = prc0.get("context", "domain_activation")
                 if act == "skip":
-                    self._resume_after_domain_activation_follow_up()
+                    self.pending_required_choice = None
+                    self.action_required["id"] = self.game_id
+                    self.action_required["action"] = ""
+                    if ctx == "action_end_queue":
+                        self.pending_action_end_queue.pop(0) if self.pending_action_end_queue else None
+                        if not self._drain_action_end_manipulate_queue():
+                            pass  # advance_tick handles turn end
+                    else:
+                        self._resume_after_domain_activation_follow_up()
                     return
                 if act != "confirm_self_convert":
                     return
@@ -4624,7 +4698,15 @@ class Game:
                 self._log_game_event(
                     f"{self._player_label(player_id)} confirmed \"{prc0.get('domain_name', 'Domain')}\" trade; scores {before} -> {after}"
                 )
-                self._resume_after_domain_activation_follow_up()
+                self.pending_required_choice = None
+                self.action_required["id"] = self.game_id
+                self.action_required["action"] = ""
+                if ctx == "action_end_queue":
+                    self.pending_action_end_queue.pop(0) if self.pending_action_end_queue else None
+                    if not self._drain_action_end_manipulate_queue():
+                        pass  # advance_tick handles turn end
+                else:
+                    self._resume_after_domain_activation_follow_up()
                 return
 
             if prc0.get("kind") == "domain_manipulate_player" and str(current_required).strip() == "choose_player":
@@ -5227,6 +5309,8 @@ class Game:
                         owned_same_name += 1
 
             scaled_cost = int(getattr(top, "gold_cost", 0) or 0) + int(owned_same_name)
+            if self._player_has_action_effect_flag(player, "action.defiantridge"):
+                scaled_cost = max(0, scaled_cost - 1)
             _validate_hire_or_domain_gold_payment(player, scaled_cost, gp, sp, mp)
 
             before = self._player_scores_line(player)
@@ -5299,6 +5383,8 @@ class Game:
                 + int(getattr(top, "extra_magic_cost", 0) or 0)
             )
             effective_gold_cost = int(getattr(top, "extra_gold_cost", 0) or 0)
+            if self._player_has_action_effect_flag(player, "action.fortskyler"):
+                effective_strength_cost = max(0, effective_strength_cost - 1)
 
             _validate_monster_slay_payment(
                 player, effective_strength_cost, effective_magic_cost, effective_gold_cost, gp, sp, mp
