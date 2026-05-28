@@ -429,7 +429,11 @@
       img.replaceWith(placeholder);
     });
 
-    const idLine = `${kind} #${id}` + (type === "monsters" && card.order != null ? ` · order ${card.order}` : "");
+    let idLine = `${kind} #${id}`;
+    if (type === "monsters") {
+      if (card.area) idLine += ` · ${card.area}`;
+      if (card.order != null) idLine += ` · order ${card.order}`;
+    }
     const node = h("div", { class: "wiki-card", "data-id": String(id), "data-type": type },
       img,
       h("div", { class: "wiki-card-meta" },
