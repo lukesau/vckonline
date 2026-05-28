@@ -1,5 +1,5 @@
 {
   "_description": "Cards listed here are excluded from the random deal at game setup (by database id). Remove an id from a list to unban that card. Keys: 'dukes' uses id_dukes, 'domains' uses id_domains.",
-  "dukes": [3],
+  "dukes": [99],
   "domains": []
 }
