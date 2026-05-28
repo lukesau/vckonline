@@ -15,6 +15,8 @@ This document covers how effect strings work across the three card tables (citiz
 | Champion | `exchange g 1 s 4` | Pay 1g, gain 4s |
 | Paladin | `exchange s 1 m 3` | Pay 1s, gain 3m |
 | Butcher | `count owned_worker g 2` | Gain 2g per owned Worker citizen |
+| Miner | `g 1 + count owned_domains g 1` | Gain 1g, then +1g per owned Domain |
+| Purser | `count owned_citizens g 1` | Gain 1g per owned face-up Citizen (including the Purser; excluding flipped peers; not counting starter citizens) |
 | Thief (on-turn) | `steal g 3 m 3` | Choose an opponent, then steal 3g or 3m from them |
 | Thief (off-turn) | `choose g 2 m 2` | Pick one: +2g or +2m |
 
@@ -84,12 +86,24 @@ roll.set_one_die cost=g:2
 
 ### 2. `count` — same structure, different second word
 
-The two count patterns are syntactically parallel but semantically distinct. No unification needed beyond being aware they share a parser.
+The various `count` patterns are syntactically parallel but semantically distinct. No unification needed beyond being aware they share a parser.
 
 ```
-count owned_worker g 2     # count by citizen role owned
-count area Hills g 1        # count by monster area slain
+count owned_worker g 2          # count by citizen role pip totals (sum of worker_count on each owned citizen, scaling 2g per pip)
+count owned_citizens g 1        # count face-up citizen cards (Purser); excludes flipped citizens, excludes starters
+count owned_domains g 1         # count domain cards (Miner)
+count owned_monsters g 1        # count monster cards owned (reserved; no shipped card uses this yet)
+count owned_citizen_name X g 1  # count face-up owned citizens named X (Jousting Field citizen leg)
+count owned_starter_name X g 1  # count starter citizens named X (Jousting Field starter leg)
+count area Hills g 1            # count by monster area slain
 ```
+
+The card-pool family (`owned_citizens` / `owned_domains` / `owned_monsters`)
+counts whole cards, not role pips. Flipped citizens are excluded from
+`owned_citizens` so the count matches the harvest-eligibility rule — a
+flipped citizen sits out its own payout, so it should not contribute to
+"per owned citizen" payouts either. Domains and monsters have no flipped
+state.
 
 ### 3. `choose` — brackets sometimes, not always
 

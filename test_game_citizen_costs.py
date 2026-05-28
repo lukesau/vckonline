@@ -6,28 +6,22 @@ from game_models import Player
 
 
 def make_wizard(citizen_id=100):
+    """Citizen-cost smoke-test stand-in for the Wizard.
+
+    Constructor positional args (see cards.Citizen.__init__):
+      citizen_id, name, gold_cost, roll_match1, roll_match2,
+      shadow, holy, soldier, worker,
+      g_on, g_off, s_on, s_off, m_on, m_off, vp_on, vp_off,
+      has_sp_on, has_sp_off, sp_on, sp_off, special_citizen, expansion
+    """
     citizen = Citizen(
-        citizen_id,
-        "Wizard",
-        4,
-        6,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        1,
-        0,
-        False,
-        False,
-        "",
-        "",
-        False,
-        "test",
+        citizen_id, "Wizard",
+        4,        # gold_cost
+        6, 0,     # roll_match1, roll_match2
+        0, 0, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        False, False, "", "",
+        False, "test",
     )
     citizen.toggle_visibility(True)
     citizen.toggle_accessibility(True)

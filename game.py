@@ -2877,7 +2877,41 @@ class Game:
                     case "owned_monsters":
                         self.update_payout_for_role('owned_monsters', player_id, payout, split_command)
                     case "owned_citizens":
-                        self.update_payout_for_role('owned_citizens', player_id, payout, split_command)
+                        # Filtered count: flipped citizens skip their own
+                        # harvest payouts and are excluded from role spends,
+                        # so they also do not contribute to "per owned
+                        # citizen" payouts. Mirrors the flipped-exclusion
+                        # already used by `count owned_citizen_name`.
+                        # `calc_roles()['owned_citizens']` intentionally
+                        # stays as the raw `len(owned_citizens)` (it is the
+                        # literal pile size used by serialization and Duke
+                        # scoring, the latter after every citizen is
+                        # unflipped for final scoring).
+                        player_oc = self._player_by_id(player_id)
+                        if not player_oc:
+                            payout[0] = -9999
+                        else:
+                            n_oc = sum(
+                                1 for c in list(getattr(player_oc, "owned_citizens", []) or [])
+                                if not getattr(c, "is_flipped", False)
+                            )
+                            try:
+                                mult_oc = int(split_command[3])
+                            except (TypeError, ValueError):
+                                payout[0] = -9999
+                                mult_oc = None
+                            if mult_oc is not None:
+                                match third_word:
+                                    case 'g':
+                                        payout[0] = n_oc * mult_oc
+                                    case 's':
+                                        payout[1] = n_oc * mult_oc
+                                    case 'm':
+                                        payout[2] = n_oc * mult_oc
+                                    case 'v':
+                                        payout[3] = n_oc * mult_oc
+                                    case _:
+                                        payout[0] = -9999
                     case "owned_domains":
                         self.update_payout_for_role('owned_domains', player_id, payout, split_command)
                     case "owned_citizen_name":
