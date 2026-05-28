@@ -150,9 +150,14 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
     duke_query = "select_random_dukes"
     duke_stack = []
     event_query = "select_base_events"
+    monster_expansion_filters = None
+    citizen_expansion_filters = None
+    domain_expansion_filters = None
+    duke_expansion_filters = None
+    event_expansion_filters = None
     # Apply card_filters.keep_for_random (implemented AND has image) to every
     # raw row pool below. Off for the curated presets so a one-off missing
-    # image or stub effect doesn't silently shrink Test 1/etc.
+    # image or stub effect doesn't silently shrink those pools.
     apply_implemented_image_filter = False
     # exhausted_stack is built after DB queries (see below); placeholder here.
     exhausted_stack = []
@@ -204,16 +209,28 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             citizen_query = "select_base2_citizens"
             domain_query = "select_random_domains"
             event_query = "select_base_events"
-        case "test1":
-            monster_query = "select_base1_monsters"
-            citizen_query = "select_base1_citizens"
-            domain_query = "select_test1_domains"
-            event_query = "select_base_events"
-        case "test2":
-            monster_query = "select_base2_monsters"
-            citizen_query = "select_base2_citizens"
-            domain_query = "select_test2_domains"
-            event_query = "select_base_events"
+        case "flamesandfrost":
+            # Preset rules:
+            # - starters: all starters (default starter query already does this)
+            # - dukes: expansion in ("base", "flamesandfrost")
+            # - monsters/citizens/domains/events: expansion = "flamesandfrost"
+            monster_expansion_filters = ("flamesandfrost",)
+            citizen_expansion_filters = ("flamesandfrost",)
+            domain_expansion_filters = ("flamesandfrost",)
+            duke_expansion_filters = ("base", "flamesandfrost")
+            event_expansion_filters = ("flamesandfrost",)
+            choose_one_citizen_per_roll = True
+        case "shadowvale":
+            # Preset rules:
+            # - starters: all starters (default starter query already does this)
+            # - dukes: expansion in ("base", "shadowvale")
+            # - monsters/citizens/domains/events: expansion = "shadowvale"
+            monster_expansion_filters = ("shadowvale",)
+            citizen_expansion_filters = ("shadowvale",)
+            domain_expansion_filters = ("shadowvale",)
+            duke_expansion_filters = ("base", "shadowvale")
+            event_expansion_filters = ("shadowvale",)
+            choose_one_citizen_per_roll = True
         case "random":
             # Pull every card (every expansion) and let
             # card_filters.keep_for_random + the existing
@@ -239,22 +256,24 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             apply_implemented_image_filter = True
         case _:
             raise ValueError(f"Unknown game data preset: {preset}")
-
-    # Debug mode filters roll-modifier domain IDs out of the board deal because
-    # it duplicates those cards onto every player's tableau. The test presets
-    # have narrow domain pools that overlap those IDs, so widen only those pools
-    # before applying the filter.
-    if debug_mode and domain_query in ("select_test1_domains", "select_test2_domains"):
-        domain_query = "select_random_domains"
     try:
         my_connect = mariadb.connect(
             user="vckonline", password="vckonline", host="127.0.0.1", database="vckonline", port=3306
         )
         my_cursor = my_connect.cursor(dictionary=True)
 
-        my_cursor.callproc(monster_query)
+        def _fetch_pool_rows(proc_name, table_name, expansion_filters):
+            if expansion_filters:
+                placeholders = ", ".join(["%s"] * len(expansion_filters))
+                my_cursor.execute(
+                    f"SELECT * FROM {table_name} WHERE expansion IN ({placeholders})",
+                    tuple(expansion_filters),
+                )
+            else:
+                my_cursor.callproc(proc_name)
+            return my_cursor.fetchall()
 
-        results = my_cursor.fetchall()
+        results = _fetch_pool_rows(monster_query, "monsters", monster_expansion_filters)
         if apply_implemented_image_filter:
             results = _filter_monster_areas_for_random(results, len(player_list_from_lobby))
         for row in results:
@@ -279,11 +298,10 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             )
             monster_stack.append(my_monster)
 
-        my_cursor.callproc(citizen_query)
         citizen_count = 5
         if len(player_list_from_lobby) == 5:
             citizen_count = 6
-        results = my_cursor.fetchall()
+        results = _fetch_pool_rows(citizen_query, "citizens", citizen_expansion_filters)
         if apply_implemented_image_filter:
             results = [r for r in results if keep_for_random("citizen", r) and not int(r.get("special_citizen") or 0)]
         if draft_selections and preset == "draft":
@@ -321,8 +339,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
                 )
                 citizen_stack.append(my_citizen)
 
-        my_cursor.callproc(domain_query)
-        results = my_cursor.fetchall()
+        results = _fetch_pool_rows(domain_query, "domains", domain_expansion_filters)
         if apply_implemented_image_filter:
             results = [r for r in results if keep_for_random("domain", r)]
         skip_domains = set(banned_domain_ids())
@@ -378,8 +395,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             )
             debug_roll_modifier_domain_rows = list(my_cursor.fetchall() or [])
 
-        my_cursor.callproc(duke_query)
-        results = my_cursor.fetchall()
+        results = _fetch_pool_rows(duke_query, "dukes", duke_expansion_filters)
         if apply_implemented_image_filter:
             results = [r for r in results if keep_for_random("duke", r)]
         skip_dukes = banned_duke_ids()
@@ -440,8 +456,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
         # its source procedure in `event_query` (see the match block
         # above) so adding a new event pool is "add a thin SP + a case
         # branch" — same shape as monsters/citizens/domains/dukes.
-        my_cursor.callproc(event_query)
-        event_rows = my_cursor.fetchall()
+        event_rows = _fetch_pool_rows(event_query, "events", event_expansion_filters)
         if apply_implemented_image_filter:
             event_rows = [r for r in event_rows if keep_for_random("event", r)]
         event_pool = []

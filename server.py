@@ -116,7 +116,7 @@ manager = ConnectionManager()
 # that swapping `current` to a future format does not remove Base Set from
 # the dropdown. `random` deals from every implemented card across all
 # expansions (see `card_filters.keep_for_random`).
-_VALID_LOBBY_PRESETS = ("current", "base", "test1", "test2", "random", "draft")
+_VALID_LOBBY_PRESETS = ("current", "base", "flamesandfrost", "shadowvale", "random", "draft")
 
 # Lobby min-players bounds. The lower bound matches the historical default
 # (the game has always required 2 players); the upper bound matches the

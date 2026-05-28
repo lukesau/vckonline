@@ -225,7 +225,7 @@ let playerId = localStorage.getItem('playerId') || '';
                         }
                         card += '</div>';
                         if (isOwner) {
-                            const presetOpts = ['current', 'base', 'test1', 'test2', 'random']
+                            const presetOpts = ['current', 'base', 'flamesandfrost', 'shadowvale', 'random']
                                 .map(v => `<option value="${v}"${v === lb.preset ? ' selected' : ''}>${v}</option>`)
                                 .join('');
                             const minOpts = [2, 3, 4, 5]

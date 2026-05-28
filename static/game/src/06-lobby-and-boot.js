@@ -395,8 +395,8 @@ async function initLobbyBackgroundCanvas(canvas) {
 const LOBBY_PRESET_SHORT_LABELS = {
   current: 'Default',
   base: 'Base Set',
-  test1: 'Test 1',
-  test2: 'Test 2',
+  flamesandfrost: 'Flames+Frost',
+  shadowvale: 'Shadowvale',
   random: 'Random',
   draft: 'Draft',
 };
