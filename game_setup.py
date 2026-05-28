@@ -333,7 +333,11 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             skip_domains |= set(DEBUG_ROLL_MODIFIER_DOMAIN_IDS)
         if skip_domains:
             results = [r for r in results if int(r["id_domains"]) not in skip_domains]
-        domains_needed = 15  # 5 stacks x 3 cards
+        # Standard board is 5 stacks of 3 (15 domains). At 5 players each
+        # stack is dealt 4 deep (3 hidden + 1 face-up top), so the pool needs
+        # 20 valid domains.
+        domain_stack_depth = 4 if len(player_list_from_lobby) == 5 else 3
+        domains_needed = 5 * domain_stack_depth
         if len(results) < domains_needed:
             hints = []
             if banned_domain_ids():
@@ -595,18 +599,17 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
                     d.toggle_visibility(True)
                     d.toggle_accessibility(True)
                     player.owned_domains.append(d)
-        # deal the domains into stacks
+        # deal the domains into stacks. 5-player games use 4-deep stacks
+        # (3 hidden + 1 face-up top); 2-4 players use the standard 3-deep
+        # layout. Only the top of each stack starts face-up either way.
         for i in range(5):
             stack = domain_grid[i]
-            for j in range(3):
-                if j == 2:
-                    domain = domain_stack.pop()
+            for j in range(domain_stack_depth):
+                domain = domain_stack.pop()
+                if j == domain_stack_depth - 1:
                     domain.toggle_visibility(True)
                     domain.toggle_accessibility(True)
-                    stack.append(domain)
-                else:
-                    domain = domain_stack.pop()
-                    stack.append(domain)
+                stack.append(domain)
 
         game_state = {
             "game_id": game_id,

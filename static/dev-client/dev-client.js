@@ -1328,6 +1328,7 @@ let playerId = localStorage.getItem('playerId') || '';
                 }
 
                 const players = Array.isArray(gameState?.player_list) ? gameState.player_list : [];
+                const restingPid = (gameState?.resting_player_id || '').toString();
                 if (deltaEl) {
                 deltaEl.innerHTML = '';
                 players.forEach(p => {
@@ -1344,13 +1345,17 @@ let playerId = localStorage.getItem('playerId') || '';
                     const card = document.createElement('div');
                     card.className = 'delta-card';
                     const name = p?.name || (p?.player_id ? p.player_id.slice(0, 6) : 'Player');
+                    const isResting = restingPid && (p?.player_id || '').toString() === restingPid;
+                    const restingTag = isResting
+                        ? ' <span title="5-player rule: this seat skips harvest this turn." style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;border:1px solid #b78b1f;background:#f0d27a;color:#2a1f06;font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;">Resting</span>'
+                        : '';
 
                     const fmt = (n) => (n > 0 ? `+${n}` : `${n}`);
                     const cls = (n) => (n > 0 ? 'delta-pos' : (n < 0 ? 'delta-neg' : 'delta-zero'));
 
                     card.innerHTML = `
                         <div class="delta-grid">
-                            <span class="delta-name">${name}</span>
+                            <span class="delta-name">${name}${restingTag}</span>
                             <span class="delta-cell"><span class="delta-label">ΔG</span><span class="delta-value ${cls(g)}">${fmt(g)}</span></span>
                             <span class="delta-cell"><span class="delta-label">ΔS</span><span class="delta-value ${cls(s)}">${fmt(s)}</span></span>
                             <span class="delta-cell"><span class="delta-label">ΔM</span><span class="delta-value ${cls(m)}">${fmt(m)}</span></span>

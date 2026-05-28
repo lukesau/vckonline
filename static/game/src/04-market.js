@@ -94,6 +94,41 @@ function canAffordCost(player, cost) {
   return { ok, payGold, payStrength, payMagic, deficitGold, deficitStrength, remainingMagic, reservedMagic };
 }
 
+function canAffordMonsterCost(player, cost) {
+  const G = Number(player?.gold_score || 0);
+  const S = Number(player?.strength_score || 0);
+  const M = Number(player?.magic_score || 0);
+  const goldCost = Number(cost?.gold || 0);
+  const strengthCost = Number(cost?.strength || 0);
+  const magicMin = Number(cost?.magicMin || 0);
+
+  const remainingMagic = M - magicMin;
+  const deficitGold = Math.max(0, goldCost - G);
+  const deficitStrength = Math.max(0, strengthCost - S);
+  if (remainingMagic < 0) {
+    return { ok: false, payGold: 0, payStrength: 0, payMagic: 0, deficitGold, deficitStrength, remainingMagic: 0, reservedMagic: 0 };
+  }
+
+  const reservedMagic = reservedMagicForOffTurnConverts(player);
+  const lacksStrengthFloor = strengthCost > 0 && deficitStrength > 0 && S <= 0;
+  const wildBudget = Math.max(0, remainingMagic - reservedMagic);
+  let payStrength = 0;
+  let wildPay = 0;
+  if (strengthCost > 0) {
+    payStrength = Math.max(1, strengthCost - wildBudget);
+    payStrength = Math.min(payStrength, S, strengthCost);
+    if (payStrength > 1 && payStrength >= S && remainingMagic >= strengthCost - 1) {
+      payStrength = 1;
+    }
+    wildPay = Math.max(0, strengthCost - payStrength);
+  }
+
+  const payGold = Math.min(goldCost, G);
+  const payMagic = magicMin + wildPay;
+  const ok = deficitGold === 0 && !lacksStrengthFloor && deficitStrength <= remainingMagic;
+  return { ok, payGold, payStrength, payMagic, deficitGold, deficitStrength, remainingMagic, reservedMagic };
+}
+
 function ownedNameCount(player, name) {
   const target = (name ?? '').toString();
   if (!target) return 0;
@@ -556,13 +591,13 @@ function evaluateMarketCardContext(card, state) {
       evalRes = canAffordCost(actingPlayer, { gold: effectiveGold, strength: 0, magicMin: 0 });
       pratchettHint = pratchettActive && baseCost !== effectiveGold ? `base ${baseCost}g − 1 (Pratchett's Plateau)` : '';
     } else if (card.monster_id != null) {
-      evalRes = canAffordCost(actingPlayer, {
+      evalRes = canAffordMonsterCost(actingPlayer, {
         gold:     Number(top.extra_gold_cost     || 0),
         strength: Number(top.strength_cost       || 0) + Number(top.extra_strength_cost || 0),
         magicMin: Number(top.magic_cost          || 0) + Number(top.extra_magic_cost    || 0),
       });
     } else if (card.event_id != null) {
-      evalRes = canAffordCost(actingPlayer, {
+      evalRes = canAffordMonsterCost(actingPlayer, {
         gold:     Number(top.extra_gold_cost     || 0),
         strength: Number(top.strength_cost       || 0) + Number(top.extra_strength_cost || 0),
         magicMin: Number(top.magic_cost          || 0) + Number(top.extra_magic_cost    || 0),
@@ -714,14 +749,16 @@ function appendMarketActionUI(infoEl, card, ctx) {
   } else if (card.monster_id != null) {
     primaryLabel = 'Slay monster';
     payWrap.dataset.monsterId = String(card.monster_id);
-    payWrap.appendChild(mkPayField('', 'pay-g', 0, 0, 0, true, 'Monsters use strength and magic', 'gold', Gmax));
+    const effGold = Number(ctx.top?.extra_gold_cost || 0);
+    const goldDisabled = inputsDisabled || effGold === 0;
+    payWrap.appendChild(mkPayField('', 'pay-g', effGold, effGold, effGold, goldDisabled, effGold ? `Gold cost: ${effGold} (exact)` : 'No gold cost', 'gold', Gmax));
     payWrap.appendChild(mkPayField('', 'pay-s', 0, Smax, pay.payStrength ?? 0, inputsDisabled, 'Strength payment', 'strength', Smax));
     payWrap.appendChild(mkPayField('', 'pay-m', 0, Mmax, pay.payMagic ?? 0, inputsDisabled, 'Magic payment', 'magic', Mmax));
   } else if (card.event_id != null) {
     primaryLabel = 'Slay monster';
     payWrap.dataset.eventId = String(card.event_id);
-    const effGold = Number(top?.extra_gold_cost || 0);
-    const goldDisabled = effGold === 0;
+    const effGold = Number(ctx.top?.extra_gold_cost || 0);
+    const goldDisabled = inputsDisabled || effGold === 0;
     payWrap.appendChild(mkPayField('', 'pay-g', effGold, effGold, effGold, goldDisabled, effGold ? `Gold cost: ${effGold} (exact)` : 'No gold cost', 'gold', Gmax));
     payWrap.appendChild(mkPayField('', 'pay-s', 0, Smax, pay.payStrength ?? 0, inputsDisabled, 'Strength payment', 'strength', Smax));
     payWrap.appendChild(mkPayField('', 'pay-m', 0, Mmax, pay.payMagic ?? 0, inputsDisabled, 'Magic payment', 'magic', Mmax));

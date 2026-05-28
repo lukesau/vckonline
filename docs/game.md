@@ -211,6 +211,87 @@ Some special payouts set `action_required` and start a background thread that wa
 
 This is a dev-oriented approach; it allows the REST API to supply a follow-up choice via `act_on_required_action` while the game engine waits.
 
+### 5-player "resting" seat
+
+At exactly 5 players the rulebook adds a *resting* mechanic: each turn the
+player who would have rolled immediately before the active player sits the
+harvest out completely. They do **not** harvest on-turn or off-turn, do not
+fire any of their citizens during the steal pre-phase, and do not get the
+end-of-harvest "no payout" consolation prompt either. The resting seat
+rotates with the active seat so every player rests exactly once every 5
+turns.
+
+`Game.resting_player_id()` is the source of truth. At 5 players it returns
+`player_list[(turn_index - 1) % 5].player_id`; at any other player count it
+returns `None` and the engine behaves exactly as before.
+
+The skip is implemented in one place — `_harvest_player_id_order_starting_active`
+filters the resting seat out of the harvest turn order, which is what both
+the interactive harvest loop (`_harvest_run_automation_until_blocked`) and
+the silent batch path (`harvest_phase`) iterate. `_harvest_complete_finalize`
+also excludes the resting seat from `pending_harvest_choices` so the
+missed-harvest consolation (legacy `bonus_resource_choice` or Herald's
+`no_payout` starter) does not fire for that player.
+
+`resting_player_id` is exposed on the serialized game state; clients render
+a "Resting" badge on that player's tableau (see `static/game/src/02-render-and-board.js`
+and the dev client's harvest-delta strip).
+
+#### "Not in play" — negative-effect immunity
+
+While a seat is resting it is treated as "not in play" for negative
+citizen / domain / monster / event effects: it is filtered out of every
+target candidate list the engine builds. Specifically:
+
+- citizen `steal ...` (Thief) — resting opponents drop out of the victim
+  list alongside `immunity.take` holders (Castle of the Seven Suns).
+- event `all_lose g|s|m N` — the resting seat is logged but loses zero.
+- domain `concurrent_flip_one_citizen` (Cursed Cavern) — the resting
+  seat is not added to the concurrent flip pending list.
+- monster reward `flip_citizen targeted` — resting opponents drop out
+  of the player-choice options.
+- domain Sunder Bay (`_execute_banish_player_citizen_payout`) — resting
+  opponents drop out of the banish target list.
+- domain `take_from_player` mode in `_manipulate_candidates_other_players`
+  — filtered alongside `immunity.take`. `pay_to_player` mode is positive
+  for the target so the resting seat stays eligible.
+- domain `take_owned` (`_prompt_take_owned_card`) — resting opponents
+  and `immunity.take` holders both drop out of the player options.
+
+The single source of truth is `Game._player_is_negative_effect_target(p)`,
+which returns `False` exactly when `_player_is_resting(p)` is true. New
+negative-targeting effects should call the helper rather than re-checking
+`resting_player_id` directly.
+
+#### `immunity.take` (Castle of the Seven Suns)
+
+Castle of the Seven Suns reads, with the operator-icon legend, "Opponents
+Cannot Take You" — and "you" is defined as "you as a player AND any of
+your cards or Resources". The narrower `immunity.take` passive therefore
+covers every "take" surface (resource AND card) but does not cover other
+operators (`banish`, `flip`, event `all_lose`).
+
+- Surfaces blocked: citizen `steal` (Thief), domain `take_from_player`
+  (Cathedral of St Aquila, Orb of Urdr), domain `take_owned`.
+- Surfaces NOT blocked: Sunder Bay banish (`_execute_banish_player_citizen_payout`),
+  Cursed Cavern concurrent flip (`_begin_concurrent_flip_one_citizen`),
+  monster reward `flip_citizen targeted` (`_execute_flip_citizen_payout`),
+  event `all_lose g|s|m N`.
+
+The helper is `Game._player_has_take_immunity(p)`. The legacy passive
+string `immunity.steal` is still accepted for back-compat — pre-migration
+DB rows continue to work — but every new card or migration should use
+`immunity.take`.
+
+#### Domain stack depth
+
+At 2-4 players each of the five domain stacks is dealt 3 cards deep with
+the top face-up (15 domains total). At 5 players each stack is dealt 4
+cards deep with 3 hidden + 1 face-up (20 domains total) — see
+`game_setup.py` (`domain_stack_depth = 4 if n == 5 else 3`). The face-up
+top still rotates through `_reveal_hidden_domain_stack_tops` after a
+purchase.
+
 ### Harvest steal pre-phase
 
 Citizens with a `steal ...` special payout (currently Thief, but the engine

@@ -1092,6 +1092,18 @@ function makeHeader(player, state) {
     nameRow.appendChild(tim);
   }
 
+  if (state && state.resting_player_id != null && idsMatch(state.resting_player_id, player.player_id)) {
+    const restBadge = mk('player-resting-badge');
+    restBadge.textContent = 'Resting';
+    restBadge.title =
+      '5-player rule: the seat immediately before the active player skips harvest this turn.';
+    restBadge.setAttribute(
+      'aria-label',
+      'Resting (5-player rule: skips harvest this turn)',
+    );
+    nameRow.appendChild(restBadge);
+  }
+
   h.appendChild(nameRow);
 
   const resRow = mk('player-header-res-row');

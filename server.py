@@ -1286,8 +1286,14 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 if getattr(game, "phase", None) == "action":
                     break
         
+        elif request.action_type == "reroll_pending_die":
+            try:
+                game.reroll_pending_die(request.player_id, request.die_one or 1)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+
         elif request.action_type == "roll_phase":
-            raise HTTPException(status_code=400, detail="roll_phase is automatic; reserved for future reroll effects")
+            raise HTTPException(status_code=400, detail="roll_phase is automatic")
         
         elif request.action_type == "harvest_phase":
             raise HTTPException(status_code=400, detail="harvest_phase is automatic")

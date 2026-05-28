@@ -459,6 +459,11 @@ class Game:
                     self.harvest_player_idx = 0
                     self.harvest_player_order = self._harvest_player_id_order_starting_active()
                     self._harvest_steal_phase_done = False
+                    resting_pid = self.resting_player_id()
+                    if resting_pid is not None:
+                        self._log_game_event(
+                            f"{self._player_label(resting_pid)} is resting (5-player rule); no harvest this turn."
+                        )
                     # Harvest-phase domain passives (e.g. Jousting Field) must run after deltas are
                     # cleared for the new harvest round, not during finalize_roll (which ran before
                     # this reset and would lose passive contributions from harvest_delta tracking).
@@ -668,6 +673,8 @@ class Game:
         self.phase = "roll_pending"
         self.action_required["id"] = self.current_player_id()
         self.action_required["action"] = "finalize_roll"
+        # Reset per-turn Twilight Palace re-roll token.
+        self._pending_reroll_twilight_used = False
 
         # Default final dice are unset until finalized.
         # (We intentionally do not touch self.die_one/die_two here.)
@@ -725,6 +732,9 @@ class Game:
         if (self.action_required.get("action") or "") != "event_slay_cost_choice":
             self.action_required["id"] = self.game_id
             self.action_required["action"] = ""
+        # Fire Northern Wall optional Minion-banish (only if nothing else is pending).
+        if not (self.action_required.get("action") or ""):
+            self._maybe_fire_northern_wall_banish(player_id)
         self.tick_id += 1
         who = self._player_label(self.current_player_id())
         if fd1 == rd1 and fd2 == rd2:
@@ -735,6 +745,47 @@ class Game:
             self._log_game_event(
                 f"Turn {int(self.turn_number)} ({who}): roll changed {rd1}+{rd2}={rd1+rd2} -> {fd1}+{fd2}={self.die_sum}."
             )
+
+    def reroll_pending_die(self, player_id, die_index):
+        """Re-roll one die during the roll_pending phase (Twilight Palace passive).
+
+        die_index: 1 or 2. Generates a new random value, updates pending_roll,
+        and marks the Twilight Palace token as consumed for this roll phase.
+        """
+        if self.phase != "roll_pending":
+            raise ValueError("Not in roll_pending phase.")
+        if player_id != self.current_player_id():
+            raise ValueError("Only the active player may re-roll a die.")
+        player = self._player_by_id(player_id)
+        if not player:
+            raise ValueError("Player not found.")
+        if not self._player_has_action_effect_flag(player, "roll.reroll_one_die"):
+            raise ValueError("Player does not own Twilight Palace (or it is on build-turn cooldown).")
+        if getattr(self, "_pending_reroll_twilight_used", False):
+            raise ValueError("Twilight Palace re-roll already used this roll phase.")
+        die_index = int(die_index)
+        if die_index not in (1, 2):
+            raise ValueError("die_index must be 1 or 2.")
+        rolled = self.pending_roll or {}
+        new_val = random.randint(1, 6)
+        if die_index == 1:
+            old_val = int(rolled.get("rolled_die_one", 1) or 1)
+            rolled["rolled_die_one"] = new_val
+            self.rolled_die_one = new_val
+        else:
+            old_val = int(rolled.get("rolled_die_two", 1) or 1)
+            rolled["rolled_die_two"] = new_val
+            self.rolled_die_two = new_val
+        rolled["rolled_die_sum"] = int(rolled.get("rolled_die_one", 1)) + int(rolled.get("rolled_die_two", 1))
+        self.rolled_die_sum = rolled["rolled_die_sum"]
+        self.pending_roll = rolled
+        self._pending_reroll_twilight_used = True
+        self.tick_id += 1
+        who = self._player_label(player_id)
+        self._log_game_event(
+            f"Turn {int(self.turn_number)} ({who}): Twilight Palace re-rolled die {die_index}: "
+            f"{old_val} → {new_val}."
+        )
 
     def _owned_citizen_count_for_role_selector(self, player, role_selector):
         role = (role_selector or "").strip().lower()
@@ -775,6 +826,8 @@ class Game:
             raise ValueError("Another concurrent prompt is already active.")
         targets = []
         for p in list(getattr(self, "player_list", []) or []):
+            if not self._player_is_negative_effect_target(p):
+                continue
             oc = list(getattr(p, "owned_citizens", []) or [])
             if any(not getattr(c, "is_flipped", False) for c in oc):
                 targets.append(p.player_id)
@@ -1154,6 +1207,12 @@ class Game:
                 )
                 return
             for p in list(getattr(self, "player_list", []) or []):
+                if not self._player_is_negative_effect_target(p):
+                    self._log_game_event(
+                        f"{self._player_label(p.player_id)} is resting; "
+                        f"loses 0{resource} from event \"{event.name}\"."
+                    )
+                    continue
                 current = int(getattr(p, attr, 0) or 0)
                 new_val = max(0, current - amount)
                 if current != new_val:
@@ -1310,12 +1369,61 @@ class Game:
         while len(self.game_log) > _GAME_LOG_MAX:
             self.game_log.pop(0)
 
+    def _player_is_resting(self, player_or_id):
+        """True if `player_or_id` (a Player or a player_id string) is the resting seat this turn."""
+        rid = self.resting_player_id()
+        if rid is None or player_or_id is None:
+            return False
+        if hasattr(player_or_id, "player_id"):
+            pid = player_or_id.player_id
+        else:
+            pid = player_or_id
+        return pid == rid
+
+    def _player_is_negative_effect_target(self, player_or_id):
+        """True if a "negative" citizen / domain / monster / event effect is allowed
+        to target `player_or_id`.
+
+        At 5 players the resting seat is "not in play" while it has the resting
+        effect, so it is excluded as a target for negative effects (steal,
+        all_lose, flip, banish-citizen, take-from-player, take-owned-card,
+        Cursed Cavern's concurrent flip, etc.). Positive effects (e.g.
+        `pay_to_player`) still resolve normally — the rule book carves out
+        "negative" specifically.
+        """
+        return not self._player_is_resting(player_or_id)
+
+    def resting_player_id(self):
+        """Return the player_id of the "resting" player this turn, else None.
+
+        At 5 players the rulebook adds a "resting" mechanic: each turn the
+        player who would have rolled immediately before the active player
+        sits the harvest out (no on-turn or off-turn payouts, no steal pre-
+        phase activations, no end-of-harvest "no payout" consolation). The
+        resting seat rotates with the active seat so every player rests
+        exactly once every 5 turns.
+
+        At 2-4 or 6+ players there is no resting seat and this returns None.
+        """
+        n = len(self.player_list)
+        if n != 5:
+            return None
+        t = int(self.turn_index) % n
+        return self.player_list[(t - 1) % n].player_id
+
     def _harvest_player_id_order_starting_active(self):
         n = len(self.player_list)
         if n == 0:
             return []
         t = int(self.turn_index) % n
-        return [self.player_list[(t + i) % n].player_id for i in range(n)]
+        order = [self.player_list[(t + i) % n].player_id for i in range(n)]
+        # 5-player resting: the seat immediately BEFORE the active player
+        # sits the harvest out. Excluding them from the order skips both the
+        # steal pre-phase scan and their normal payouts in one shot.
+        resting = self.resting_player_id()
+        if resting is not None:
+            order = [pid for pid in order if pid != resting]
+        return order
 
     def _roll_match_count(self, card):
         d1, d2, ds = self.die_one, self.die_two, self.die_sum
@@ -1568,7 +1676,13 @@ class Game:
         # clear so a malformed entry can't pin the harvest open across phases.
         self.pending_harvest_slays = []
         self.pending_harvest_choices = []
+        # 5-player resting seat: that player did not harvest at all this round,
+        # so they do NOT get the missed-harvest consolation prompt either (they
+        # would otherwise look identical to "had no matching cards").
+        resting_pid = self.resting_player_id()
         for p in self.player_list:
+            if resting_pid is not None and p.player_id == resting_pid:
+                continue
             if p.player_id not in activated_pids:
                 self.pending_harvest_choices.append(p.player_id)
         if self.pending_harvest_choices:
@@ -1769,6 +1883,11 @@ class Game:
             p.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0}
         active = self._player_by_id(self.current_player_id())
         self._apply_harvest_jousting_passive(active)
+        resting_pid = self.resting_player_id()
+        if resting_pid is not None:
+            self._log_game_event(
+                f"{self._player_label(resting_pid)} is resting (5-player rule); no harvest this turn."
+            )
         self._silent_harvest_batch = True
         try:
             order = self._harvest_player_id_order_starting_active()
@@ -1856,7 +1975,11 @@ class Game:
         opponents = [p for p in self.player_list if p.player_id != player_id]
         if not opponents:
             return [0, 0, 0, 0]
-        opponents = [p for p in opponents if not self._player_has_steal_immunity(p)]
+        opponents = [
+            p for p in opponents
+            if not self._player_has_take_immunity(p)
+            and self._player_is_negative_effect_target(p)
+        ]
         if not opponents:
             self._log_game_event(
                 f"{self._player_label(player_id)} could not steal — all opponents are immune."
@@ -2239,6 +2362,69 @@ class Game:
         self._finalize_citizen_stack_after_claiming_top(stack)
         return banished
 
+    def _banish_center_monster(self, stack_idx):
+        """Remove the top monster from a center stack and push it to the banish pile."""
+        from cards import Event as _Event
+        stacks = list(getattr(self, "monster_grid", []) or [])
+        if stack_idx < 0 or stack_idx >= len(stacks):
+            return None
+        stack = stacks[stack_idx]
+        if not stack:
+            return None
+        top = stack[-1]
+        if not getattr(top, "is_accessible", False):
+            return None
+        if getattr(top, "monster_id", None) is None:
+            return None  # Event/Exhausted placeholder — not banishable as a monster
+        banished = stack.pop(-1)
+        self.banish_pile.append(banished)
+        if stack:
+            stack[-1].toggle_accessibility(True)
+        elif self.exhausted_stack:
+            exhausted = self.exhausted_stack.pop()
+            stack.append(exhausted)
+            self.exhausted_count = int(self.exhausted_count) + 1
+            if isinstance(exhausted, _Event):
+                exhausted.toggle_visibility(True)
+                exhausted.toggle_accessibility(True)
+        return banished
+
+    def _maybe_fire_northern_wall_banish(self, player_id):
+        """If the active player owns The Northern Wall, open an optional Minion-banish prompt."""
+        player = self._player_by_id(player_id)
+        if not player:
+            return
+        if not self._player_has_action_effect_flag(player, "action.northernwall"):
+            return
+        options = []
+        for stack_idx, stack in enumerate(getattr(self, "monster_grid", []) or []):
+            if not stack:
+                continue
+            top = stack[-1]
+            if getattr(top, "monster_id", None) is None:
+                continue
+            if not getattr(top, "is_accessible", False):
+                continue
+            if (getattr(top, "monster_type", "") or "").strip().lower() != "minion":
+                continue
+            options.append({
+                "token": "monster.center",
+                "idx": stack_idx,
+                "name": getattr(top, "name", "?"),
+                "monster_id": int(getattr(top, "monster_id", -1)),
+                "monster_type": getattr(top, "monster_type", "?"),
+            })
+        if not options:
+            return  # No accessible Minions; skip silently
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "choose_owned_card"
+        self.pending_required_choice = {
+            "kind": "banish_roll_minion",
+            "player_id": player_id,
+            "options": options,
+            "allow_skip": True,
+        }
+
     def _execute_banish_owned_payout(self, command, player_id):
         """Parse `banish_owned <kind> [optional]` and open a self-target prompt.
 
@@ -2336,6 +2522,8 @@ class Game:
         for p in self.player_list:
             if p.player_id == player_id:
                 continue
+            if not self._player_is_negative_effect_target(p):
+                continue
             owned = list(getattr(p, "owned_citizens", []) or [])
             if not any(not getattr(c, "is_flipped", False) for c in owned):
                 continue
@@ -2360,6 +2548,76 @@ class Game:
         }
         self._log_game_event(
             f"{self._player_label(player_id)} is choosing a player to flip a citizen from."
+        )
+        return [0, 0, 0, 0]
+
+    def _execute_banish_player_citizen_payout(self, player_id):
+        """Sunder Bay: choose a player, then banish one of their citizens permanently."""
+        options = []
+        for p in self.player_list:
+            if p.player_id == player_id:
+                continue
+            if not self._player_is_negative_effect_target(p):
+                continue
+            owned = list(getattr(p, "owned_citizens", []) or [])
+            if not owned:
+                continue
+            options.append({
+                "token": "player",
+                "player_id": p.player_id,
+                "name": getattr(p, "name", "?"),
+            })
+        if not options:
+            self._log_game_event(
+                f"{self._player_label(player_id)} could not use \"Sunder Bay\" "
+                f"(no opponents have citizens)."
+            )
+            return [0, 0, 0, 0]
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "choose_player"
+        self.pending_required_choice = {
+            "kind": "banish_player_citizen",
+            "player_id": player_id,
+            "stage": "player",
+            "item": {"domain_name": "Sunder Bay"},
+            "options": options,
+            "allow_skip": False,
+        }
+        self._log_game_event(
+            f"{self._player_label(player_id)} is choosing a player to banish a citizen from (Sunder Bay)."
+        )
+        return [0, 0, 0, 0]
+
+    def _execute_banish_random_player_monster_payout(self, player_id):
+        """Wandering Flame: choose a player, then a random monster from their tableau is banished."""
+        options = []
+        for p in self.player_list:
+            if p.player_id == player_id:
+                continue
+            if list(getattr(p, "owned_monsters", []) or []):
+                options.append({
+                    "token": "player",
+                    "player_id": p.player_id,
+                    "name": getattr(p, "name", "?"),
+                })
+        if not options:
+            self._log_game_event(
+                f"{self._player_label(player_id)} could not use \"Wandering Flame\" "
+                f"(no opponents have monsters)."
+            )
+            return [0, 0, 0, 0]
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "choose_player"
+        self.pending_required_choice = {
+            "kind": "banish_random_player_monster",
+            "player_id": player_id,
+            "item": {"domain_name": "Wandering Flame"},
+            "explain": "A random monster from the chosen player's tableau will be permanently banished.",
+            "options": options,
+            "allow_skip": False,
+        }
+        self._log_game_event(
+            f"{self._player_label(player_id)} is choosing a player to banish a random monster from (Wandering Flame)."
         )
         return [0, 0, 0, 0]
 
@@ -2570,6 +2828,10 @@ class Game:
             )
         if low.startswith("flip_citizen"):
             return self._execute_flip_citizen_payout(raw, player_id)
+        if low == "banish_player_citizen":
+            return self._execute_banish_player_citizen_payout(player_id)
+        if low == "banish_random_player_monster":
+            return self._execute_banish_random_player_monster_payout(player_id)
         if low.startswith("banish_center"):
             return self._execute_banish_center_payout(raw, player_id)
         if low.startswith("banish_owned"):
@@ -3073,7 +3335,8 @@ class Game:
     #   - stage "pick_monster": present every accessible monster top + a Pass.
     #     `action_required.action = "choose_monster_slay"`.
     #   - stage "pay_for_slay": after a monster is picked, collect the slay
-    #     payment (gold not allowed, strength/magic per `_validate_monster_slay_payment`).
+    #     payment (gold only when an event added it; strength/magic per
+    #     `_validate_monster_slay_payment`).
     #     `action_required.action = "slay_monster_payment"`.
     #
     # `resume_kind` distinguishes follow-up resolution:
@@ -3103,6 +3366,7 @@ class Game:
                     "event_id": int(eid),
                     "name": getattr(top, "name", "?"),
                     "area": "",
+                    "gold_cost": int(getattr(top, "extra_gold_cost", 0) or 0),
                     "strength_cost": (
                         int(getattr(top, "strength_cost", 0) or 0)
                         + int(getattr(top, "extra_strength_cost", 0) or 0)
@@ -3120,8 +3384,15 @@ class Game:
                 "monster_id": mid,
                 "name": getattr(top, "name", "?"),
                 "area": getattr(top, "area", ""),
-                "strength_cost": int(getattr(top, "strength_cost", 0) or 0),
-                "magic_cost": int(getattr(top, "magic_cost", 0) or 0),
+                "gold_cost": int(getattr(top, "extra_gold_cost", 0) or 0),
+                "strength_cost": (
+                    int(getattr(top, "strength_cost", 0) or 0)
+                    + int(getattr(top, "extra_strength_cost", 0) or 0)
+                ),
+                "magic_cost": (
+                    int(getattr(top, "magic_cost", 0) or 0)
+                    + int(getattr(top, "extra_magic_cost", 0) or 0)
+                ),
             })
         return options
 
@@ -3167,6 +3438,7 @@ class Game:
             "resume_kind": prc.get("resume_kind", "domain_activation"),
             "monster_name": chosen.get("name", "?"),
             "area": chosen.get("area", ""),
+            "gold_cost": int(chosen.get("gold_cost", 0) or 0),
             "strength_cost": int(chosen.get("strength_cost", 0) or 0),
             "magic_cost": int(chosen.get("magic_cost", 0) or 0),
             "options": list(prc.get("options") or []),
@@ -3513,7 +3785,11 @@ class Game:
         for p in self.player_list:
             if p.player_id == active_pid:
                 continue
-            if take_or_pay == "take" and self._player_has_steal_immunity(p):
+            # Resting seat is "not in play" for negative effects, but pay_to_player
+            # is a positive effect for the target so it stays eligible.
+            if take_or_pay == "take" and not self._player_is_negative_effect_target(p):
+                continue
+            if take_or_pay == "take" and self._player_has_take_immunity(p):
                 continue
             tup = self._player_resource_tuple(p)
             if take_or_pay == "take" and tup[ri] < res_n:
@@ -4052,6 +4328,14 @@ class Game:
         options = []
         for p in self.player_list:
             if p.player_id == active_pid:
+                continue
+            if not self._player_is_negative_effect_target(p):
+                continue
+            # `take_owned` removes a card from the target's tableau, so it is a
+            # "take" effect under Castle of the Seven Suns' operator-icon
+            # reading ("you" includes your cards). Players with `immunity.take`
+            # are not eligible targets.
+            if self._player_has_take_immunity(p):
                 continue
             if not list(getattr(p, attr, []) or []):
                 continue
@@ -4960,6 +5244,131 @@ class Game:
                 self.pending_required_choice = None
                 return
 
+            if prc0.get("kind") == "banish_player_citizen" and str(current_required).strip() == "choose_player":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                if not act.startswith("choose_player "):
+                    return
+                opts = list(prc0.get("options") or [])
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if sel < 0 or sel >= len(opts):
+                    return
+                target_pid = opts[sel].get("player_id")
+                target = self._player_by_id(target_pid)
+                if not target:
+                    return
+                citizen_opts = []
+                for i, c in enumerate(list(getattr(target, "owned_citizens", []) or [])):
+                    citizen_opts.append({
+                        "token": "citizen.owned",
+                        "idx": i,
+                        "name": getattr(c, "name", "?"),
+                        "citizen_id": int(getattr(c, "citizen_id", -1)),
+                    })
+                if not citizen_opts:
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} could not banish a citizen from "
+                        f"{self._player_label(target_pid)} (no citizens); effect lost."
+                    )
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    self._resume_after_domain_activation_follow_up()
+                    return
+                self.pending_required_choice = {
+                    "kind": "banish_player_citizen",
+                    "player_id": player_id,
+                    "stage": "citizen",
+                    "target_player_id": target_pid,
+                    "options": citizen_opts,
+                }
+                self.action_required["id"] = player_id
+                self.action_required["action"] = "choose_owned_card"
+                self._log_game_event(
+                    f"{self._player_label(player_id)} chose {self._player_label(target_pid)} "
+                    f"and is now picking a citizen to banish (Sunder Bay)."
+                )
+                return
+
+            if prc0.get("kind") == "banish_player_citizen" and str(current_required).strip() == "choose_owned_card":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                if not act.startswith("choose_owned_card "):
+                    return
+                opts = list(prc0.get("options") or [])
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if sel < 0 or sel >= len(opts):
+                    return
+                target_pid = prc0.get("target_player_id")
+                target = self._player_by_id(target_pid)
+                if not target:
+                    return
+                src_idx = int(opts[sel].get("idx", -1))
+                owned = list(getattr(target, "owned_citizens", []) or [])
+                if src_idx < 0 or src_idx >= len(owned):
+                    return
+                citizen = owned[src_idx]
+                citizen_name = getattr(citizen, "name", "?")
+                target.owned_citizens.pop(src_idx)
+                self._citizen_set_flipped(citizen, False)
+                self.banish_pile.append(citizen)
+                self._log_game_event(
+                    f"{self._player_label(player_id)} banished citizen \"{citizen_name}\" "
+                    f"from {self._player_label(target_pid)}'s tableau (Sunder Bay)."
+                )
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self.pending_required_choice = None
+                self._resume_after_domain_activation_follow_up()
+                return
+
+            if prc0.get("kind") == "banish_random_player_monster" and str(current_required).strip() == "choose_player":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                if not act.startswith("choose_player "):
+                    return
+                opts = list(prc0.get("options") or [])
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if sel < 0 or sel >= len(opts):
+                    return
+                target_pid = opts[sel].get("player_id")
+                target = self._player_by_id(target_pid)
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self.pending_required_choice = None
+                if not target:
+                    self._resume_after_domain_activation_follow_up()
+                    return
+                monsters = list(getattr(target, "owned_monsters", []) or [])
+                if not monsters:
+                    self._log_game_event(
+                        f"{self._player_label(target_pid)} had no monsters to banish (Wandering Flame)."
+                    )
+                    self._resume_after_domain_activation_follow_up()
+                    return
+                idx = random.randrange(len(monsters))
+                banished = monsters.pop(idx)
+                target.owned_monsters = monsters
+                self.banish_pile.append(banished)
+                self._log_game_event(
+                    f"{self._player_label(player_id)} banished \"{getattr(banished, 'name', '?')}\" "
+                    f"from {self._player_label(target_pid)}'s tableau at random (Wandering Flame)."
+                )
+                self._resume_after_domain_activation_follow_up()
+                return
+
             if prc0.get("kind") == "domain_take_owned" and str(current_required).strip() == "choose_player":
                 if player_id != prc0.get("player_id"):
                     return
@@ -5115,6 +5524,40 @@ class Game:
                 self.action_required["id"] = self.game_id
                 self.pending_required_choice = None
                 self._resume_payout_continuation()
+                return
+
+            if prc0.get("kind") == "banish_roll_minion" and str(current_required).strip() == "choose_owned_card":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                if act == "skip":
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} declined to banish a Minion (The Northern Wall)."
+                    )
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    return
+                if not act.startswith("choose_owned_card "):
+                    return
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                opts = list(prc0.get("options") or [])
+                if sel < 0 or sel >= len(opts):
+                    return
+                stack_idx = int(opts[sel].get("idx", -1))
+                card_label = opts[sel].get("name", "?")
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self.pending_required_choice = None
+                banished = self._banish_center_monster(stack_idx)
+                if banished:
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} banished Minion \"{card_label}\" "
+                        f"from the center (The Northern Wall)."
+                    )
                 return
 
             if prc0.get("kind") == "domain_return_owned" and str(current_required).strip() == "choose_owned_card":
@@ -5353,13 +5796,26 @@ class Game:
             totals["worker"] += int(getattr(c, "worker_count", 0) or 0)
         return totals
 
-    def _player_has_steal_immunity(self, player):
-        """True if the player owns a domain granting immunity to steal/take effects."""
+    def _player_has_take_immunity(self, player):
+        """True if the player owns a domain granting immunity to "take" effects.
+
+        Castle of the Seven Suns (`immunity.take`) reads, with the operator
+        legend, "Opponents cannot take you" where "you" includes both the
+        player AND any of their cards or Resources. So this immunity covers
+        every "take" surface — citizen `steal`, domain `take_from_player`,
+        and domain `take_owned` — but does not cover other operators like
+        `banish` (Sunder Bay), `flip` (Cursed Cavern, monster targeted flip),
+        or global `all_lose` events.
+
+        The legacy passive string `immunity.steal` is also accepted so older
+        DB rows keep working until they're migrated to `immunity.take`.
+        """
         for d in list(getattr(player, "owned_domains", []) or []):
             if self._domain_recurring_passive_on_build_turn_cooldown(d):
                 continue
             raw = (getattr(d, "passive_effect", None) or "")
-            if str(raw).strip().lower() == "immunity.steal":
+            effect = str(raw).strip().lower()
+            if effect in ("immunity.take", "immunity.steal"):
                 return True
         return False
 

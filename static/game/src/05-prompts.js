@@ -339,6 +339,19 @@ function stagedRollKey(rolled1, rolled2) {
   return `${rolled1},${rolled2}`;
 }
 
+/** True when the active player owns Twilight Palace (no cooldown) and hasn't re-rolled yet. */
+function hasTwilightPalaceReroll(state) {
+  const req = state?.action_required || {};
+  if ((req.action || '').toString() !== 'finalize_roll') return false;
+  if (state?.pending_reroll_twilight_used) return false;
+  const reqId = (req.id || '').toString();
+  if (!idsMatch(reqId, PLAYER_ID)) return false;
+  const player = playerById(state, reqId);
+  if (!player) return false;
+  const tn = Number(state?.turn_number);
+  return hasActionEffectFlag(player, 'roll.reroll_one_die', tn);
+}
+
 /** Affordable roll.set_one_die choices for the player who must finalize (may be empty). */
 function finalizeRollModifierOptions(state) {
   const req = state?.action_required || {};
@@ -359,6 +372,7 @@ function maybeAutoFinalizeRoll(state) {
   if ((req.action || '').toString() !== 'finalize_roll') return;
   if (!idsMatch(req.id, PLAYER_ID)) return;
   if (finalizeRollModifierOptions(state).length > 0) return;
+  if (hasTwilightPalaceReroll(state)) return;
   const rolled1 = clampDie(state?.rolled_die_one ?? state?.die_one ?? 1);
   const rolled2 = clampDie(state?.rolled_die_two ?? state?.die_two ?? 1);
   sendFinalizeRollChoice(rolled1, rolled2);
@@ -776,8 +790,36 @@ function renderFinalizeRollPrompt(state) {
       ));
     });
 
+    if (hasTwilightPalaceReroll(state)) {
+      [1, 2].forEach(dieIdx => {
+        foot.appendChild(promptButton(
+          `Re-roll die ${dieIdx} (Twilight Palace)`,
+          () => openActionConfirmModal({
+            title: `Re-roll die ${dieIdx}?`,
+            message: `Re-roll die ${dieIdx} using Twilight Palace. You will get a new random value.`,
+            onConfirm: async () => {
+              if (!GAME_ID || !PLAYER_ID || finalizeRollInFlight) return;
+              finalizeRollInFlight = true;
+              try {
+                await postGameAction({
+                  player_id: PLAYER_ID,
+                  action_type: 'reroll_pending_die',
+                  die_one: dieIdx,
+                });
+              } finally {
+                finalizeRollInFlight = false;
+                resetFinalizeRollStaging();
+              }
+            },
+          }),
+        ));
+      });
+    }
+
     const hint = mk('prompt-modal-note');
-    hint.textContent = 'Choose a roll modifier (or keep). You can chain a second modifier on the other die.';
+    const hintParts = ['Choose a roll modifier (or keep). You can chain a second modifier on the other die.'];
+    if (hasTwilightPalaceReroll(state)) hintParts.push('Twilight Palace: re-roll one die (once per turn).');
+    hint.textContent = hintParts.join(' ');
     body.appendChild(hint);
   } else {
     // Stage 2: staged first modifier; offer Confirm (apply only the staged
@@ -1077,7 +1119,9 @@ function renderDomainChoosePlayer(state) {
   const prc = state?.pending_required_choice || null;
   const opts = Array.isArray(prc?.options) ? prc.options : [];
   const dn = (prc?.item?.domain_name || 'Domain').toString();
-  const explain = prc?.kind === 'domain_manipulate_player'
+  const explain = prc?.explain
+    ? prc.explain.toString()
+    : prc?.kind === 'domain_manipulate_player'
     ? domainManipulateExplain(prc)
     : 'Choose another player.';
 
@@ -1229,11 +1273,13 @@ function renderImmediateSlayPickMonster(state) {
   const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
   opts.forEach((o, idx) => {
     const nm = (o?.name || '?').toString();
+    const gc = Number(o?.gold_cost || 0);
     const sc = Number(o?.strength_cost || 0);
     const mc = Number(o?.magic_cost || 0);
     const area = (o?.area || '').toString();
     const tail = area ? ` · ${area}` : '';
-    const label = `${nm} (${sc} str + ${mc} mag${tail})`;
+    const goldPart = gc > 0 ? `${gc} gold + ` : '';
+    const label = `${nm} (${goldPart}${sc} str + ${mc} mag${tail})`;
     foot.appendChild(promptButton(label, () => confirmAndPostGameAction(
       {
         player_id: PLAYER_ID,
@@ -1242,7 +1288,7 @@ function renderImmediateSlayPickMonster(state) {
       },
       {
         title: 'Choose monster?',
-        message: `Pick "${nm}" — you'll set the strength/magic payment on the next step.`,
+        message: `Pick "${nm}" — you'll set the slay payment on the next step.`,
       },
     )));
   });
@@ -1346,9 +1392,9 @@ function renderEventSlayCostPrompt(state) {
   });
 }
 
-// "May slay a Monster" prompt — stage 2: collect strength/magic payment for the
-// monster picked in stage 1, then submit `slay_pay <g> <s> <m>` (gold is forced
-// to 0 because monsters can't be slain with gold).
+// "May slay a Monster" prompt — stage 2: collect payment for the monster picked
+// in stage 1, then submit `slay_pay <g> <s> <m>`. Gold is only allowed when an
+// event added an exact gold slay cost.
 function renderImmediateSlayPayment(state) {
   const req = state?.action_required || {};
   const reqId = (req?.id || '').toString();
@@ -1356,6 +1402,7 @@ function renderImmediateSlayPayment(state) {
   const prc = state?.pending_required_choice || null;
   const sourceLabel = (prc?.source_label || 'Effect').toString();
   const monsterName = (prc?.monster_name || '?').toString();
+  const goldCost = Number(prc?.gold_cost || 0);
   const strengthCost = Number(prc?.strength_cost || 0);
   const magicCost = Number(prc?.magic_cost || 0);
 
@@ -1375,6 +1422,7 @@ function renderImmediateSlayPayment(state) {
   }
 
   const me = playerById(state, PLAYER_ID) || {};
+  const gMax = Number(me?.gold_score || 0);
   const sMax = Number(me?.strength_score || 0);
   const mMax = Number(me?.magic_score || 0);
 
@@ -1402,7 +1450,8 @@ function renderImmediateSlayPayment(state) {
   }
 
   const sub = mk('prompt-modal-note');
-  sub.textContent = `Slay "${monsterName}" — strength cost ${strengthCost}, magic minimum ${magicCost}. Magic above the minimum can cover any strength shortfall (1g equivalent rule does not apply to monsters).`;
+  const goldText = goldCost > 0 ? `gold cost ${goldCost}, ` : '';
+  sub.textContent = `Slay "${monsterName}" — ${goldText}strength cost ${strengthCost}, magic minimum ${magicCost}. Magic above the minimum can cover any strength shortfall (gold costs are exact; 1g equivalent rule does not apply to monsters).`;
   body.appendChild(sub);
 
   if (reservation.total > 0) {
@@ -1417,7 +1466,8 @@ function renderImmediateSlayPayment(state) {
   appendPromptResourcesPanel(body, state);
 
   const payWrap = mk('market-pay-row');
-  payWrap.appendChild(mkPayField('', 'pay-g', 0, 0, 0, true, 'Monsters use strength and magic', 'gold'));
+  const goldDisabled = goldCost === 0;
+  payWrap.appendChild(mkPayField('', 'pay-g', goldCost, goldCost, goldCost, goldDisabled, goldCost ? `Gold cost: ${goldCost} (exact)` : 'No gold cost', 'gold', gMax));
   payWrap.appendChild(mkPayField('', 'pay-s', 0, sMax, suggestedStrength, false, 'Strength payment', 'strength'));
   payWrap.appendChild(mkPayField('', 'pay-m', magicCost, mMax, suggestedMagic, false, 'Magic payment (minimum required)', 'magic'));
 
@@ -1432,11 +1482,11 @@ function renderImmediateSlayPayment(state) {
       {
         player_id: PLAYER_ID,
         action_type: 'act_on_required_action',
-        action: `slay_pay 0 ${p.strength} ${p.magic}`,
+        action: `slay_pay ${p.gold} ${p.strength} ${p.magic}`,
       },
       {
         title: 'Slay monster?',
-        message: `Slay "${monsterName}" using ${p.strength} strength and ${p.magic} magic.`,
+        message: `Slay "${monsterName}" using ${p.gold} gold, ${p.strength} strength, and ${p.magic} magic.`,
       },
     );
   }));
@@ -1522,6 +1572,35 @@ function chooseOwnedCardCopy(prc, state) {
       confirmMessage: (nm) => `Permanently banish center-stack ${noun} "${nm}" to the banish pile.`,
       skipLabel: 'Skip (optional)',
       skipMessage: `Skip banishing a center-stack ${noun}.`,
+      tableauOwner: 'center',
+    };
+  }
+
+  if (kind === 'banish_player_citizen') {
+    const targetName = prc?.target_player_id
+      ? playerDisplayName(state, prc.target_player_id)
+      : 'that player';
+    return {
+      title: `Sunder Bay: banish a citizen from ${targetName}`,
+      explain: `Choose one of ${targetName}'s citizens to permanently banish (Sunder Bay).`,
+      waiting: (label) => `Waiting on ${label} to banish a citizen (Sunder Bay).`,
+      confirmTitle: 'Banish citizen?',
+      confirmMessage: (nm) => `Permanently banish "${nm}" from ${targetName}'s tableau.`,
+      skipLabel: 'Skip',
+      skipMessage: 'Skip banishing a citizen.',
+      tableauOwner: 'target',
+    };
+  }
+
+  if (kind === 'banish_roll_minion') {
+    return {
+      title: 'The Northern Wall: banish a Minion',
+      explain: 'You may banish one accessible Minion Monster from the center stacks (The Northern Wall). This is optional.',
+      waiting: (label) => `Waiting on ${label} to optionally banish a Minion (The Northern Wall).`,
+      confirmTitle: 'Banish Minion?',
+      confirmMessage: (nm) => `Permanently banish Minion "${nm}" from the center stacks.`,
+      skipLabel: 'Decline (keep Minion)',
+      skipMessage: 'Decline to banish a Minion this roll phase.',
       tableauOwner: 'center',
     };
   }
@@ -2061,7 +2140,7 @@ function renderPromptModal(state) {
   }
 
   if (reqAction === 'finalize_roll') {
-    if (finalizeRollModifierOptions(state).length === 0) {
+    if (finalizeRollModifierOptions(state).length === 0 && !hasTwilightPalaceReroll(state)) {
       removePromptOverlay();
       return;
     }

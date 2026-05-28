@@ -120,6 +120,7 @@ class GameObjectEncoder(JSONEncoder):
                 "phase": getattr(obj, "phase", "roll"),
                 "actions_remaining": getattr(obj, "actions_remaining", 0),
                 "active_player_id": obj.current_player_id() if hasattr(obj, "current_player_id") else None,
+                "resting_player_id": obj.resting_player_id() if hasattr(obj, "resting_player_id") else None,
                 "harvest_player_order": getattr(obj, "harvest_player_order", None),
                 "harvest_player_idx": getattr(obj, "harvest_player_idx", 0),
                 "harvest_consumed": getattr(obj, "harvest_consumed", {}) or {},
@@ -128,5 +129,6 @@ class GameObjectEncoder(JSONEncoder):
                 "game_log": list(getattr(obj, "game_log", None) or []),
                 "shutdown": shutdown,
                 "pending_event_slay_cost": getattr(obj, "pending_event_slay_cost", None),
+                "pending_reroll_twilight_used": bool(getattr(obj, "_pending_reroll_twilight_used", False)),
             }
         return super().default(obj)

@@ -43,6 +43,7 @@ This document covers how effect strings work across the three card tables (citiz
 | Cathedral of St Aquila | `action.end manipulate_resources mode=take_from_player take=g:1 optional=true` | End of action: optionally take 1g from a player |
 | King Tower | `action.end manipulate_resources mode=pay_to_player gain=v:1 pay=m:1 optional=true` | End of action: optionally pay 1m to a player for 1vp |
 | The Orb of Urdr | `action.end manipulate_resources mode=take_from_player take=m:1 optional=true` | End of action: optionally take 1m from a player |
+| Castle of the Seven Suns | `immunity.take` | Opponents cannot take resources or cards from the holder. Covers `steal`, `take_from_player`, and `take_owned`; does NOT cover `banish` / `flip` / event `all_lose`. The legacy string `immunity.steal` is also accepted for back-compat. |
 
 ### Monsters — `special_reward`
 

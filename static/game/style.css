@@ -414,6 +414,22 @@ html, body {
 .score-pill.victory  { color: var(--vp); }
 
 
+/* 5-player "resting" seat badge: the player immediately before the active
+   seat sits the harvest out for this turn (no on-turn / off-turn payouts). */
+.player-resting-badge {
+  margin-left: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #2a1f06;
+  background: #f0d27a;
+  border: 1px solid #b78b1f;
+  flex-shrink: 0;
+}
+
 /* Idle countdown on whoever’s turn it is (all seats); ring above is viewer-only */
 .tableau-inactive-timer {
   margin-left: auto;
