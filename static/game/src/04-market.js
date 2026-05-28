@@ -538,6 +538,8 @@ function evaluateMarketCardContext(card, state) {
   const emeraldActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.emeraldstronghold', tn) : false;
   const pratchettActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.pratchettsplateau', tn) : false;
   const shilinaActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.newshilinatower', tn) : false;
+  const defiantActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.defiantridge', tn) : false;
+  const fortskylerActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.fortskyler', tn) : false;
 
   const loc = state ? findMarketStack(card, state) : null;
   let blockReason = '';
@@ -564,12 +566,15 @@ function evaluateMarketCardContext(card, state) {
   let pratchettHint = '';
   let dupHint = '';
   let emeraldHint = '';
+  let defiantHint = '';
+  let fortskylerHint = '';
 
   if (actingPlayer && loc && top && !blockReason) {
     if (card.citizen_id != null) {
       baseCost = Number(top.gold_cost || 0);
       surcharge = emeraldActive ? 0 : ownedNameCount(actingPlayer, top.name);
       scaledCost = baseCost + surcharge;
+      if (defiantActive) scaledCost = Math.max(0, scaledCost - 1);
       if (shilinaActive) {
         const G = Number(actingPlayer?.gold_score || 0);
         const S = Number(actingPlayer?.strength_score || 0);
@@ -585,17 +590,20 @@ function evaluateMarketCardContext(card, state) {
       }
       dupHint = surcharge ? `base ${baseCost}g + ${surcharge} duplicate(s)` : '';
       emeraldHint = (!surcharge && emeraldActive) ? 'Emerald Stronghold: no duplicate surcharge.' : '';
+      defiantHint = defiantActive ? 'Defiant Ridge: −1 citizen cost.' : '';
     } else if (card.domain_id != null) {
       baseCost = Number(top.gold_cost || 0);
       effectiveGold = Math.max(0, baseCost - (pratchettActive ? 1 : 0));
       evalRes = canAffordCost(actingPlayer, { gold: effectiveGold, strength: 0, magicMin: 0 });
       pratchettHint = pratchettActive && baseCost !== effectiveGold ? `base ${baseCost}g − 1 (Pratchett's Plateau)` : '';
     } else if (card.monster_id != null) {
+      const rawStr = Number(top.strength_cost || 0) + Number(top.extra_strength_cost || 0);
       evalRes = canAffordMonsterCost(actingPlayer, {
-        gold:     Number(top.extra_gold_cost     || 0),
-        strength: Number(top.strength_cost       || 0) + Number(top.extra_strength_cost || 0),
-        magicMin: Number(top.magic_cost          || 0) + Number(top.extra_magic_cost    || 0),
+        gold:     Number(top.extra_gold_cost || 0),
+        strength: Math.max(0, rawStr - (fortskylerActive ? 1 : 0)),
+        magicMin: Number(top.magic_cost || 0) + Number(top.extra_magic_cost || 0),
       });
+      fortskylerHint = fortskylerActive && rawStr > 0 ? 'Fort Skyler: −1 monster strength cost.' : '';
     } else if (card.event_id != null) {
       evalRes = canAffordMonsterCost(actingPlayer, {
         gold:     Number(top.extra_gold_cost     || 0),
@@ -622,6 +630,8 @@ function evaluateMarketCardContext(card, state) {
     emeraldActive,
     pratchettActive,
     shilinaActive,
+    defiantActive,
+    fortskylerActive,
     loc,
     top,
     stackSize,
@@ -634,6 +644,8 @@ function evaluateMarketCardContext(card, state) {
     pratchettHint,
     dupHint,
     emeraldHint,
+    defiantHint,
+    fortskylerHint,
     canActThisCard,
   };
 }
@@ -699,6 +711,8 @@ function appendMarketActionUI(infoEl, card, ctx) {
   if (ctx.emeraldActive) fx.push('Emerald Stronghold: ignore citizen duplicate surcharge');
   if (ctx.pratchettActive) fx.push("Pratchett's Plateau: domains cost 1 less gold");
   if (ctx.shilinaActive) fx.push('New Shilina Tower: may pay Citizen cost with Strength');
+  if (ctx.defiantActive) fx.push('Defiant Ridge: citizens cost 1 less');
+  if (ctx.fortskylerActive) fx.push('Fort Skyler: monsters cost 1 less Strength');
   if (fx.length) {
     const fb = mk('market-effects-banner');
     fb.textContent = `Active: ${fx.join(' · ')}`;

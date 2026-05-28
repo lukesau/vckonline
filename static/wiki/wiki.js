@@ -410,13 +410,13 @@
     const id = card[TYPE_TO_ID_FIELD[type]];
     const imgUrl = `/card-image/${kind}/${id}`;
     const badges = [];
+    if (card.expansion) badges.push(h("span", { class: "wiki-badge expansion" }, card.expansion));
     if (card.is_banned) badges.push(h("span", { class: "wiki-badge banned" }, "Banned"));
     if (card.is_unimplemented) badges.push(h("span", {
       class: "wiki-badge unimplemented",
       title: "Has a flagged special effect with no text — not yet implemented",
     }, "Unimplemented"));
     if (card.is_extra) badges.push(h("span", { class: "wiki-badge extra", title: "Only included in 5-player games" }, "5+"));
-    if (card.expansion) badges.push(h("span", { class: "wiki-badge expansion" }, card.expansion));
 
     const img = h("img", {
       class: "wiki-card-image",
