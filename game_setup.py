@@ -76,6 +76,23 @@ def _filter_monster_areas_for_random(rows, n_players):
     return [r for arows in valid.values() for r in arows]
 
 
+def _sort_monster_areas_by_top_card_cost(chosen_areas, grouped_monsters):
+    """Order chosen monster areas by their stack top cost (strength, then magic)."""
+
+    def _area_top_cost(area):
+        stack = list(grouped_monsters.get(area) or [])
+        if not stack:
+            return (9999, 9999, str(area))
+        # Board stacks are dealt with top-at-end (`stack[-1]`), so use the same
+        # card here for left-to-right ordering.
+        top = stack[-1]
+        strength = int(getattr(top, "strength_cost", 0) or 0)
+        magic = int(getattr(top, "magic_cost", 0) or 0)
+        return (strength, magic, str(area))
+
+    return sorted(list(chosen_areas or []), key=_area_top_cost)
+
+
 # 10 board citizen stacks, one per dice trigger: 1, 2, 3, 4, 5, 6, 7, 8,
 # 9-10 (roll_match1=9), 11-12 (roll_match1=11). Every preset's citizen
 # pool must cover all of these or the engine will try to access an empty
@@ -563,6 +580,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
                 raise ValueError(f"Draft-selected areas not in available monster pool: {missing}")
         else:
             chosen_areas = random.sample(areas, 5)
+        chosen_areas = _sort_monster_areas_by_top_card_cost(chosen_areas, grouped_monsters)
         monster_stack_areas = list(chosen_areas)
         for i, area in enumerate(chosen_areas):
             monsters = grouped_monsters[area]
