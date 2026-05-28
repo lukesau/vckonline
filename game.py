@@ -1848,6 +1848,7 @@ class Game:
             on_turn = pid == self.current_player_id()
             slots = self._build_harvest_slots(player, consumed_list, on_turn)
             if not slots:
+                self._apply_harvest_on_any_magic_gain_passives(player)
                 self.harvest_player_idx += 1
                 continue
             slot = self._harvest_slots_sorted_for_simulation(slots)[0]
@@ -4221,6 +4222,83 @@ class Game:
             f"({unit_name} {pool_label} x{n}): scores {before} -> {after}"
         )
 
+    def _apply_harvest_on_any_magic_gain_passives(self, player):
+        """Fire `harvest.on_any_magic_gain <r> <n>` passives for the given player.
+
+        Called at the end of the player's harvest processing (when all their
+        slots are exhausted). If the player gained any magic this harvest
+        phase (harvest_delta["magic"] > 0), each matching domain grants
+        the specified bonus resource once.
+
+        Example (Opera House): `harvest.on_any_magic_gain m 1`
+        """
+        if not player:
+            return
+        hd = getattr(player, "harvest_delta", None) or {}
+        if int(hd.get("magic", 0)) <= 0:
+            return
+        for d in list(getattr(player, "owned_domains", []) or []):
+            if self._domain_recurring_passive_on_build_turn_cooldown(d):
+                continue
+            raw = (getattr(d, "passive_effect", None) or "").strip()
+            if not raw:
+                continue
+            parts = raw.split()
+            if len(parts) != 3 or parts[0].lower() != "harvest.on_any_magic_gain":
+                continue
+            gain_r = parts[1].lower()
+            try:
+                gain_n = int(parts[2])
+            except (ValueError, TypeError):
+                continue
+            if gain_r not in ("g", "s", "m", "v") or gain_n <= 0:
+                continue
+            before = self._player_scores_line(player)
+            self._bank_gain_for_active(player, gain_r, gain_n)
+            after = self._player_scores_line(player)
+            if before != after:
+                self._log_game_event(
+                    f"{self._player_label(player.player_id)} \"{getattr(d, 'name', 'Domain')}\" "
+                    f"harvest magic bonus; scores {before} -> {after}"
+                )
+
+    def _apply_all_players_on_any_slay_passives(self):
+        """Fire `action.on_any_slay <r> <n>` passives for ALL players.
+
+        Called from slay_monster after a successful slay. Fires only during
+        the action phase (not harvest-phase slays). Every player who owns a
+        domain with this passive receives the stated resource gain.
+
+        Example (Raven's Outpost): `action.on_any_slay s 1`
+        """
+        if getattr(self, "phase", None) != "action":
+            return
+        for player in list(getattr(self, "player_list", []) or []):
+            for d in list(getattr(player, "owned_domains", []) or []):
+                if self._domain_recurring_passive_on_build_turn_cooldown(d):
+                    continue
+                raw = (getattr(d, "passive_effect", None) or "").strip()
+                if not raw:
+                    continue
+                parts = raw.split()
+                if len(parts) != 3 or parts[0].lower() != "action.on_any_slay":
+                    continue
+                gain_r = parts[1].lower()
+                try:
+                    gain_n = int(parts[2])
+                except (ValueError, TypeError):
+                    continue
+                if gain_r not in ("g", "s", "m", "v") or gain_n <= 0:
+                    continue
+                before = self._player_scores_line(player)
+                self._bank_gain_for_active(player, gain_r, gain_n)
+                after = self._player_scores_line(player)
+                if before != after:
+                    self._log_game_event(
+                        f"{self._player_label(player.player_id)} \"{getattr(d, 'name', 'Domain')}\" "
+                        f"reactive slay bonus; scores {before} -> {after}"
+                    )
+
     def _prompt_domain_monster_strength_boost(self, player, domain, effect):
         parts = effect.split()
         delta = 3
@@ -6357,6 +6435,7 @@ class Game:
                 f"{self._player_label(player_id)} slew \"{monster_to_add.name}\" ({pay}); scores {before} -> {after}"
             )
             self._apply_action_event_gain_passives(player, "slay")
+            self._apply_all_players_on_any_slay_passives()
             return
 
         raise ValueError("Monster not available to slay.")
