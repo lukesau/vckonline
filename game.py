@@ -2306,24 +2306,42 @@ class Game:
             return [-9999, 0, 0, 0]
         kind = parts[1].lower()
         optional = any(p.lower() == "optional" for p in parts[2:])
-        if kind not in ("citizen",):
+        if kind not in ("citizen", "monster"):
             return [-9999, 0, 0, 0]
         options = []
-        for i, stack in enumerate(list(getattr(self, "citizen_grid", []) or [])):
-            if not stack:
-                continue
-            top = stack[-1]
-            if not getattr(top, "is_accessible", False):
-                continue
-            if getattr(top, "citizen_id", None) is None:
-                continue  # Event/Exhausted placeholder — not a valid citizen target
-            options.append({
-                "token": "citizen.center",
-                "idx": i,
-                "name": getattr(top, "name", "?"),
-                "citizen_id": int(getattr(top, "citizen_id", -1)),
-                "gold_cost": int(getattr(top, "gold_cost", 0) or 0),
-            })
+        if kind == "citizen":
+            for i, stack in enumerate(list(getattr(self, "citizen_grid", []) or [])):
+                if not stack:
+                    continue
+                top = stack[-1]
+                if not getattr(top, "is_accessible", False):
+                    continue
+                if getattr(top, "citizen_id", None) is None:
+                    continue  # Event/Exhausted placeholder — not a valid citizen target
+                options.append({
+                    "token": "citizen.center",
+                    "idx": i,
+                    "name": getattr(top, "name", "?"),
+                    "citizen_id": int(getattr(top, "citizen_id", -1)),
+                    "gold_cost": int(getattr(top, "gold_cost", 0) or 0),
+                })
+        else:  # monster
+            for i, stack in enumerate(list(getattr(self, "monster_grid", []) or [])):
+                if not stack:
+                    continue
+                top = stack[-1]
+                if not getattr(top, "is_accessible", False):
+                    continue
+                if getattr(top, "monster_id", None) is None:
+                    continue  # Event/Exhausted placeholder — not a valid monster target
+                options.append({
+                    "token": "monster.center",
+                    "idx": i,
+                    "name": getattr(top, "name", "?"),
+                    "monster_id": int(getattr(top, "monster_id", -1)),
+                    "strength_cost": int(getattr(top, "strength_cost", 0) or 0),
+                    "magic_cost": int(getattr(top, "magic_cost", 0) or 0),
+                })
         if not options:
             self._log_game_event(
                 f"{self._player_label(player_id)} had no center-stack {kind} to banish; effect skipped."
@@ -5542,6 +5560,8 @@ class Game:
                 card_label = opts[sel].get("name", "?")
                 if card_kind == "citizen":
                     banished = self._banish_center_citizen(stack_idx)
+                elif card_kind == "monster":
+                    banished = self._banish_center_monster(stack_idx)
                 else:
                     banished = None
                 if not banished:
@@ -6136,6 +6156,7 @@ class Game:
                 domain_stack.append(exhausted)
                 self.exhausted_count = int(self.exhausted_count) + 1
             self._apply_domain_activation_effect(player, bought)
+            self._apply_action_event_gain_passives(player, "build")
             after = self._player_scores_line(player)
             pay = self._format_resource_payment(gp, sp, mp)
             self._log_game_event(

@@ -74,7 +74,7 @@ def _load_citizens(cur):
 
 
 def _load_monsters(cur):
-    rows = _fetch_all(cur, "SELECT * FROM monsters ORDER BY area ASC, monster_order ASC, id_monsters ASC")
+    rows = _fetch_all(cur, "SELECT * FROM monsters ORDER BY id_monsters")
     out = []
     for row in rows:
         m = Monster(
