@@ -378,6 +378,7 @@ class Game:
                 or aa.startswith("choose_monster")
                 or aa.startswith("choose_owned")
                 or aa == "domain_self_convert"
+                or aa == "domain_choose_resource"
                 or aa == "event_slay_cost_choice"
                 or aa == "choose_domain_to_build"
             ):
@@ -594,6 +595,7 @@ class Game:
                 "harvest_wild_cost_exchange",
                 "choose_domain_reward",
                 "domain_self_convert",
+                "domain_choose_resource",
                 "choose_monster_slay",
                 "slay_monster_payment",
                 "choose_domain_to_build",
@@ -675,6 +677,8 @@ class Game:
         self.action_required["action"] = "finalize_roll"
         # Reset per-turn Twilight Palace re-roll token.
         self._pending_reroll_twilight_used = False
+        # Reset per-turn Blood Moon Palace re-roll token.
+        self._pending_reroll_blood_moon_used = False
 
         # Default final dice are unset until finalized.
         # (We intentionally do not touch self.die_one/die_two here.)
@@ -785,6 +789,47 @@ class Game:
         self._log_game_event(
             f"Turn {int(self.turn_number)} ({who}): Twilight Palace re-rolled die {die_index}: "
             f"{old_val} → {new_val}."
+        )
+
+    def reroll_both_dice(self, player_id):
+        """Re-roll both dice during the roll_pending phase (Blood Moon Palace passive).
+
+        Costs 2 Magic. Generates new random values for both dice, updates
+        pending_roll, and marks the Blood Moon Palace token as consumed for
+        this roll phase.
+        """
+        if self.phase != "roll_pending":
+            raise ValueError("Not in roll_pending phase.")
+        if player_id != self.current_player_id():
+            raise ValueError("Only the active player may re-roll the dice.")
+        player = self._player_by_id(player_id)
+        if not player:
+            raise ValueError("Player not found.")
+        if not self._player_has_action_effect_flag(player, "roll.reroll_both_dice_pay_magic_2"):
+            raise ValueError("Player does not own Blood Moon Palace (or it is on build-turn cooldown).")
+        if getattr(self, "_pending_reroll_blood_moon_used", False):
+            raise ValueError("Blood Moon Palace re-roll already used this roll phase.")
+        if int(getattr(player, "magic_score", 0) or 0) < 2:
+            raise ValueError("Not enough Magic to use Blood Moon Palace (costs 2).")
+        player.magic_score = int(player.magic_score) - 2
+        rolled = self.pending_roll or {}
+        old_one = int(rolled.get("rolled_die_one", 1) or 1)
+        old_two = int(rolled.get("rolled_die_two", 1) or 1)
+        new_one = random.randint(1, 6)
+        new_two = random.randint(1, 6)
+        rolled["rolled_die_one"] = new_one
+        rolled["rolled_die_two"] = new_two
+        rolled["rolled_die_sum"] = new_one + new_two
+        self.rolled_die_one = new_one
+        self.rolled_die_two = new_two
+        self.rolled_die_sum = new_one + new_two
+        self.pending_roll = rolled
+        self._pending_reroll_blood_moon_used = True
+        self.tick_id += 1
+        who = self._player_label(player_id)
+        self._log_game_event(
+            f"Turn {int(self.turn_number)} ({who}): Blood Moon Palace re-rolled both dice: "
+            f"({old_one},{old_two}) → ({new_one},{new_two}), sum {new_one + new_two} (cost 2 Magic)."
         )
 
     def _owned_citizen_count_for_role_selector(self, player, role_selector):
@@ -1654,6 +1699,8 @@ class Game:
         if str(aa).startswith("choose_owned"):
             return True
         if str(aa) == "domain_self_convert":
+            return True
+        if str(aa) == "domain_choose_resource":
             return True
         return False
 
@@ -2569,6 +2616,56 @@ class Game:
         )
         return [0, 0, 0, 0]
 
+    def _execute_steal_citizen_payout(self, command, player_id):
+        """Hobb's End: steal a citizen (cost <= max_cost) from an opponent's tableau.
+
+        Grammar: steal_citizen gold_cost<=N
+        The stolen citizen is moved to the acting player's tableau (not banished).
+        """
+        parts = (command or "").strip().split()
+        max_cost = 2
+        for p in parts[1:]:
+            if p.lower().startswith("gold_cost<="):
+                try:
+                    max_cost = int(p.split("<=", 1)[1])
+                except (ValueError, IndexError):
+                    pass
+        options = []
+        for p in self.player_list:
+            if p.player_id == player_id:
+                continue
+            if not self._player_is_negative_effect_target(p):
+                continue
+            owned = list(getattr(p, "owned_citizens", []) or [])
+            eligible = [c for c in owned if int(getattr(c, "gold_cost", 0) or 0) <= max_cost]
+            if not eligible:
+                continue
+            options.append({
+                "token": "player",
+                "player_id": p.player_id,
+                "name": getattr(p, "name", "?"),
+            })
+        if not options:
+            self._log_game_event(
+                f"{self._player_label(player_id)} could not use \"Hobb's End\" "
+                f"(no opponents have citizens costing {max_cost}g or less)."
+            )
+            return [0, 0, 0, 0]
+        self.action_required["id"] = player_id
+        self.action_required["action"] = "choose_player"
+        self.pending_required_choice = {
+            "kind": "steal_citizen",
+            "player_id": player_id,
+            "max_cost": max_cost,
+            "item": {"domain_name": "Hobb's End"},
+            "explain": f"Choose a player to steal a citizen (cost ≤{max_cost}g) from (Hobb's End).",
+            "options": options,
+        }
+        self._log_game_event(
+            f"{self._player_label(player_id)} is choosing a player to steal a citizen from (Hobb's End)."
+        )
+        return [0, 0, 0, 0]
+
     def _execute_banish_player_citizen_payout(self, player_id):
         """Sunder Bay: choose a player, then banish one of their citizens permanently."""
         options = []
@@ -2846,8 +2943,16 @@ class Game:
             )
         if low.startswith("flip_citizen"):
             return self._execute_flip_citizen_payout(raw, player_id)
+        if low == "flip_opponent_citizen":
+            result = self._execute_flip_citizen_payout("flip_citizen targeted", player_id)
+            prc = getattr(self, "pending_required_choice", None)
+            if prc and prc.get("kind") == "monster_flip_citizen_targeted":
+                prc["explain"] = "Choose a player to flip one of their citizens face-down (Laborium)."
+            return result
         if low == "banish_player_citizen":
             return self._execute_banish_player_citizen_payout(player_id)
+        if low.startswith("steal_citizen"):
+            return self._execute_steal_citizen_payout(raw, player_id)
         if low == "banish_random_player_monster":
             return self._execute_banish_random_player_monster_payout(player_id)
         if low.startswith("banish_center"):
@@ -3802,12 +3907,54 @@ class Game:
             prc["context"] = "action_start"
             prc["domain_name"] = getattr(domain, "name", "Domain")
 
+    def _parse_action_end_choose(self, passive_text):
+        """Parse `action.end choose <r1> <n1> <r2> <n2>` passive into a choose_resource queue item.
+
+        Returns a dict with mode="choose_resource" and choices=[(r, n), ...], or None.
+        """
+        s = (passive_text or "").strip()
+        low = s.lower()
+        if not low.startswith("action.end"):
+            return None
+        rest = s[len("action.end"):].strip()
+        if not rest.lower().startswith("choose"):
+            return None
+        tokens = rest.split()
+        # tokens: ["choose", r1, n1, r2, n2, ...]
+        if len(tokens) < 5 or tokens[0].lower() != "choose":
+            return None
+        choices = []
+        i = 1
+        while i + 1 < len(tokens):
+            res = tokens[i].strip().lower()
+            try:
+                amt = int(tokens[i + 1])
+            except (ValueError, TypeError):
+                return None
+            if res not in ("g", "s", "m", "v") or amt <= 0:
+                return None
+            choices.append((res, amt))
+            i += 2
+        if len(choices) < 2:
+            return None
+        return {"mode": "choose_resource", "choices": choices}
+
     def _collect_action_end_manipulate_queue(self, active_player):
         out = []
         for d in list(getattr(active_player, "owned_domains", []) or []):
             if self._domain_recurring_passive_on_build_turn_cooldown(d):
                 continue
-            kv = self._parse_manipulate_action_end(getattr(d, "passive_effect", None) or "")
+            raw = (getattr(d, "passive_effect", None) or "").strip()
+            # Try choose_resource first (action.end choose ...)
+            choose_kv = self._parse_action_end_choose(raw)
+            if choose_kv:
+                out.append({
+                    "domain_name": getattr(d, "name", "Domain"),
+                    "mode": "choose_resource",
+                    "choices": choose_kv["choices"],
+                })
+                continue
+            kv = self._parse_manipulate_action_end(raw)
             if not kv:
                 continue
             mode = (kv.get("mode") or "").strip().lower()
@@ -3875,6 +4022,22 @@ class Game:
                 self.pending_action_end_queue = []
                 return False
             mode = item["mode"]
+            # choose_resource items (Lost Gardens): prompt player to pick one of several gains.
+            if mode == "choose_resource":
+                choices = list(item.get("choices") or [])
+                if not choices:
+                    self.pending_action_end_queue.pop(0)
+                    continue
+                self.action_required["id"] = active_pid
+                self.action_required["action"] = "domain_choose_resource"
+                self.pending_required_choice = {
+                    "kind": "domain_choose_resource",
+                    "player_id": active_pid,
+                    "choices": choices,
+                    "domain_name": item.get("domain_name", "Domain"),
+                    "context": "action_end_queue",
+                }
+                return True
             kv = item["kv"]
             # self_convert items (Rime Temple, Switch Wind Fortress): prompt player to
             # optionally trade one resource for another. Skip silently if unaffordable.
@@ -5294,6 +5457,7 @@ class Game:
                 self.action_required["action"] = ""
                 self.action_required["id"] = self.game_id
                 self.pending_required_choice = None
+                self._resume_payout_continuation()
                 return
 
             if prc0.get("kind") == "banish_player_citizen" and str(current_required).strip() == "choose_player":
@@ -5380,6 +5544,131 @@ class Game:
                 self.action_required["id"] = self.game_id
                 self.pending_required_choice = None
                 self._resume_after_domain_activation_follow_up()
+                return
+
+            if prc0.get("kind") == "steal_citizen" and str(current_required).strip() == "choose_player":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                if not act.startswith("choose_player "):
+                    return
+                opts = list(prc0.get("options") or [])
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if sel < 0 or sel >= len(opts):
+                    return
+                target_pid = opts[sel].get("player_id")
+                target = self._player_by_id(target_pid)
+                if not target:
+                    return
+                max_cost = int(prc0.get("max_cost", 2))
+                citizen_opts = []
+                for i, c in enumerate(list(getattr(target, "owned_citizens", []) or [])):
+                    if int(getattr(c, "gold_cost", 0) or 0) > max_cost:
+                        continue
+                    citizen_opts.append({
+                        "token": "citizen.owned",
+                        "idx": i,
+                        "name": getattr(c, "name", "?"),
+                        "citizen_id": int(getattr(c, "citizen_id", -1)),
+                        "gold_cost": int(getattr(c, "gold_cost", 0) or 0),
+                        "is_flipped": bool(getattr(c, "is_flipped", False)),
+                    })
+                if not citizen_opts:
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} could not steal from "
+                        f"{self._player_label(target_pid)} (no eligible citizens); effect lost."
+                    )
+                    self.action_required["action"] = ""
+                    self.action_required["id"] = self.game_id
+                    self.pending_required_choice = None
+                    self._resume_after_domain_activation_follow_up()
+                    return
+                self.pending_required_choice = {
+                    "kind": "steal_citizen",
+                    "player_id": player_id,
+                    "stage": "citizen",
+                    "target_player_id": target_pid,
+                    "max_cost": max_cost,
+                    "options": citizen_opts,
+                }
+                self.action_required["id"] = player_id
+                self.action_required["action"] = "choose_owned_card"
+                self._log_game_event(
+                    f"{self._player_label(player_id)} chose {self._player_label(target_pid)} "
+                    f"and is now picking a citizen to steal (Hobb's End)."
+                )
+                return
+
+            if prc0.get("kind") == "steal_citizen" and str(current_required).strip() == "choose_owned_card":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                if not act.startswith("choose_owned_card "):
+                    return
+                opts = list(prc0.get("options") or [])
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if sel < 0 or sel >= len(opts):
+                    return
+                target_pid = prc0.get("target_player_id")
+                target = self._player_by_id(target_pid)
+                actor = self._player_by_id(player_id)
+                if not target or not actor:
+                    return
+                src_idx = int(opts[sel].get("idx", -1))
+                owned = list(getattr(target, "owned_citizens", []) or [])
+                if src_idx < 0 or src_idx >= len(owned):
+                    return
+                citizen = owned[src_idx]
+                citizen_name = getattr(citizen, "name", "?")
+                target.owned_citizens.pop(src_idx)
+                self._citizen_set_flipped(citizen, False)
+                actor.owned_citizens.append(citizen)
+                self._log_game_event(
+                    f"{self._player_label(player_id)} stole citizen \"{citizen_name}\" "
+                    f"from {self._player_label(target_pid)}'s tableau (Hobb's End)."
+                )
+                self.action_required["action"] = ""
+                self.action_required["id"] = self.game_id
+                self.pending_required_choice = None
+                self._resume_after_domain_activation_follow_up()
+                return
+
+            if prc0.get("kind") == "domain_choose_resource" and str(current_required).strip() == "domain_choose_resource":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                choices = list(prc0.get("choices") or [])
+                if not act.startswith("choose "):
+                    return
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if sel < 0 or sel >= len(choices):
+                    return
+                r, amt = choices[sel]
+                player_obj = self._player_by_id(player_id)
+                if player_obj:
+                    before = self._player_scores_line(player_obj)
+                    self._bank_gain_for_active(player_obj, r, int(amt))
+                    after = self._player_scores_line(player_obj)
+                    self._log_game_event(
+                        f"{self._player_label(player_id)} chose {r}+{amt} from \"{prc0.get('domain_name', 'Domain')}\"; "
+                        f"scores {before} -> {after}"
+                    )
+                self.pending_required_choice = None
+                self.action_required["id"] = self.game_id
+                self.action_required["action"] = ""
+                if self.pending_action_end_queue:
+                    self.pending_action_end_queue.pop(0)
+                if not self._drain_action_end_manipulate_queue():
+                    pass  # advance_tick handles turn end
                 return
 
             if prc0.get("kind") == "banish_random_player_monster" and str(current_required).strip() == "choose_player":

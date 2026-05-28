@@ -1292,6 +1292,12 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
 
+        elif request.action_type == "reroll_both_dice":
+            try:
+                game.reroll_both_dice(request.player_id)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+
         elif request.action_type == "roll_phase":
             raise HTTPException(status_code=400, detail="roll_phase is automatic")
         

@@ -130,5 +130,6 @@ class GameObjectEncoder(JSONEncoder):
                 "shutdown": shutdown,
                 "pending_event_slay_cost": getattr(obj, "pending_event_slay_cost", None),
                 "pending_reroll_twilight_used": bool(getattr(obj, "_pending_reroll_twilight_used", False)),
+                "pending_reroll_blood_moon_used": bool(getattr(obj, "_pending_reroll_blood_moon_used", False)),
             }
         return super().default(obj)

@@ -352,6 +352,19 @@ function hasTwilightPalaceReroll(state) {
   return hasActionEffectFlag(player, 'roll.reroll_one_die', tn);
 }
 
+function hasBloodMoonReroll(state) {
+  const req = state?.action_required || {};
+  if ((req.action || '').toString() !== 'finalize_roll') return false;
+  if (state?.pending_reroll_blood_moon_used) return false;
+  const reqId = (req.id || '').toString();
+  if (!idsMatch(reqId, PLAYER_ID)) return false;
+  const player = playerById(state, reqId);
+  if (!player) return false;
+  if (Number(player?.magic_score || 0) < 2) return false;
+  const tn = Number(state?.turn_number);
+  return hasActionEffectFlag(player, 'roll.reroll_both_dice_pay_magic_2', tn);
+}
+
 /** Affordable roll.set_one_die choices for the player who must finalize (may be empty). */
 function finalizeRollModifierOptions(state) {
   const req = state?.action_required || {};
@@ -373,6 +386,7 @@ function maybeAutoFinalizeRoll(state) {
   if (!idsMatch(req.id, PLAYER_ID)) return;
   if (finalizeRollModifierOptions(state).length > 0) return;
   if (hasTwilightPalaceReroll(state)) return;
+  if (hasBloodMoonReroll(state)) return;
   const rolled1 = clampDie(state?.rolled_die_one ?? state?.die_one ?? 1);
   const rolled2 = clampDie(state?.rolled_die_two ?? state?.die_two ?? 1);
   sendFinalizeRollChoice(rolled1, rolled2);
@@ -816,9 +830,33 @@ function renderFinalizeRollPrompt(state) {
       });
     }
 
+    if (hasBloodMoonReroll(state)) {
+      foot.appendChild(promptButton(
+        'Re-roll both dice (Blood Moon Palace, costs 2 Magic)',
+        () => openActionConfirmModal({
+          title: 'Re-roll both dice?',
+          message: 'Re-roll both dice using Blood Moon Palace. Costs 2 Magic. You will get two new random values.',
+          onConfirm: async () => {
+            if (!GAME_ID || !PLAYER_ID || finalizeRollInFlight) return;
+            finalizeRollInFlight = true;
+            try {
+              await postGameAction({
+                player_id: PLAYER_ID,
+                action_type: 'reroll_both_dice',
+              });
+            } finally {
+              finalizeRollInFlight = false;
+              resetFinalizeRollStaging();
+            }
+          },
+        }),
+      ));
+    }
+
     const hint = mk('prompt-modal-note');
     const hintParts = ['Choose a roll modifier (or keep). You can chain a second modifier on the other die.'];
     if (hasTwilightPalaceReroll(state)) hintParts.push('Twilight Palace: re-roll one die (once per turn).');
+    if (hasBloodMoonReroll(state)) hintParts.push('Blood Moon Palace: re-roll both dice (costs 2 Magic, once per turn).');
     hint.textContent = hintParts.join(' ');
     body.appendChild(hint);
   } else {
@@ -947,6 +985,53 @@ function renderDomainSelfConvertPrompt(state) {
 
   openPromptOverlayShell({
     title: `${dn}: optional trade`,
+    dismissible: false,
+    bodyEl: body,
+    footerEl: foot,
+  });
+}
+
+function renderDomainChooseResourcePrompt(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const dn = (prc?.domain_name || 'Domain').toString();
+  const choices = Array.isArray(prc?.choices) ? prc.choices : [];
+  const labels = { g: 'Gold', s: 'Strength', m: 'Magic', v: 'Victory Point' };
+
+  const body = mk('prompt-modal-body');
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — ${dn}: choose a resource.`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({
+      title: `${dn}: choose`,
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const sub = mk('prompt-modal-note');
+  sub.textContent = `${dn}: choose one resource to gain.`;
+  body.appendChild(sub);
+  appendPromptResourcesPanel(body, state);
+
+  const buttons = choices.map(([r, n], idx) => {
+    const label = `+${n} ${labels[r] || r.toUpperCase()}`;
+    return promptButton(label, () => postGameAction({
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: `choose ${idx + 1}`,
+    }));
+  });
+
+  const foot = promptActionsRow(buttons);
+  openPromptOverlayShell({
+    title: `${dn}: choose resource`,
     dismissible: false,
     bodyEl: body,
     footerEl: foot,
@@ -1592,6 +1677,23 @@ function chooseOwnedCardCopy(prc, state) {
     };
   }
 
+  if (kind === 'steal_citizen') {
+    const targetName = prc?.target_player_id
+      ? playerDisplayName(state, prc.target_player_id)
+      : 'that player';
+    const maxCost = Number(prc?.max_cost ?? 2);
+    return {
+      title: `Hobb's End: steal a citizen from ${targetName}`,
+      explain: `Choose one of ${targetName}'s citizens (cost ≤${maxCost}g) to take for yourself (Hobb's End).`,
+      waiting: (label) => `Waiting on ${label} to steal a citizen (Hobb's End).`,
+      confirmTitle: 'Steal citizen?',
+      confirmMessage: (nm) => `Take "${nm}" from ${targetName}'s tableau and add it to yours.`,
+      skipLabel: 'Skip',
+      skipMessage: "Skip Hobb's End.",
+      tableauOwner: 'target',
+    };
+  }
+
   if (kind === 'banish_roll_minion') {
     return {
       title: 'The Northern Wall: banish a Minion',
@@ -2140,7 +2242,7 @@ function renderPromptModal(state) {
   }
 
   if (reqAction === 'finalize_roll') {
-    if (finalizeRollModifierOptions(state).length === 0 && !hasTwilightPalaceReroll(state)) {
+    if (finalizeRollModifierOptions(state).length === 0 && !hasTwilightPalaceReroll(state) && !hasBloodMoonReroll(state)) {
       removePromptOverlay();
       return;
     }
@@ -2150,6 +2252,11 @@ function renderPromptModal(state) {
 
   if (reqAction === 'domain_self_convert') {
     renderDomainSelfConvertPrompt(state);
+    return;
+  }
+
+  if (reqAction === 'domain_choose_resource') {
+    renderDomainChooseResourcePrompt(state);
     return;
   }
 
