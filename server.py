@@ -1404,8 +1404,13 @@ async def startup_event():
 
 # ── Card image lookup ────────────────────────────────────────────────────────
 @app.get("/card-image/{card_type}/{card_id}")
-async def card_image(card_type: str, card_id: int):
-    """Return the card image matched by type + numeric ID prefix."""
+async def card_image(card_type: str, card_id: int, variant: Optional[str] = None):
+    """Return the card image matched by type + numeric ID prefix.
+
+    Pass ``?variant=alt`` to return the alternate artwork file
+    (``alt_<card_type>_<id>_*``) instead of the canonical one. Falls back to
+    a 404 if no alternate exists for that id.
+    """
     if card_type == "exhausted":
         if _EXHAUSTED_CARD_JPEG.is_file():
             return FileResponse(str(_EXHAUSTED_CARD_JPEG), media_type="image/jpeg")
@@ -1413,7 +1418,10 @@ async def card_image(card_type: str, card_id: int):
     dir_path = _CARD_IMAGE_DIRS.get(card_type)
     if not dir_path or not dir_path.exists():
         raise HTTPException(status_code=404, detail="Unknown card type")
-    prefix = f"{card_type}_{card_id:02d}_"
+    if variant == "alt":
+        prefix = f"alt_{card_type}_{card_id:02d}_"
+    else:
+        prefix = f"{card_type}_{card_id:02d}_"
     for f in sorted(dir_path.iterdir()):
         if f.name.startswith(prefix) and f.suffix.lower() in _IMAGE_EXTS:
             return FileResponse(str(f), media_type="image/jpeg")

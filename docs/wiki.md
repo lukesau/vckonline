@@ -24,12 +24,13 @@ It does **not** apply `banned_cards.json` filtering, expansion gating, or any pr
 ## Endpoints
 
 - `GET /wiki` — serves `static/wiki/index.html`.
-- `GET /api/wiki/cards` — returns `{ counts: {citizens, monsters, domains, dukes, starters}, cards: {...} }`. Response shape per card matches the corresponding `cards.py` class's `to_dict()` output, with two additions:
+- `GET /api/wiki/cards` — returns `{ counts: {citizens, monsters, domains, dukes, starters}, cards: {...} }`. Response shape per card matches the corresponding `cards.py` class's `to_dict()` output, with three additions:
   - `domains` and `dukes` entries include `is_banned` (looked up against `banned_cards.json`).
   - `citizens`, `monsters`, and `domains` entries include `is_unimplemented` — true when the row has a special/effect flag set but the corresponding text column is `NULL` or whitespace-only. See [Unimplemented detection](#unimplemented-detection) below.
+  - Every entry includes `has_alt_image` — true when an `alt_<kind>_<id>_*.{jpg,jpeg,png,webp}` file exists in the matching `images/` subdirectory. The client renders an "Alt" toggle for those cards. See [Alternate artwork](#alternate-artwork) below.
 - `GET /api/wiki/cards?refresh=1` — bust the in-memory cache and reload from the DB. Useful when you edit a row and want to see it without restarting the server.
 
-The wiki uses the existing `/card-image/{kind}/{id}` endpoint for art — no new image plumbing.
+The wiki uses the existing `/card-image/{kind}/{id}` endpoint for art. To request the alternate artwork, append `?variant=alt`; the endpoint then looks for a file beginning with `alt_<kind>_<id>_` instead of `<kind>_<id>_`. Other callers of `/card-image/...` are unaffected — they keep getting the canonical art by default.
 
 ## Caching
 
@@ -62,3 +63,16 @@ A row is flagged as `is_unimplemented` when one of its `has_*` flags is truthy b
 | Domains   | `has_passive_effect` + `passive_effect`, `has_activation_effect` + `activation_effect` |
 
 Dukes and starters are not flagged today — dukes are pure stat multipliers, and starters use the same payout columns as citizens but no production starter ships with an unfilled special.
+
+## Alternate artwork
+
+Some cards have a second piece of artwork on disk. The convention is that the alternate file lives in the same `images/<kind>s/` directory as the canonical art and starts with `alt_`, keeping the same `<kind>_<id>_<slug>` skeleton. For example:
+
+- `images/monsters/monster_13_death_knight.jpg` — canonical
+- `images/monsters/alt_monster_13_death_knight.jpg` — alternate
+
+`wiki_data._scan_alt_card_ids` walks each `images/<kind>s/` directory once per `/api/wiki/cards` call and collects the integer ids of any files matching `^alt_<kind>_(\d+)_.*\.(jpg|jpeg|png|webp)$`. Every card entry then gets a `has_alt_image` boolean. The scan is keyed off `<kind>` exactly, so an `alt_monster_13_*` file does not flag domain id 13.
+
+The wiki UI uses that flag to render a small "Alt" toggle on the grid card and a "Show alternate artwork" / "Show original artwork" button in the detail modal. Clicking either swaps the image's `src` from `/card-image/<kind>/<id>` to `/card-image/<kind>/<id>?variant=alt` and back. The selection lives only in JS state (`state.altSelections`, a `Set` of `${type}_${id}` keys) — refreshing the page resets every card to canonical art.
+
+Today only monster cards ship alternates, but the flag and toggle work uniformly for citizens, monsters, domains, dukes, and starters; drop a matching `alt_<kind>_<id>_*` file into the right directory and the wiki picks it up on the next cache refresh (`?refresh=1` or server restart).

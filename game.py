@@ -308,6 +308,13 @@ class Game:
         # may legally change the dice. When present, the engine blocks in roll_pending until finalized.
         self.pending_roll = game_state.get('pending_roll') or None
         self.pending_event_slay_cost = game_state.get('pending_event_slay_cost') or None
+        # When a may-slay flow's slay opens a follow-up prompt via the slain
+        # monster's `special_reward` (e.g. Warg's `choose m 3 <citizens where
+        # name==Peasant>`), we stash the resume info here instead of clobbering
+        # the new prompt. Drained when that follow-up resolves and there is no
+        # other action_required / pending_payout_continuation pending.
+        # Each entry: {"player_id": ..., "resume_kind": ...}. None when idle.
+        self.pending_post_slay_resume = game_state.get('pending_post_slay_resume') or None
 
         # If players were dealt multiple dukes, prompt every such player to keep exactly one.
         # This is a concurrent (non-ordered) action: any player may choose at any time, and
@@ -1971,6 +1978,12 @@ class Game:
                   f"Citizens: {len(player.owned_citizens)}, Domains {len(player.owned_domains)}")
 
     def _maybe_resume_harvest_prompt(self):
+        # A may-slay flow that opened a follow-up prompt via the slain monster's
+        # special_reward stashes its resume here; once the chain finishes (which
+        # is what brought us back to this resume point) we have to drain it
+        # BEFORE attempting any further harvest automation, because the engine
+        # is otherwise idle but still owes the slay-flow a continuation.
+        self._maybe_resume_post_slay_continuation()
         if self.phase != "harvest" or getattr(self, "harvest_processed", False):
             return
         if getattr(self, "harvest_player_order", None) is None:
@@ -2882,11 +2895,13 @@ class Game:
         """
         cont = getattr(self, "pending_payout_continuation", None)
         if not cont:
+            self._maybe_resume_post_slay_continuation()
             return
         self.pending_payout_continuation = None
         player_id = cont.get("player_id")
         parts = [p for p in (cont.get("parts") or []) if p]
         if not parts or not player_id:
+            self._maybe_resume_post_slay_continuation()
             return
         balance_hint = cont.get("balance_hint")
         if len(parts) == 1:
@@ -2894,19 +2909,48 @@ class Game:
         else:
             payout = self._execute_compound_payout(" + ".join(parts), player_id, balance_hint=balance_hint)
         if not (isinstance(payout, list) and len(payout) >= 4):
+            self._maybe_resume_post_slay_continuation()
             return
         if payout[0] == -9999:
+            self._maybe_resume_post_slay_continuation()
             return
         if payout[0] == 0 and payout[1] == 0 and payout[2] == 0 and payout[3] == 0:
+            self._maybe_resume_post_slay_continuation()
             return
         player = self._player_by_id(player_id)
         if not player:
+            self._maybe_resume_post_slay_continuation()
             return
         player.gold_score = int(player.gold_score) + payout[0]
         player.strength_score = int(player.strength_score) + payout[1]
         player.magic_score = int(player.magic_score) + payout[2]
         player.victory_score = int(getattr(player, "victory_score", 0)) + payout[3]
         self._bump_harvest_delta(player, payout[0], payout[1], payout[2], payout[3])
+        self._maybe_resume_post_slay_continuation()
+
+    def _maybe_resume_post_slay_continuation(self):
+        """Drain a stashed may-slay resume if the engine is idle.
+
+        Stashed by the `slay_monster_payment` handler when the slain monster's
+        `special_reward` opened a follow-up prompt (so the handler couldn't
+        immediately call `_resume_after_immediate_slay` without clobbering the
+        new prompt). Fires only when every prompt the special reward chained
+        has resolved — i.e. no `action_required.action`, no
+        `pending_payout_continuation`, and no `concurrent_action`.
+        """
+        cont = getattr(self, "pending_post_slay_resume", None)
+        if not cont:
+            return
+        ar = self.action_required if isinstance(self.action_required, dict) else None
+        if ar and (ar.get("action") or ""):
+            return
+        if getattr(self, "pending_payout_continuation", None):
+            return
+        if getattr(self, "concurrent_action", None):
+            return
+        self.pending_post_slay_resume = None
+        resume_kind = cont.get("resume_kind", "domain_activation")
+        self._resume_after_immediate_slay(resume_kind)
 
     def execute_special_payout(
         self,
@@ -2929,6 +2973,22 @@ class Game:
             return self._execute_take_owned_payout(raw, player_id)
         if low == "<domains>" or low.startswith("<domains"):
             return self._execute_grant_domain_payout(player_id)
+        # Defensive fallback for a bare `<citizens ...>` token (no leading
+        # `choose `). The canonical form for "gain a citizen of your choice"
+        # rewards is `choose <citizens>` (with optional `where ...`), and every
+        # other monster in the DB stores it that way. Historically a few rows
+        # (Frost Ogre, Wendigo) shipped without the `choose ` prefix, which
+        # silently fell through to the default `case _:` branch and returned
+        # the `-9999` sentinel without opening a prompt. Normalize to the
+        # canonical choose form so future malformed rows don't repeat the bug.
+        if low == "<citizens>" or low.startswith("<citizens"):
+            return self.execute_special_payout(
+                f"choose {raw}",
+                player_id,
+                auto_apply_single_choice=auto_apply_single_choice,
+                balance_hint=balance_hint,
+                suppress_exchange_optional_prompt=suppress_exchange_optional_prompt,
+            )
         if low == "build_domain":
             return self._execute_build_domain_activation_payout(player_id)
         if low == "concurrent_flip_one_citizen":
@@ -5294,6 +5354,10 @@ class Game:
                     return
                 target = self._player_by_id(player_id)
                 before_tup = self._player_resource_tuple(target) if target else (0, 0, 0, 0)
+                # Snapshot prompt state so we can detect whether slay_monster's
+                # special_reward opened a follow-up prompt (e.g. Warg's "choose
+                # m 3 <citizens where name==Peasant>") that we must NOT clobber.
+                _prior_concurrent = getattr(self, "concurrent_action", None)
                 try:
                     self.slay_monster(player_id, monster_id, sp, mp, gp, event_id=event_id_opt)
                 except ValueError as e:
@@ -5317,6 +5381,24 @@ class Game:
                         after_tup[2] - before_tup[2],
                         after_tup[3] - before_tup[3],
                     )
+                # Detect a follow-up prompt opened by the slain monster's
+                # special_reward. If present, leave the new prompt intact and
+                # stash the may-slay resume — it'll fire from
+                # `_maybe_resume_post_slay_continuation` once the full chain
+                # clears (compound legs + final choose / banish / flip / etc.).
+                _new_required_action = (self.action_required or {}).get("action", "") if isinstance(self.action_required, dict) else ""
+                _new_concurrent = getattr(self, "concurrent_action", None)
+                _opened_followup = (
+                    (_new_required_action and _new_required_action != "slay_monster_payment")
+                    or (_new_concurrent is not _prior_concurrent)
+                    or (getattr(self, "pending_payout_continuation", None) is not None)
+                )
+                if _opened_followup:
+                    self.pending_post_slay_resume = {
+                        "player_id": player_id,
+                        "resume_kind": resume_kind,
+                    }
+                    return
                 self.action_required["action"] = ""
                 self.action_required["id"] = self.game_id
                 self.pending_required_choice = None
@@ -6393,13 +6475,28 @@ class Game:
             player.owned_monsters.append(monster_to_add)
 
             if top.has_special_reward:
+                # Snapshot action_required / concurrent_action BEFORE the special
+                # payout so the deferral check can tell whether *this* call opened
+                # a follow-up prompt. Using "is there an action_required now?" as
+                # the proxy breaks when slay_monster is invoked from inside a
+                # prompt handler (the may-slay flow leaves action_required set to
+                # `slay_monster_payment`), causing the -9999 sentinel to leak into
+                # the player's gold score.
+                _prior_required_action = (self.action_required or {}).get("action", "") if isinstance(self.action_required, dict) else ""
+                _prior_concurrent = getattr(self, "concurrent_action", None)
                 self._immediate_slay_source_label = getattr(top, "name", "Monster")
                 try:
                     payout = self.execute_special_payout(top.special_reward, player_id)
                 finally:
                     self._immediate_slay_source_label = None
+                _new_required_action = (self.action_required or {}).get("action", "") if isinstance(self.action_required, dict) else ""
+                _new_concurrent = getattr(self, "concurrent_action", None)
+                _opened_new_prompt = (
+                    (_new_required_action and _new_required_action != _prior_required_action)
+                    or (_new_concurrent is not _prior_concurrent)
+                )
                 if isinstance(payout, list) and len(payout) >= 1 and payout[0] == -9999:
-                    if not (isinstance(self.action_required, dict) and self.action_required.get("action")):
+                    if not _opened_new_prompt:
                         payout = [0, 0, 0, 0]
             payout[0] = payout[0] + int(getattr(top, "gold_reward", 0) or 0)
             payout[1] = payout[1] + int(getattr(top, "strength_reward", 0) or 0)

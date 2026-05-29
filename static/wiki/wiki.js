@@ -38,6 +38,10 @@
     activeType: "citizens",
     search: "",
     filters: {},                // { citizens: { role: 'shadow' }, monsters: { area: 'Forest' }, ... }
+    // Cards currently displaying alternate artwork. Keys are `${type}_${id}`
+    // so the choice persists between the grid and the detail modal for one
+    // page session (no localStorage — refresh resets to canonical art).
+    altSelections: new Set(),
   };
 
   const el = {
@@ -78,6 +82,20 @@
   };
 
   const titleCase = (s) => (s || "").toString().replace(/\b\w/g, c => c.toUpperCase());
+
+  // ── alt artwork helpers ───────────────────────────────────────────────
+  const altKey = (type, id) => `${type}_${id}`;
+  const isAltActive = (type, id) => state.altSelections.has(altKey(type, id));
+  const setAltActive = (type, id, on) => {
+    const k = altKey(type, id);
+    if (on) state.altSelections.add(k);
+    else    state.altSelections.delete(k);
+  };
+  const cardImageUrl = (type, id, useAlt) => {
+    const kind = TYPE_TO_IMAGE_KIND[type];
+    const base = `/card-image/${kind}/${id}`;
+    return useAlt ? `${base}?variant=alt` : base;
+  };
 
   // ── boot ──────────────────────────────────────────────────────────────
   loadData();
@@ -408,7 +426,7 @@
     const type = state.activeType;
     const kind = TYPE_TO_IMAGE_KIND[type];
     const id = card[TYPE_TO_ID_FIELD[type]];
-    const imgUrl = `/card-image/${kind}/${id}`;
+    let useAlt = isAltActive(type, id);
     const badges = [];
     if (card.expansion) badges.push(h("span", { class: "wiki-badge expansion" }, card.expansion));
     if (card.is_banned) badges.push(h("span", { class: "wiki-badge banned" }, "Banned"));
@@ -420,7 +438,7 @@
 
     const img = h("img", {
       class: "wiki-card-image",
-      src: imgUrl,
+      src: cardImageUrl(type, id, useAlt),
       alt: card.name,
       loading: "lazy",
     });
@@ -429,6 +447,25 @@
       img.replaceWith(placeholder);
     });
 
+    let altBtn = null;
+    if (card.has_alt_image) {
+      altBtn = h("button", {
+        type: "button",
+        class: "wiki-alt-toggle" + (useAlt ? " active" : ""),
+        title: useAlt ? "Show original artwork" : "Show alternate artwork",
+        "aria-pressed": useAlt ? "true" : "false",
+      }, "Alt");
+      altBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        useAlt = !useAlt;
+        setAltActive(type, id, useAlt);
+        img.src = cardImageUrl(type, id, useAlt);
+        altBtn.classList.toggle("active", useAlt);
+        altBtn.title = useAlt ? "Show original artwork" : "Show alternate artwork";
+        altBtn.setAttribute("aria-pressed", useAlt ? "true" : "false");
+      });
+    }
+
     let idLine = `${kind} #${id}`;
     if (type === "monsters") {
       if (card.area) idLine += ` · ${card.area}`;
@@ -436,6 +473,7 @@
     }
     const node = h("div", { class: "wiki-card", "data-id": String(id), "data-type": type },
       img,
+      altBtn,
       h("div", { class: "wiki-card-meta" },
         h("div", { class: "wiki-card-name" }, card.name || "(unnamed)"),
         h("div", { class: "wiki-card-id" }, idLine),
@@ -456,21 +494,42 @@
   function closeModal() {
     el.modal.classList.remove("open");
     el.modal.setAttribute("aria-hidden", "true");
+    // The modal can flip a card to alt art; re-render so the grid card's
+    // thumbnail picks up that selection.
+    render();
   }
 
   function renderDetail(card) {
     const type = state.activeType;
     const kind = TYPE_TO_IMAGE_KIND[type];
     const id = card[TYPE_TO_ID_FIELD[type]];
-    const imgUrl = `/card-image/${kind}/${id}`;
+    let useAlt = isAltActive(type, id);
 
-    const img = h("img", { class: "wiki-modal-image", src: imgUrl, alt: card.name });
+    const img = h("img", { class: "wiki-modal-image", src: cardImageUrl(type, id, useAlt), alt: card.name });
     img.addEventListener("error", () => {
       img.replaceWith(h("div", { class: "wiki-modal-image" }, "no image"));
     });
 
+    let altBtn = null;
+    if (card.has_alt_image) {
+      altBtn = h("button", {
+        type: "button",
+        class: "wiki-alt-toggle modal" + (useAlt ? " active" : ""),
+        "aria-pressed": useAlt ? "true" : "false",
+      }, useAlt ? "Show original artwork" : "Show alternate artwork");
+      altBtn.addEventListener("click", () => {
+        useAlt = !useAlt;
+        setAltActive(type, id, useAlt);
+        img.src = cardImageUrl(type, id, useAlt);
+        altBtn.classList.toggle("active", useAlt);
+        altBtn.textContent = useAlt ? "Show original artwork" : "Show alternate artwork";
+        altBtn.setAttribute("aria-pressed", useAlt ? "true" : "false");
+      });
+    }
+
     const left = h("div", { class: "wiki-modal-image-col" },
       img,
+      altBtn,
       card.is_banned ? h("span", { class: "wiki-badge banned" }, "Banned in game setup") : null,
       card.is_unimplemented ? h("span", {
         class: "wiki-badge unimplemented",

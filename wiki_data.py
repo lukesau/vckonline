@@ -12,6 +12,9 @@ in `banned_cards.json` are flagged via an extra `is_banned` boolean so
 the client can render a small badge, but they are not filtered out.
 """
 
+import re
+from pathlib import Path
+
 from cards import Citizen, Domain, Duke, Monster, Starter
 from banned_cards import banned_domain_ids, banned_duke_ids
 from card_filters import (
@@ -20,6 +23,38 @@ from card_filters import (
     is_unimplemented_domain as _is_unimplemented_domain,
     is_unimplemented_event as _is_unimplemented_event,
 )
+
+
+_REPO_ROOT = Path(__file__).resolve().parent
+# Card image filenames look like ``<kind>_<id>_<slug>.<ext>``; alternate
+# artworks reuse the same convention with an ``alt_`` prefix
+# (``alt_monster_13_death_knight.jpg``). Extra alts beyond the first can use
+# any suffix (``alt2_``, ``alt_b_``, ...) but we currently only surface a
+# single alternate per card.
+_ALT_FILENAME_RE = re.compile(
+    r"^alt_(?P<kind>[a-z]+)_(?P<id>\d+)_.*\.(?:jpg|jpeg|png|webp)$",
+    re.IGNORECASE,
+)
+_ALT_KIND_TO_DIR = {
+    "citizen": _REPO_ROOT / "images" / "citizens",
+    "monster": _REPO_ROOT / "images" / "monsters",
+    "domain":  _REPO_ROOT / "images" / "domains",
+    "duke":    _REPO_ROOT / "images" / "dukes",
+    "starter": _REPO_ROOT / "images" / "starters",
+}
+
+
+def _scan_alt_card_ids(kind):
+    """Return the set of int card ids that have an alternate art file on disk."""
+    dir_path = _ALT_KIND_TO_DIR.get(kind)
+    if not dir_path or not dir_path.is_dir():
+        return set()
+    out = set()
+    for f in dir_path.iterdir():
+        m = _ALT_FILENAME_RE.match(f.name)
+        if m and m.group("kind").lower() == kind:
+            out.add(int(m.group("id")))
+    return out
 
 
 def _connect():
@@ -40,6 +75,7 @@ def _fetch_all(cur, sql):
 
 def _load_citizens(cur):
     rows = _fetch_all(cur, "SELECT * FROM citizens ORDER BY id_citizens")
+    alt_ids = _scan_alt_card_ids("citizen")
     out = []
     for row in rows:
         c = Citizen(
@@ -69,12 +105,14 @@ def _load_citizens(cur):
         )
         entry = c.to_dict()
         entry["is_unimplemented"] = _is_unimplemented_citizen(row)
+        entry["has_alt_image"] = int(row["id_citizens"]) in alt_ids
         out.append(entry)
     return out
 
 
 def _load_monsters(cur):
     rows = _fetch_all(cur, "SELECT * FROM monsters ORDER BY id_monsters")
+    alt_ids = _scan_alt_card_ids("monster")
     out = []
     for row in rows:
         m = Monster(
@@ -98,12 +136,14 @@ def _load_monsters(cur):
         )
         entry = m.to_dict()
         entry["is_unimplemented"] = _is_unimplemented_monster(row)
+        entry["has_alt_image"] = int(row["id_monsters"]) in alt_ids
         out.append(entry)
     return out
 
 
 def _load_domains(cur, banned):
     rows = _fetch_all(cur, "SELECT * FROM domains ORDER BY id_domains")
+    alt_ids = _scan_alt_card_ids("domain")
     out = []
     for row in rows:
         d = Domain(
@@ -125,12 +165,14 @@ def _load_domains(cur, banned):
         entry = d.to_dict()
         entry["is_banned"] = int(row["id_domains"]) in banned
         entry["is_unimplemented"] = _is_unimplemented_domain(row)
+        entry["has_alt_image"] = int(row["id_domains"]) in alt_ids
         out.append(entry)
     return out
 
 
 def _load_dukes(cur, banned):
     rows = _fetch_all(cur, "SELECT * FROM dukes ORDER BY id_dukes")
+    alt_ids = _scan_alt_card_ids("duke")
     out = []
     for row in rows:
         d = Duke(
@@ -154,6 +196,7 @@ def _load_dukes(cur, banned):
         )
         entry = d.to_dict()
         entry["is_banned"] = int(row["id_dukes"]) in banned
+        entry["has_alt_image"] = int(row["id_dukes"]) in alt_ids
         out.append(entry)
     return out
 
@@ -195,6 +238,7 @@ def _load_events(cur):
 
 def _load_starters(cur):
     rows = _fetch_all(cur, "SELECT * FROM starters ORDER BY id_starters")
+    alt_ids = _scan_alt_card_ids("starter")
     out = []
     for row in rows:
         s = Starter(
@@ -215,7 +259,9 @@ def _load_starters(cur):
             row["expansion"],
             row.get("activation_trigger", "") or "",
         )
-        out.append(s.to_dict())
+        entry = s.to_dict()
+        entry["has_alt_image"] = int(row["id_starters"]) in alt_ids
+        out.append(entry)
     return out
 
 
