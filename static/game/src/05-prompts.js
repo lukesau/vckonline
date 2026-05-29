@@ -1112,6 +1112,109 @@ function renderHarvestOptionalExchangePrompt(state) {
   });
 }
 
+function renderHarvestWildCostExchangePrompt(state) {
+  // exchange wild N <gain_res> M — player chooses which resource to PAY N of; gains M of gain_res.
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const gainRes = (prc?.gain_resource || '').toLowerCase();
+  const gainAmt = Number(prc?.gain_amount || 0);
+  const costOpts = Array.isArray(prc?.cost_options) ? prc.cost_options : [];
+  const labels = { g: 'Gold', s: 'Strength', m: 'Magic', v: 'Victory Points' };
+
+  const body = mk('prompt-modal-body');
+  const gainLabel = `${gainAmt} ${labels[gainRes] || gainRes.toUpperCase()}`;
+
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — choosing what to pay for +${gainLabel}.`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({
+      title: 'Harvest: wild-cost exchange',
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const sub = mk('prompt-modal-note');
+  sub.textContent = `Choose which resource to pay. You will gain ${gainLabel}.`;
+  body.appendChild(sub);
+  appendPromptResourcesPanel(body, state);
+
+  const buttons = costOpts.map(opt => {
+    const r = (opt.resource || '').toLowerCase();
+    const n = Number(opt.amount || 0);
+    const label = `Pay ${n} ${labels[r] || r.toUpperCase()}`;
+    return promptButton(label, () => postGameAction({
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: `wild_cost_resource ${r}`,
+    }));
+  });
+
+  openPromptOverlayShell({
+    title: `Harvest: gain ${gainLabel}`,
+    dismissible: false,
+    bodyEl: body,
+    footerEl: promptActionsRow(buttons),
+  });
+}
+
+function renderHarvestWildGainExchangePrompt(state) {
+  // exchange wild <cost_res> N M — player pays N of cost_res, chooses which resource to GAIN M of.
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const costRes = (prc?.cost_resource || '').toLowerCase();
+  const costAmt = Number(prc?.cost_amount || 0);
+  const gainAmt = Number(prc?.gain_amount || 0);
+  const labels = { g: 'Gold', s: 'Strength', m: 'Magic', v: 'Victory Points' };
+
+  const body = mk('prompt-modal-body');
+  const costLabel = `${costAmt} ${labels[costRes] || costRes.toUpperCase()}`;
+
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — choosing what to gain for ${costLabel}.`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({
+      title: 'Harvest: wild-gain exchange',
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const sub = mk('prompt-modal-note');
+  sub.textContent = `Pay ${costLabel}. Choose which resource to gain (${gainAmt}).`;
+  body.appendChild(sub);
+  appendPromptResourcesPanel(body, state);
+
+  const gainOptions = ['g', 's', 'm'];
+  const buttons = gainOptions.map(r => {
+    const label = `Gain ${gainAmt} ${labels[r] || r.toUpperCase()}`;
+    return promptButton(label, () => postGameAction({
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: `wild_gain_resource ${r}`,
+    }));
+  });
+
+  openPromptOverlayShell({
+    title: `Harvest: pay ${costLabel}`,
+    dismissible: false,
+    bodyEl: body,
+    footerEl: promptActionsRow(buttons),
+  });
+}
+
 function renderHarvestStealPrompt(state) {
   const req = state?.action_required || {};
   const reqId = (req?.id || '').toString();
@@ -2307,6 +2410,16 @@ function renderPromptModal(state) {
 
   if (reqAction === 'harvest_optional_exchange') {
     renderHarvestOptionalExchangePrompt(state);
+    return;
+  }
+
+  if (reqAction === 'harvest_wild_cost_exchange') {
+    renderHarvestWildCostExchangePrompt(state);
+    return;
+  }
+
+  if (reqAction === 'harvest_wild_gain_exchange') {
+    renderHarvestWildGainExchangePrompt(state);
     return;
   }
 

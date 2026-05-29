@@ -77,18 +77,17 @@ def _filter_monster_areas_for_random(rows, n_players):
 
 
 def _sort_monster_areas_by_top_card_cost(chosen_areas, grouped_monsters):
-    """Order chosen monster areas by their stack top cost (strength, then magic)."""
+    """Order chosen monster areas by top-card total cost (strength + magic)."""
 
     def _area_top_cost(area):
         stack = list(grouped_monsters.get(area) or [])
         if not stack:
-            return (9999, 9999, str(area))
-        # Board stacks are dealt with top-at-end (`stack[-1]`), so use the same
-        # card here for left-to-right ordering.
-        top = stack[-1]
+            return 9999
+        # Compare the opposite end of the stack from the face-up board top.
+        top = stack[0]
         strength = int(getattr(top, "strength_cost", 0) or 0)
         magic = int(getattr(top, "magic_cost", 0) or 0)
-        return (strength, magic, str(area))
+        return strength + magic
 
     return sorted(list(chosen_areas or []), key=_area_top_cost)
 
