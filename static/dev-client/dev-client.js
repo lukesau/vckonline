@@ -1,5 +1,27 @@
-let playerId = localStorage.getItem('playerId') || '';
-            let currentGameId = localStorage.getItem('gameId') || '';
+// ── URL params + cookie-backed ids (vck_client) ───────────────────────────
+            // Mirrors static/game/src/01-core.js so the debug page shares the same
+            // active-game / user-id storage as the visual game client.
+            const _vckParams = new URLSearchParams(location.search);
+            const _vckStored =
+                (typeof VCK_CLIENT_META !== 'undefined' && VCK_CLIENT_META.read) ? VCK_CLIENT_META.read() : {};
+            const _vckQueryGameId = (_vckParams.get('game_id') || '').trim();
+            const _vckQueryPlayerId = (_vckParams.get('player_id') || '').trim();
+            let playerId = _vckQueryPlayerId || String(_vckStored.player_id || '').trim();
+            let currentGameId = _vckQueryGameId || String(_vckStored.game_id || '').trim();
+            if (typeof VCK_CLIENT_META !== 'undefined' && VCK_CLIENT_META.patch) {
+                const _vckBootPatch = {};
+                if (_vckQueryPlayerId) _vckBootPatch.player_id = _vckQueryPlayerId;
+                if (_vckQueryGameId) _vckBootPatch.game_id = _vckQueryGameId;
+                if (Object.keys(_vckBootPatch).length) VCK_CLIENT_META.patch(_vckBootPatch);
+            }
+
+            function vckPatchClient(updates) {
+                try {
+                    if (typeof VCK_CLIENT_META !== 'undefined' && VCK_CLIENT_META.patch) {
+                        VCK_CLIENT_META.patch(updates);
+                    }
+                } catch (_) { /* ignore */ }
+            }
             /** Avoid duplicate tabs when toggleReady and lobby poll both notice the new game */
             let openedVisualGameTabForGameId = '';
             let lastGameState = null;
@@ -90,7 +112,7 @@ let playerId = localStorage.getItem('playerId') || '';
                     const data = await response.json();
                     if (!response.ok) throw new Error(data.detail || 'Create failed');
                     playerId = data.player_id;
-                    localStorage.setItem('playerId', playerId);
+                    vckPatchClient({ player_id: playerId });
                     document.getElementById('playerId').textContent = 'Player ID: ' + playerId;
                     getLobbyStatus();
                 } catch (error) {
@@ -113,7 +135,7 @@ let playerId = localStorage.getItem('playerId') || '';
                     const data = await response.json();
                     if (!response.ok) throw new Error(data.detail || 'Join failed');
                     playerId = data.player_id;
-                    localStorage.setItem('playerId', playerId);
+                    vckPatchClient({ player_id: playerId });
                     document.getElementById('playerId').textContent = 'Player ID: ' + playerId;
                     getLobbyStatus();
                 } catch (error) {
@@ -127,7 +149,7 @@ let playerId = localStorage.getItem('playerId') || '';
                     await fetch('/api/lobby/leave?player_id=' + encodeURIComponent(playerId), {method: 'POST'});
                 } catch (_) { /* ignore */ }
                 playerId = '';
-                localStorage.removeItem('playerId');
+                vckPatchClient({ player_id: null });
                 document.getElementById('playerId').textContent = '';
                 getLobbyStatus();
             }
@@ -187,14 +209,14 @@ let playerId = localStorage.getItem('playerId') || '';
                         if (data.game_id !== currentGameId) {
                             openVisualGameClientTab(data.game_id);
                             currentGameId = data.game_id;
-                            localStorage.setItem('gameId', currentGameId);
+                            vckPatchClient({ game_id: currentGameId });
                             getGameState(false);
                         }
                         return;
                     }
                     if (currentGameId) {
                         currentGameId = '';
-                        localStorage.removeItem('gameId');
+                        vckPatchClient({ game_id: null });
                         stopGamePollingIntervals();
                     }
 
@@ -276,7 +298,7 @@ let playerId = localStorage.getItem('playerId') || '';
                     const data = await response.json();
                     if (data.game_id) {
                         currentGameId = data.game_id;
-                        localStorage.setItem('gameId', currentGameId);
+                        vckPatchClient({ game_id: currentGameId });
                         openVisualGameClientTab(data.game_id);
                         getGameState(false);
                     }
@@ -641,7 +663,7 @@ let playerId = localStorage.getItem('playerId') || '';
                 }
                 if (!gameId) return;
                 currentGameId = gameId;
-                localStorage.setItem('gameId', currentGameId);
+                vckPatchClient({ game_id: currentGameId });
                 try {
                     const qs = playerId ? `?player_id=${encodeURIComponent(playerId)}` : '';
                     const response = await fetch(`/api/game/${gameId}/state${qs}`);
