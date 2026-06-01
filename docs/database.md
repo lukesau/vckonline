@@ -1,26 +1,97 @@
 # Database
 
-## Overview
+## Connection (read this first)
 
-The game bootstrap in `game.py` loads card data from a MariaDB database named `vckonline` using stored procedures to select card sets and randomize stacks.
+**Everything DB-related in this repo connects to a single MariaDB instance with the same credentials hard-coded everywhere.** Do not invent alternative hosts/users/passwords; if a tool or test seems to "need" a different one, that's a bug in the tool, not a real configuration.
 
-The code assumes it can connect to:
+| field    | value       |
+| -------- | ----------- |
+| host     | `127.0.0.1` |
+| port     | `3306`      |
+| database | `vckonline` |
+| user     | `vckonline` |
+| password | `vckonline` |
 
-- host: `127.0.0.1`
-- port: `3306`
-- user: `vckonline`
-- password: `vckonline`
-- database: `vckonline`
+Mnemonic: **db == user == pass == `vckonline`**, host == loopback, port == default 3306.
 
-This is designed to work with an SSH tunnel that forwards the remote DB to local port 3306.
-
-## SSH tunnel
-
-Keep an SSH port forward running while using the DB locally:
+The DB itself is not local — it lives on `lukesau.com`. The `127.0.0.1:3306` endpoint is provided by an SSH port forward that you start before doing anything that touches the DB:
 
 ```bash
 ssh -L 3306:localhost:3306 lukesau.com
 ```
+
+Keep that tunnel running for the whole session. `check_db_server.py` (port reachability) and `test_database.py` (full validation) both expect this exact endpoint, as do `game.py`, `game_setup.py`, `server.py`, and every test that opens a `mariadb.connect(...)`. If a test you're writing needs the DB, copy the dict above verbatim — do not parameterize.
+
+## First-try connect script
+
+Copy this template instead of writing your own from scratch. It is what every Python entry point in this repo does:
+
+```python
+import mariadb
+
+DB_CONFIG = {
+    "user": "vckonline",
+    "password": "vckonline",
+    "host": "127.0.0.1",
+    "port": 3306,
+    "database": "vckonline",
+}
+
+conn = mariadb.connect(**DB_CONFIG)
+cur = conn.cursor(dictionary=True)
+cur.execute("SELECT id_citizens, name FROM citizens LIMIT 3")
+for row in cur:
+    print(row)
+conn.close()
+```
+
+Two prerequisites for this to work:
+
+1. SSH tunnel up (`ssh -L 3306:localhost:3306 lukesau.com`).
+2. Venv activated with `MARIADB_CONFIG` exported: `source ./activate_with_env.sh`.
+
+## Use the `mariadb` Python connector, nothing else
+
+The repo is built on the official **`mariadb`** package (a thin wrapper over MariaDB Connector/C, declared in `requirements.txt`). Substituting any other client library is a wasted detour — none of them are installed, and switching connectors does not solve "tunnel is down" or "venv not activated", which are the actual root causes of most connect failures.
+
+Do **not** try:
+
+- `pymysql` — wrong package, not installed.
+- `mysql.connector` / `mysql-connector-python` — wrong package, not installed.
+- `mysqlclient` / `MySQLdb` — wrong package, not installed.
+- `sqlalchemy`, `asyncmy`, `aiomysql`, `aiosqlite` — not in this stack.
+- `psycopg2` (PostgreSQL), `sqlite3` (file DB) — wrong database engine entirely.
+
+If `import mariadb` raises `ModuleNotFoundError`, you are not in the venv. Run `source ./activate_with_env.sh` from the repo root and try again. Do not `pip install` a different connector to "fix" it.
+
+## Connector troubleshooting cheat sheet
+
+| symptom                                                   | actual cause                              | fix                                                 |
+| --------------------------------------------------------- | ----------------------------------------- | --------------------------------------------------- |
+| `ModuleNotFoundError: No module named 'mariadb'`          | venv not activated                        | `source ./activate_with_env.sh`                     |
+| `Can't connect to MySQL server on '127.0.0.1'` / refused  | SSH tunnel not running                    | `ssh -L 3306:localhost:3306 lukesau.com`            |
+| `Access denied for user '...'@'localhost'`                | tried to use creds other than `vckonline` | use the table above; no other accounts exist        |
+| `Unknown column 'citizen_id' in ...`                      | wrong PK name (see schema gotcha below)   | use `id_citizens` (similarly `id_monsters`, etc.)   |
+| `mariadb_config not found` during `pip install mariadb`   | Connector/C not installed                 | `./setup_venv.sh` (handles Homebrew install for you)|
+
+## Schema gotcha: primary key column names
+
+The DB pre-dates a newer naming convention. Primary key columns are `id_<table>`, not `<table>_id`:
+
+| table      | pk            |
+| ---------- | ------------- |
+| `citizens` | `id_citizens` |
+| `monsters` | `id_monsters` |
+| `domains`  | `id_domains`  |
+| `dukes`    | `id_dukes`    |
+| `starters` | `id_starters` |
+| `events`   | `id_events`   |
+
+The Python card classes (`cards.py`) expose them as `citizen_id`, `monster_id`, etc.; the rename happens in `game_setup.py` when building card objects from DB rows. SQL queries (and `cursor.execute(...)`) use the `id_<table>` names.
+
+## Overview
+
+The game bootstrap in `game.py` loads card data from the `vckonline` database using stored procedures to select card sets and randomize stacks.
 
 ## Stored procedures
 

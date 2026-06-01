@@ -23,11 +23,13 @@ If you already have `.venv/` created and just want to activate with the MariaDB 
 source ./activate_with_env.sh
 ```
 
+This step is mandatory before running any DB-touching command. Without it, `import mariadb` will raise `ModuleNotFoundError` because the connector is installed inside `.venv/`, not system Python — and the answer is *not* to swap in a different connector.
+
 ## Requirements
 
 Dependencies are listed in `requirements.txt` and include:
 
 - `fastapi` + `uvicorn` (API server)
-- `mariadb` (DB access; requires MariaDB Connector/C to build)
+- **`mariadb`** (DB access; requires MariaDB Connector/C to build). This is the only supported DB driver in the project. Do not substitute `pymysql`, `mysql-connector-python`, `mysqlclient`, `sqlalchemy`, etc. — they are not installed and they don't fix any of the real connection problems (which are almost always the SSH tunnel being down, not the driver choice). See `docs/database.md` for the full anti-pattern list.
 - `shortuuid` (player id generation)
 

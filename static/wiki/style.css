@@ -272,7 +272,9 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
 
 .wiki-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  /* Clamp the column min to half the container (minus half the 16px gap) so
+     we never drop below 2 columns, even on very narrow viewports. */
+  grid-template-columns: repeat(auto-fill, minmax(min(220px, 50% - 8px), 1fr));
   gap: 16px;
 }
 
