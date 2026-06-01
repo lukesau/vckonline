@@ -172,7 +172,7 @@ class RestingNegativeEffectImmunityTests(unittest.TestCase):
             p.gold_score = 5
 
         active = players[0].player_id
-        game._execute_steal_payout("steal g 1", active)
+        game.harvest._execute_steal_payout("steal g 1", active)
 
         prc = game.pending_required_choice or {}
         victim_ids = [opt.get("victim_id") for opt in (prc.get("victim_options") or [])]
@@ -186,7 +186,7 @@ class RestingNegativeEffectImmunityTests(unittest.TestCase):
             p.gold_score = 5
 
         evt = make_all_lose_event(amount=2, resource="g")
-        game._execute_event_roll_effect(evt, players[0].player_id)
+        game.dice._execute_event_roll_effect(evt, players[0].player_id)
 
         for p in players[:4]:
             self.assertEqual(p.gold_score, 3, f"{p.player_id} should have lost 2 gold")
@@ -198,7 +198,7 @@ class RestingNegativeEffectImmunityTests(unittest.TestCase):
         # should be prompted for the Cursed Cavern flip.
         game, players = make_n_player_game(5, turn_index=0, with_match_citizens=True)
 
-        game._begin_concurrent_flip_one_citizen(players[0].player_id)
+        game.dice._begin_concurrent_flip_one_citizen(players[0].player_id)
 
         ca = game.concurrent_action or {}
         pending = list(ca.get("pending") or [])
@@ -210,7 +210,7 @@ class RestingNegativeEffectImmunityTests(unittest.TestCase):
         game, players = make_n_player_game(5, turn_index=0, with_match_citizens=True)
 
         active = players[0].player_id
-        game._execute_flip_citizen_payout("flip_citizen targeted", active)
+        game.payouts._execute_flip_citizen_payout("flip_citizen targeted", active)
 
         prc = game.pending_required_choice or {}
         opt_ids = [opt.get("player_id") for opt in (prc.get("options") or [])]
@@ -221,7 +221,7 @@ class RestingNegativeEffectImmunityTests(unittest.TestCase):
         game, players = make_n_player_game(5, turn_index=0, with_match_citizens=True)
 
         active = players[0].player_id
-        game._execute_banish_player_citizen_payout(active)
+        game.payouts._execute_banish_player_citizen_payout(active)
 
         prc = game.pending_required_choice or {}
         opt_ids = [opt.get("player_id") for opt in (prc.get("options") or [])]
@@ -234,7 +234,7 @@ class RestingNegativeEffectImmunityTests(unittest.TestCase):
             p.gold_score = 3
 
         kv = {"take": "g:1"}
-        parsed_take, _ = game._manipulate_candidates_other_players(
+        parsed_take, _ = game.domain_effects._manipulate_candidates_other_players(
             players[0].player_id, "take", kv,
         )
         take_ids = [o["player_id"] for o in (parsed_take or {}).get("options", [])]
@@ -243,7 +243,7 @@ class RestingNegativeEffectImmunityTests(unittest.TestCase):
 
         # pay_to_player is a positive effect for the target — resting must NOT be filtered.
         kv_pay = {"pay": "g:1"}
-        parsed_pay, _ = game._manipulate_candidates_other_players(
+        parsed_pay, _ = game.domain_effects._manipulate_candidates_other_players(
             players[0].player_id, "pay", kv_pay,
         )
         pay_ids = [o["player_id"] for o in (parsed_pay or {}).get("options", [])]
@@ -256,7 +256,7 @@ class RestingNegativeEffectImmunityTests(unittest.TestCase):
         game, players = make_n_player_game(5, turn_index=0, with_match_citizens=True)
 
         active_player = game._player_by_id(players[0].player_id)
-        game._prompt_take_owned_card(
+        game.domain_effects._prompt_take_owned_card(
             active_player,
             "Test Domain",
             {"kind": "citizen", "pick": "random", "optional": False},

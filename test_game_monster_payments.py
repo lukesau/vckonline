@@ -87,7 +87,7 @@ class MonsterPaymentTests(unittest.TestCase):
         monster.extra_magic_cost = 1
         game = make_game(player, monster)
 
-        options = game._immediate_slay_monster_options()
+        options = game.slay._immediate_slay_monster_options()
 
         self.assertEqual(options[0]["gold_cost"], 1)
         self.assertEqual(options[0]["strength_cost"], 9)

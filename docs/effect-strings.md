@@ -64,6 +64,7 @@ This document covers how effect strings work across the three card tables (citiz
 | Orc Warrior | `choose <citizens where gold_cost<=3>` | Take a citizen worth ≤3g |
 | Orc Batrider | `choose <citizens>` | Take any citizen |
 | Orc Chieftain | `count area Mountain g 2` | Gain 2g per Mountain monster slain |
+| (compound reward) | `<domains> + <citizens>` | Take a free domain, then take a free citizen (prompts open in order; reverse order also supported). |
 
 ---
 
@@ -199,7 +200,7 @@ action.end pay_to_player g 1 v 1 optional
 1. **`.` means phase prefix only.** The left side is always a timing trigger (`harvest`, `roll`, `action.end`). Bare verbs have no dot.
 2. **Resource amounts are always positional: `g N`.** Colon notation (`g:N`) only appears inside `=` assignments in KV strings where a space would be ambiguous.
 3. **`choose` uses brackets for entity picks, bare words for resource picks.** Mixed is allowed: `choose g 3 <citizens where name==Knight>`.
-4. **Compound effects use ` + `.** Each leg is a self-contained effect: `m 4 + concurrent_flip_one_citizen`.
+4. **Compound effects use ` + `.** Each leg is a self-contained effect: `m 4 + concurrent_flip_one_citizen`. Compound dispatch happens before bracket shortcuts, so legs can themselves be bare `<domains>` / `<citizens>` (e.g. `<domains> + <citizens>` for a monster reward of "1 free citizen + 1 free domain"). The split scans top-level ` + ` only, so a ` + ` inside `<...>` (for example a citizens-where extras clause `<citizens + v 1>`) is never treated as a compound separator.
 
 ### Proposed rewrites
 

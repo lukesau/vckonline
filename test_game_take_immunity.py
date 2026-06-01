@@ -95,7 +95,7 @@ class StealAndTakeFromPlayerImmunityTests(unittest.TestCase):
         game, players = make_two_player_game()
         players[1].owned_domains.append(make_castle_of_the_seven_suns())
 
-        game._execute_steal_payout("steal g 1", players[0].player_id)
+        game.harvest._execute_steal_payout("steal g 1", players[0].player_id)
 
         # No eligible victim -> no harvest_steal prompt opened.
         self.assertNotEqual(game.action_required.get("action"), "harvest_steal")
@@ -104,7 +104,7 @@ class StealAndTakeFromPlayerImmunityTests(unittest.TestCase):
         game, players = make_two_player_game()
         players[1].owned_domains.append(make_castle_of_the_seven_suns())
 
-        parsed, _opt = game._manipulate_candidates_other_players(
+        parsed, _opt = game.domain_effects._manipulate_candidates_other_players(
             players[0].player_id, "take", {"take": "g:1"}
         )
 
@@ -124,7 +124,7 @@ class TakeOwnedImmunityTests(unittest.TestCase):
         players[1].owned_domains.append(make_castle_of_the_seven_suns())
 
         active = game._player_by_id(players[0].player_id)
-        game._prompt_take_owned_card(
+        game.domain_effects._prompt_take_owned_card(
             active,
             "Test Domain",
             {"kind": "citizen", "pick": "random", "optional": False},
@@ -138,7 +138,7 @@ class TakeOwnedImmunityTests(unittest.TestCase):
         players[1].owned_citizens.append(make_simple_citizen(101))
 
         active = game._player_by_id(players[0].player_id)
-        game._prompt_take_owned_card(
+        game.domain_effects._prompt_take_owned_card(
             active,
             "Test Domain",
             {"kind": "citizen", "pick": "random", "optional": False},
@@ -159,7 +159,7 @@ class NonTakeOperatorsBypassImmunity(unittest.TestCase):
         players[1].owned_citizens.append(make_simple_citizen(101))
         players[1].owned_domains.append(make_castle_of_the_seven_suns())
 
-        game._execute_banish_player_citizen_payout(players[0].player_id)
+        game.payouts._execute_banish_player_citizen_payout(players[0].player_id)
 
         prc = game.pending_required_choice or {}
         opt_ids = [opt.get("player_id") for opt in (prc.get("options") or [])]
@@ -172,7 +172,7 @@ class NonTakeOperatorsBypassImmunity(unittest.TestCase):
         players[1].owned_citizens.append(make_simple_citizen(101))
         players[1].owned_domains.append(make_castle_of_the_seven_suns())
 
-        game._execute_flip_citizen_payout("flip_citizen targeted", players[0].player_id)
+        game.payouts._execute_flip_citizen_payout("flip_citizen targeted", players[0].player_id)
 
         prc = game.pending_required_choice or {}
         opt_ids = [opt.get("player_id") for opt in (prc.get("options") or [])]

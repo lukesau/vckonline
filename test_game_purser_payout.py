@@ -68,7 +68,7 @@ class PurserPayoutTests(unittest.TestCase):
 
     def _run_purser_payout(self, player):
         game = make_game(player)
-        return game.execute_special_payout(
+        return game.payouts.execute_special_payout(
             "count owned_citizens g 1", player.player_id
         )
 
