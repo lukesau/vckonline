@@ -23,21 +23,28 @@ password vckonline
 
 Mnemonic: **db == user == pass == `vckonline`**.
 
-### Step 1 — start the SSH tunnel and leave it running
+### Step 1 — check whether the SSH tunnel is already up; do NOT recreate it
 
-```bash
-ssh -L 3306:localhost:3306 lukesau.com
-```
-
-If the tunnel is down, `127.0.0.1:3306` won't accept TCP connections and you will get errors like "Can't connect to MySQL server", "Connection refused", "lost connection during query handshake". The fix is always the tunnel — never substitute a different host.
-
-Verify the tunnel before importing anything:
+The repo owner usually starts the tunnel by hand in another terminal and leaves it running across sessions. **Always probe first; only start a tunnel if the probe fails.**
 
 ```bash
 python3 check_db_server.py
 ```
 
 It only does a `connect_ex` on `127.0.0.1:3306` (no Python deps) so it tells you "tunnel up?" without dragging in the venv.
+
+- **Probe succeeds** ("OK: 127.0.0.1:3306 accepts TCP connections") → the tunnel is already running. **Do not run `ssh -L ...`.** Move on to Step 2.
+- **Probe fails** ("FAIL: cannot reach 127.0.0.1:3306") → only then start a tunnel yourself:
+
+  ```bash
+  ssh -L 3306:localhost:3306 lukesau.com
+  ```
+
+  Run this in a separate terminal (or backgrounded) and leave it running for the rest of the session.
+
+If you blindly try to start a tunnel while one already exists, `ssh` will exit with `bind [::1]:3306: Address already in use` / `channel_setup_fwd_listener_tcpip: cannot listen to port: 3306` — that is **not a failure**, it confirms the existing tunnel is healthy. Ignore the error and proceed.
+
+Tunnel-down failures from the connector look like "Can't connect to MySQL server", "Connection refused", or "lost connection during query handshake". The fix is always the tunnel — never substitute a different host (`lukesau.com`, etc.) to bypass it.
 
 ### Step 2 — use the `mariadb` Python connector, nothing else
 

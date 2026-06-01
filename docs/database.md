@@ -14,13 +14,28 @@
 
 Mnemonic: **db == user == pass == `vckonline`**, host == loopback, port == default 3306.
 
-The DB itself is not local — it lives on `lukesau.com`. The `127.0.0.1:3306` endpoint is provided by an SSH port forward that you start before doing anything that touches the DB:
+The DB itself is not local — it lives on `lukesau.com`. The `127.0.0.1:3306` endpoint is provided by an SSH port forward. **The repo owner usually starts the tunnel by hand in a separate terminal and keeps it open across sessions.** If you (or an agent) are working in this repo, the tunnel is probably already up; don't blindly start another one.
 
-```bash
-ssh -L 3306:localhost:3306 lukesau.com
-```
+The right flow is *probe first, only start if needed*:
 
-Keep that tunnel running for the whole session. `check_db_server.py` (port reachability) and `test_database.py` (full validation) both expect this exact endpoint, as do `game.py`, `game_setup.py`, `server.py`, and every test that opens a `mariadb.connect(...)`. If a test you're writing needs the DB, copy the dict above verbatim — do not parameterize.
+1. **Always** check reachability first:
+
+   ```bash
+   python3 check_db_server.py
+   ```
+
+   - If it reports `OK: 127.0.0.1:3306 accepts TCP connections`, the tunnel is already live — stop here. Do not run `ssh -L`.
+   - If it reports a failure, only then start the tunnel yourself.
+
+2. Only if step 1 fails, start the tunnel in a separate terminal (or backgrounded) and leave it running:
+
+   ```bash
+   ssh -L 3306:localhost:3306 lukesau.com
+   ```
+
+If a tunnel already exists and you run `ssh -L 3306:localhost:3306 lukesau.com` anyway, ssh will print `bind [::1]:3306: Address already in use` and `channel_setup_fwd_listener_tcpip: cannot listen to port: 3306`. That is **not a real error** — it just confirms the live tunnel is healthy. Ignore it and proceed with the connect.
+
+All callers — `check_db_server.py` (port reachability), `test_database.py` (full validation), `game.py`, `game_setup.py`, `server.py`, and every test that opens a `mariadb.connect(...)` — talk to the same `127.0.0.1:3306` endpoint. If a test you're writing needs the DB, copy the credentials dict above verbatim; do not parameterize.
 
 ## First-try connect script
 
@@ -69,7 +84,8 @@ If `import mariadb` raises `ModuleNotFoundError`, you are not in the venv. Run `
 | symptom                                                   | actual cause                              | fix                                                 |
 | --------------------------------------------------------- | ----------------------------------------- | --------------------------------------------------- |
 | `ModuleNotFoundError: No module named 'mariadb'`          | venv not activated                        | `source ./activate_with_env.sh`                     |
-| `Can't connect to MySQL server on '127.0.0.1'` / refused  | SSH tunnel not running                    | `ssh -L 3306:localhost:3306 lukesau.com`            |
+| `Can't connect to MySQL server on '127.0.0.1'` / refused  | SSH tunnel not running                    | probe with `python3 check_db_server.py`; if it fails, `ssh -L 3306:localhost:3306 lukesau.com` |
+| `bind [::1]:3306: Address already in use` (from `ssh`)    | tunnel already running (probably user-started) | not a real error — stop, do nothing, the tunnel is fine |
 | `Access denied for user '...'@'localhost'`                | tried to use creds other than `vckonline` | use the table above; no other accounts exist        |
 | `Unknown column 'citizen_id' in ...`                      | wrong PK name (see schema gotcha below)   | use `id_citizens` (similarly `id_monsters`, etc.)   |
 | `mariadb_config not found` during `pip install mariadb`   | Connector/C not installed                 | `./setup_venv.sh` (handles Homebrew install for you)|
