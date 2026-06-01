@@ -1,3 +1,4 @@
+import json
 from json import JSONEncoder
 
 from cards import Citizen, Domain, Duke, Event, Exhausted, Monster, Starter
@@ -133,3 +134,112 @@ class GameObjectEncoder(JSONEncoder):
                 "pending_reroll_blood_moon_used": bool(getattr(obj, "_pending_reroll_blood_moon_used", False)),
             }
         return super().default(obj)
+
+
+# ─── Round-trippable save/load ──────────────────────────────────────────────
+#
+# `GameObjectEncoder` is intentionally slim — it's the wire format clients see.
+# For save/load (and eventually DB persistence) we need every engine field a
+# rehydrated `Game(...)` would touch. Strategy:
+#
+# 1. Run the live game through `GameObjectEncoder` + `json.loads` to get a
+#    JSON-friendly dict with the bulk of the state already covered (cards
+#    flattened via their `to_dict` methods).
+# 2. Augment with the handful of fields the encoder omits (or aliases).
+# 3. On load, walk the dict and rehydrate dict-blobs back into card objects
+#    where the engine expects card objects (grids, banish_pile, exhausted_stack,
+#    each player's owned_*).
+#
+# This lives alongside the encoder rather than in `game.py` so we don't wedge
+# the engine module with persistence concerns.
+
+# Card classes whose dicts must be re-objectified at load time. We dispatch
+# by the unique `*_id` field each Card subclass exposes.
+def _rehydrate_card_from_dict(d):
+    if d is None:
+        return None
+    if not isinstance(d, dict):
+        return d
+    if d.get("card_class") == "event" or "event_id" in d:
+        return Event.from_dict(d)
+    if "starter_id" in d:
+        return Starter.from_dict(d)
+    if "citizen_id" in d:
+        return Citizen.from_dict(d)
+    if "domain_id" in d:
+        return Domain.from_dict(d)
+    if "duke_id" in d:
+        return Duke.from_dict(d)
+    if "monster_id" in d:
+        return Monster.from_dict(d)
+    if "exhausted_id" in d or d.get("name") == "Exhausted":
+        return Exhausted.from_dict(d)
+    raise ValueError(f"Cannot identify card type for dict with keys: {sorted(d.keys())}")
+
+
+def _rehydrate_card_grid(grid):
+    if not isinstance(grid, list):
+        return grid
+    return [
+        [_rehydrate_card_from_dict(c) for c in (stack or [])]
+        for stack in grid
+    ]
+
+
+def serialize_game_to_save_dict(game):
+    """Produce a JSON-serializable dict that fully captures `game` for round-trip.
+
+    Output is a superset of `GameObjectEncoder`'s wire dict — additional keys
+    cover engine fields that the encoder omits (or only emits a summary for).
+    Dukes are NOT redacted: a save must carry full state.
+    """
+    base = json.loads(json.dumps(game, cls=GameObjectEncoder))
+
+    base["save_format_version"] = 1
+
+    base["monster_stack_areas"] = list(getattr(game, "monster_stack_areas", []) or [])
+    base["exhausted_stack"] = [c.to_dict() for c in (getattr(game, "exhausted_stack", []) or [])]
+    base["pending_payout_continuation"] = getattr(game, "pending_payout_continuation", None)
+    base["pending_harvest_choices"] = list(getattr(game, "pending_harvest_choices", []) or [])
+    base["harvest_processed"] = bool(getattr(game, "harvest_processed", False))
+    base["_harvest_steal_phase_done"] = bool(getattr(game, "_harvest_steal_phase_done", False))
+
+    # The encoder names these without the leading underscore. `Game.__init__`
+    # reads the underscored keys via `game_state.get('_pending_reroll_*_used')`.
+    base["_pending_reroll_twilight_used"] = bool(getattr(game, "_pending_reroll_twilight_used", False))
+    base["_pending_reroll_blood_moon_used"] = bool(getattr(game, "_pending_reroll_blood_moon_used", False))
+
+    return base
+
+
+def deserialize_save_dict_to_game(data):
+    """Rehydrate a `serialize_game_to_save_dict(...)` blob into a fresh `Game`.
+
+    Imported lazily to avoid a circular import (`game.py` imports this module).
+    """
+    from game import Game
+
+    state = dict(data)
+
+    rehydrated_players = []
+    for player_dict in state.get("player_list", []) or []:
+        if isinstance(player_dict, Player):
+            rehydrated_players.append(player_dict)
+        elif isinstance(player_dict, dict):
+            rehydrated_players.append(Player.from_dict(player_dict))
+        else:
+            raise ValueError(f"Unsupported player entry in save: {type(player_dict)!r}")
+    state["player_list"] = rehydrated_players
+
+    state["monster_grid"] = _rehydrate_card_grid(state.get("monster_grid"))
+    state["citizen_grid"] = _rehydrate_card_grid(state.get("citizen_grid"))
+    state["domain_grid"] = _rehydrate_card_grid(state.get("domain_grid"))
+
+    state["banish_pile"] = [
+        _rehydrate_card_from_dict(c) for c in (state.get("banish_pile") or [])
+    ]
+    state["exhausted_stack"] = [
+        _rehydrate_card_from_dict(c) for c in (state.get("exhausted_stack") or [])
+    ]
+
+    return Game(state)

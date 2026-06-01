@@ -72,6 +72,8 @@
                 <div id="gameLog" aria-live="polite"></div>
             </div>
             <button onclick="getGameState()">Refresh Game State</button>
+            <button id="stepBackBtn" onclick="stepGameBack()" disabled>Back one step</button>
+            <span id="historyStatus" class="history-status" aria-live="polite"></span>
             <div class="tableau-actions">
                 <div class="mini"><strong>Tableau seats:</strong> buttons are arranged in turn order around the Board.</div>
                 <div id="tableauSeatLayout" class="tableau-seat-layout" aria-label="Tableau seats"></div>

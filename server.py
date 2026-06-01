@@ -8,6 +8,7 @@ import re
 import time
 import uuid
 import asyncio
+from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -18,6 +19,10 @@ from pydantic import BaseModel
 import shortuuid
 
 from game import Game, Lobby, LobbyMember, GameMember, load_game_data, GameObjectEncoder
+from game_serialization import (
+    deserialize_save_dict_to_game,
+    serialize_game_to_save_dict,
+)
 import json
 
 import build_game_js
@@ -310,6 +315,7 @@ def _maybe_start_lobby_game(lb: Lobby):
         if getattr(new_game, "phase", None) == "action":
             break
     games[new_game_id] = new_game
+    _record_snapshot(new_game_id, new_game)
 
     lobbies.pop(lb.lobby_id, None)
     return new_game_id
@@ -360,6 +366,47 @@ app.add_middleware(
 lobbies: Dict[str, Lobby] = {}
 games: Dict[str, Game] = {}
 gamers: List[GameMember] = []
+
+# Per-game ring buffer of save-dict snapshots taken right after every state
+# mutation (game boot + every successful action endpoint). Powers the dev
+# client's "Back one step" button. Bounded so a long-running debug game
+# doesn't grow without limit; each snapshot is ~tens of KB. Eventually this
+# will be the unit of disk persistence (see docs/game.md "save/load").
+_GAME_HISTORY_MAX_LEN = 200
+game_histories: Dict[str, deque] = {}
+
+
+def _record_snapshot(game_id: str, game: Game) -> None:
+    """Append the current game state to its history ring buffer.
+
+    Called after every successful state mutation: post-boot, after each action
+    endpoint completes, and after the event-slay-cost endpoint. Failures here
+    must NEVER abort the action — log and continue.
+    """
+    if not game_id or not game:
+        return
+    try:
+        snap = serialize_game_to_save_dict(game)
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[server] WARNING: failed to snapshot game {game_id}: {exc}")
+        return
+    history = game_histories.get(game_id)
+    if history is None:
+        history = deque(maxlen=_GAME_HISTORY_MAX_LEN)
+        game_histories[game_id] = history
+    history.append(snap)
+
+
+def _history_breadcrumb(snap: dict) -> dict:
+    """Lightweight per-snapshot label for the history endpoint."""
+    return {
+        "turn_number": snap.get("turn_number"),
+        "phase": snap.get("phase"),
+        "active_player_id": snap.get("active_player_id"),
+        "tick_id": snap.get("tick_id"),
+        "action_required": (snap.get("action_required") or {}).get("action") or None,
+        "concurrent_action_kind": (snap.get("concurrent_action") or {}).get("kind") if snap.get("concurrent_action") else None,
+    }
 
 _GAME_SHUTDOWN_DELAY_S = 30
 
@@ -655,6 +702,7 @@ async def _finish_draft(lobby_id: str):
             if getattr(new_game, "phase", None) == "action":
                 break
         games[new_game_id] = new_game
+        _record_snapshot(new_game_id, new_game)
         lobbies.pop(lobby_id, None)
         pid_list = [g.player_id for g in gamers if g.game_id == new_game_id]
         await lobby_ws_manager.broadcast_game_started(new_game_id, pid_list)
@@ -1132,6 +1180,7 @@ async def _initiate_game_shutdown(game_id: str, reason: str, initiated_by_player
         if not getattr(g, "shutdown", None):
             return
         games.pop(game_id, None)
+        game_histories.pop(game_id, None)
         # Just in case anything re-added entries.
         global gamers
         gamers = [gm for gm in gamers if gm.game_id != game_id]
@@ -1321,7 +1370,8 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
         
         else:
             raise HTTPException(status_code=400, detail=f"Unknown action type: {request.action_type}")
-        
+
+        _record_snapshot(game_id, game)
         # Push updated state to all WebSocket subscribers for this game.
         await manager.broadcast(game_id, game)
         # If this action ended the game, start the countdown once.
@@ -1359,8 +1409,74 @@ async def apply_event_slay_cost(game_id: str, request: ApplyEventSlayCostRequest
         raise HTTPException(status_code=400, detail=str(e))
     while game.advance_tick():
         pass
+    _record_snapshot(game_id, game)
     await manager.broadcast(game_id, game)
     return {"message": "Event slay cost applied", "game_state": _serialize_game_for_player(game, request.player_id)}
+
+
+@app.get("/api/game/{game_id}/history")
+async def get_game_history(game_id: str):
+    """Return one breadcrumb per recorded snapshot for this game.
+
+    The current live state is the LAST entry. Steps farther from the end
+    are older. Indexes are 0-based and stable for the duration of the
+    response (history may grow before the next call but won't reorder).
+    """
+    game = games.get(game_id)
+    if not game:
+        return game_not_found_json()
+    history = game_histories.get(game_id) or deque()
+    entries = [
+        {"index": i, **_history_breadcrumb(snap)}
+        for i, snap in enumerate(history)
+    ]
+    return {
+        "game_id": game_id,
+        "history": entries,
+        "current_index": len(entries) - 1 if entries else -1,
+        "max_len": _GAME_HISTORY_MAX_LEN,
+        "can_step_back": len(entries) > 1,
+    }
+
+
+@app.post("/api/game/{game_id}/back")
+async def step_game_back(game_id: str):
+    """Pop the most recent snapshot and rehydrate the game from the new tail.
+
+    Dev tool only. Intended for the dev client's "Back one step" button:
+    walks the in-memory snapshot ring backward one entry. The current live
+    state is dropped and replaced with the previous snapshot's rehydrated
+    `Game`. WebSocket sessions are kept alive (they're keyed by `game_id`,
+    not the Game object) and immediately get a fresh state broadcast.
+    """
+    game = games.get(game_id)
+    if not game:
+        return game_not_found_json()
+
+    history = game_histories.get(game_id)
+    if not history or len(history) < 2:
+        raise HTTPException(status_code=400, detail="No earlier snapshot to step back to.")
+
+    history.pop()
+    target_snap = history[-1]
+    try:
+        rebuilt = deserialize_save_dict_to_game(target_snap)
+    except Exception as exc:
+        # Re-push the popped snapshot so the user isn't worse off than before.
+        # This shouldn't happen given the round-trip tests, but be safe.
+        history.append(target_snap)
+        raise HTTPException(status_code=500, detail=f"Failed to restore snapshot: {exc}")
+
+    rebuilt.last_active_time = time.time()
+    games[game_id] = rebuilt
+
+    await manager.broadcast(game_id, rebuilt)
+    return {
+        "message": "Stepped back",
+        "game_id": game_id,
+        "current_index": len(history) - 1,
+        "history_length": len(history),
+    }
 
 
 @app.post("/api/game/{game_id}/abandon")
@@ -1395,6 +1511,7 @@ async def startup_event():
             ]
             for game_id in inactive_games:
                 del games[game_id]
+                game_histories.pop(game_id, None)
                 # Remove gamers from this game
                 global gamers
                 gamers = [g for g in gamers if g.game_id != game_id]

@@ -318,6 +318,65 @@
                 updatePassiveGamePolling(data);
                 refreshTableauActionButtons(data);
                 maybeAutoHarvest(data);
+                refreshHistoryStatus();
+            }
+
+            // ── In-memory back-stepping (debug) ────────────────────────────
+            // Server keeps a per-game ring buffer of save-dict snapshots and
+            // exposes /history (read) and /back (pop+rehydrate). The button
+            // is enabled iff there's an earlier snapshot to step back to.
+            async function refreshHistoryStatus() {
+                const btn = document.getElementById('stepBackBtn');
+                const status = document.getElementById('historyStatus');
+                if (!currentGameId) {
+                    if (btn) btn.disabled = true;
+                    if (status) status.textContent = '';
+                    return;
+                }
+                try {
+                    const r = await fetch(`/api/game/${encodeURIComponent(currentGameId)}/history`);
+                    if (!r.ok) {
+                        if (btn) btn.disabled = true;
+                        if (status) status.textContent = '';
+                        return;
+                    }
+                    const data = await r.json();
+                    const hist = Array.isArray(data?.history) ? data.history : [];
+                    const cur = Number.isInteger(data?.current_index) ? data.current_index : -1;
+                    if (btn) btn.disabled = !data?.can_step_back;
+                    if (status) {
+                        if (!hist.length) {
+                            status.textContent = '';
+                        } else {
+                            const tail = hist[hist.length - 1] || {};
+                            const turn = tail.turn_number != null ? `T${tail.turn_number}` : '';
+                            const phase = tail.phase ? ` ${tail.phase}` : '';
+                            status.textContent = `Step ${cur + 1} of ${hist.length} (${turn}${phase})`;
+                        }
+                    }
+                } catch (_) {
+                    if (btn) btn.disabled = true;
+                    if (status) status.textContent = '';
+                }
+            }
+
+            async function stepGameBack() {
+                if (!currentGameId) return;
+                const btn = document.getElementById('stepBackBtn');
+                if (btn) btn.disabled = true;
+                try {
+                    const r = await fetch(`/api/game/${encodeURIComponent(currentGameId)}/back`, { method: 'POST' });
+                    const data = await r.json().catch(() => ({}));
+                    if (!r.ok) {
+                        alert('Back step failed: ' + (data?.detail || r.status));
+                        return;
+                    }
+                    await getGameState(false);
+                } catch (e) {
+                    alert('Error: ' + e.message);
+                } finally {
+                    refreshHistoryStatus();
+                }
             }
 
             function maybeAutoHarvest(gameState) {
