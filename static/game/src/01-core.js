@@ -65,6 +65,15 @@ let latestGameState = null;
 const PASSIVE_GAME_POLL_MS = 5000;
 let lastRenderedGameId = '';
 let lastRenderedTickId = -1;
+// JSON snapshot of the last fully-rendered state. Used to short-circuit
+// the render pipeline when a poll / WS push delivers a state byte-for-byte
+// identical to what we already painted. We can't rely on tick_id alone:
+// the engine only bumps tick_id at phase boundaries in lifecycle.py, but
+// act_on_required_action / submit_concurrent_action / harvest sub-steps
+// mutate state (prompt stage, owned cards, pending_required_choice, etc.)
+// without changing tick_id, so a strict tick guard silently dropped real
+// updates and left the prompt UI stuck on stale content.
+let lastRenderedStateJson = '';
 let passiveStatePollTimer = null;
 
 /** Narrow layout: max-width breakpoint matches CSS tabbed / carousel mode */
@@ -81,10 +90,12 @@ let centerBoardActiveTabKey = null;
 /** Narrow carousel: horizontal scrollLeft of each player's `.tableau-cards` strip */
 const tableauStripScrollByPlayerId = {};
 
-/** Visual approx. of server 180s inactivity cleanup; refreshed on each state. */
-const INACTIVITY_IDLE_MS = 180000;
-let idleDeadlineMs = 0;
-let idleTickHandle = null;
+/** Server-driven per-action hurry-up clock. The server decides when this
+ *  is armed (active player's standard-action wait); the client only
+ *  re-syncs the local deadline from the most recent state push or poll.
+ *  A null `hurryUpDeadlineMs` means no clock is currently armed. */
+let hurryUpDeadlineMs = null;
+let hurryUpTickHandle = null;
 
 function isGameNotFoundText(s) {
   return String(s || '')
@@ -124,36 +135,50 @@ function vckStoredDisplayName() {
   return '';
 }
 
-function bumpIdleDeadline() {
-  idleDeadlineMs = Date.now() + INACTIVITY_IDLE_MS;
+function syncHurryUpDeadlineFromState(state) {
+  const remaining = state && state.hurry_up_seconds_remaining;
+  if (typeof remaining !== 'number' || !Number.isFinite(remaining)) {
+    hurryUpDeadlineMs = null;
+    return;
+  }
+  hurryUpDeadlineMs = Date.now() + Math.max(0, remaining) * 1000;
 }
 
-function formatIdleCountdownLabel(msLeft) {
+function formatHurryUpCountdownLabel(msLeft) {
   const s = Math.max(0, Math.ceil(msLeft / 1000));
   const m = Math.floor(s / 60);
   const r = s % 60;
   return `${m}:${r.toString().padStart(2, '0')}`;
 }
 
-function tickIdleTimerElements() {
+function tickHurryUpTimerElements() {
   const els = document.querySelectorAll('.tableau-inactive-timer');
   if (!els.length) return;
-  const left = idleDeadlineMs - Date.now();
-  const label = formatIdleCountdownLabel(left);
+  if (hurryUpDeadlineMs == null) {
+    els.forEach(el => {
+      el.textContent = '';
+      el.classList.remove('tableau-inactive-timer--warn');
+    });
+    return;
+  }
+  const left = hurryUpDeadlineMs - Date.now();
+  const label = formatHurryUpCountdownLabel(left);
+  const warn = left <= 30000;
   els.forEach(el => {
     el.textContent = label;
+    el.classList.toggle('tableau-inactive-timer--warn', warn);
   });
 }
 
-function ensureIdleTicking() {
-  if (idleTickHandle != null) return;
-  idleTickHandle = setInterval(() => {
+function ensureHurryUpTicking() {
+  if (hurryUpTickHandle != null) return;
+  hurryUpTickHandle = setInterval(() => {
     if (!document.querySelector('.tableau-inactive-timer')) {
-      clearInterval(idleTickHandle);
-      idleTickHandle = null;
+      clearInterval(hurryUpTickHandle);
+      hurryUpTickHandle = null;
       return;
     }
-    tickIdleTimerElements();
+    tickHurryUpTimerElements();
   }, 1000);
 }
 

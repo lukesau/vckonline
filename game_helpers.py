@@ -34,8 +34,16 @@ def _validate_hire_or_domain_gold_payment(player, scaled_gold_cost, gp, sp, mp, 
 
 
 def _citizen_has_steal(citizen, on_turn):
-    """Return True if this citizen's relevant payout (on- or off-turn) is a steal effect."""
+    """Return True if this citizen's relevant payout (on- or off-turn) is a steal effect.
+
+    Honors the `has_special_payout_*` flag the same way the harvest engine
+    does: if the flag is 0, a stale (non-empty) `special_payout_*` string
+    is ignored entirely — the flag wins.
+    """
     if not citizen:
+        return False
+    flag = "has_special_payout_on_turn" if on_turn else "has_special_payout_off_turn"
+    if not getattr(citizen, flag, False):
         return False
     field = "special_payout_on_turn" if on_turn else "special_payout_off_turn"
     val = (getattr(citizen, field, None) or "").strip().lower()

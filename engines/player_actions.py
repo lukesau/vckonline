@@ -242,6 +242,28 @@ class PlayerActionsEngine:
                 if prc_wg.get("kind") != "harvest_wild_gain_exchange" or prc_wg.get("player_id") != player_id:
                     return
                 act_wg = (action or "").strip().lower()
+                # All harvest exchanges (plain and wild) are optional. Treat
+                # `skip_harvest_exchange` as a uniform decline that resumes the
+                # harvest pipeline (or the domain `action.start` follow-up)
+                # without mutating any resources.
+                if act_wg == "skip_harvest_exchange":
+                    cmd_wg = (prc_wg.get("command") or "").strip()
+                    target_wg = self.game._player_by_id(player_id)
+                    resume_kind = prc_wg.get("context")
+                    self.game.pending_required_choice = None
+                    self.game.action_required["action"] = ""
+                    self.game.action_required["id"] = self.game.game_id
+                    if target_wg:
+                        scores_wg = self.game._player_scores_line(target_wg)
+                        self.game._log_game_event(
+                            f"{self.game._player_label(player_id)} skipped optional harvest exchange "
+                            f"({cmd_wg}); scores unchanged ({scores_wg})."
+                        )
+                    if resume_kind == "action_start":
+                        self.game.domain_effects._resume_after_domain_activation_follow_up()
+                    else:
+                        self.game.harvest._maybe_resume_harvest_prompt()
+                    return
                 if not act_wg.startswith("wild_gain_resource "):
                     return
                 res_wg = act_wg.split()[1] if len(act_wg.split()) > 1 else ""
@@ -262,6 +284,20 @@ class PlayerActionsEngine:
                 if prc_wc.get("kind") != "harvest_wild_cost_exchange" or prc_wc.get("player_id") != player_id:
                     return
                 act_wc = (action or "").strip().lower()
+                if act_wc == "skip_harvest_exchange":
+                    cmd_wc = (prc_wc.get("command") or "").strip()
+                    target_wc = self.game._player_by_id(player_id)
+                    self.game.pending_required_choice = None
+                    self.game.action_required["action"] = ""
+                    self.game.action_required["id"] = self.game.game_id
+                    if target_wc:
+                        scores_wc = self.game._player_scores_line(target_wc)
+                        self.game._log_game_event(
+                            f"{self.game._player_label(player_id)} skipped optional harvest exchange "
+                            f"({cmd_wc}); scores unchanged ({scores_wc})."
+                        )
+                    self.game.harvest._maybe_resume_harvest_prompt()
+                    return
                 if not act_wc.startswith("wild_cost_resource "):
                     return
                 res_wc = act_wc.split()[1] if len(act_wc.split()) > 1 else ""

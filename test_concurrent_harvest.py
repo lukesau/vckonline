@@ -19,7 +19,7 @@ def make_exchange_citizen(citizen_id, special_cmd):
         0, 0,  # strength payout
         0, 0,  # magic payout
         0, 0,  # vp payout
-        False, False,  # has_special_payout_on/off_turn
+        True, True,  # has_special_payout_on/off_turn
         special_cmd, special_cmd,  # special_payout_on_turn/off_turn (so everyone can prompt)
         False,  # special_citizen
         "test",  # expansion
@@ -152,7 +152,7 @@ class ConcurrentHarvestTests(unittest.TestCase):
             0, 0,
             0, 0,
             0, 0,
-            False, False,
+            True, False,  # has_special_payout_on/off_turn (on-turn steal)
             "steal g 1", "",
             False,
             "test",
@@ -216,6 +216,79 @@ class ConcurrentHarvestTests(unittest.TestCase):
         # Each player got exactly +1 gold — not double-applied by a re-opened gate.
         self.assertEqual(p1.gold_score, 1)
         self.assertEqual(p2.gold_score, 1)
+
+    def test_wild_gain_exchange_skip_concurrent(self):
+        # Sorceress-style payout: `exchange m 1 wild 2`. Skipping must leave
+        # the wild exchange's resources untouched (no magic spent, no wild
+        # gain) and clear the concurrent gate. The citizen's printed
+        # `gold_payout_*=1` still applies — only the *special* exchange is
+        # the optional bit being skipped.
+        p1 = Player("p1", "Player 1")
+        p2 = Player("p2", "Player 2")
+        for p in (p1, p2):
+            p.gold_score = 0
+            p.strength_score = 0
+            p.magic_score = 3
+            p.owned_citizens.append(make_exchange_citizen(100, "exchange m 1 wild 2"))
+
+        game = make_game_for_test([p1, p2])
+        game.advance_tick()
+
+        ca = game.concurrent_action
+        self.assertIsNotNone(ca)
+        self.assertEqual(ca.get("kind"), "harvest_choices")
+        prompts = ((ca.get("data") or {}).get("prompts") or {})
+        for pid in (p1.player_id, p2.player_id):
+            self.assertEqual(prompts[pid]["sub_kind"], "harvest_wild_gain_exchange")
+
+        for pid in (p1.player_id, p2.player_id):
+            game.submit_concurrent_action(pid, "skip_harvest_exchange", kind="harvest_choices")
+
+        self.assertIsNone(
+            game.concurrent_action,
+            "Wild-gain exchange gate must clear once every player skips.",
+        )
+        for p in (p1, p2):
+            self.assertEqual(p.gold_score, 1, "Printed gold payout still applies.")
+            self.assertEqual(p.strength_score, 0)
+            self.assertEqual(p.magic_score, 3, "Magic must not be deducted on skip.")
+            self.assertEqual(p.harvest_delta.get("magic", 0), 0)
+
+    def test_wild_cost_exchange_skip_concurrent(self):
+        # Bogatyr-style payout: `exchange wild 1 s 4`. Skipping must leave
+        # the wild exchange's resources untouched (nothing paid, no strength
+        # gained) and clear the concurrent gate. The citizen's printed
+        # `gold_payout_*=1` still applies.
+        p1 = Player("p1", "Player 1")
+        p2 = Player("p2", "Player 2")
+        for p in (p1, p2):
+            p.gold_score = 2
+            p.strength_score = 0
+            p.magic_score = 2
+            p.owned_citizens.append(make_exchange_citizen(100, "exchange wild 1 s 4"))
+
+        game = make_game_for_test([p1, p2])
+        game.advance_tick()
+
+        ca = game.concurrent_action
+        self.assertIsNotNone(ca)
+        self.assertEqual(ca.get("kind"), "harvest_choices")
+        prompts = ((ca.get("data") or {}).get("prompts") or {})
+        for pid in (p1.player_id, p2.player_id):
+            self.assertEqual(prompts[pid]["sub_kind"], "harvest_wild_cost_exchange")
+
+        for pid in (p1.player_id, p2.player_id):
+            game.submit_concurrent_action(pid, "skip_harvest_exchange", kind="harvest_choices")
+
+        self.assertIsNone(
+            game.concurrent_action,
+            "Wild-cost exchange gate must clear once every player skips.",
+        )
+        for p in (p1, p2):
+            self.assertEqual(p.gold_score, 3, "Starts at 2, +1 from printed gold payout, nothing paid on skip.")
+            self.assertEqual(p.strength_score, 0, "Strength must not be granted on skip.")
+            self.assertEqual(p.magic_score, 2, "Magic must not be deducted on skip.")
+            self.assertEqual(p.harvest_delta.get("strength", 0), 0)
 
     def test_ui_serialization_active_player_id_non_null(self):
         p1 = Player("p1", "Player 1")

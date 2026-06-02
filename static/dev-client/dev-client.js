@@ -194,6 +194,20 @@
                 return null;
             }
 
+            // Cache of the last HTML written into #lobbyStatus. The debug page
+            // polls /api/lobby/status every 2s; before this cache, every poll
+            // unconditionally replaced innerHTML, which closed any open
+            // <select> dropdowns (e.g. the owner's preset / min-players menus
+            // are nested inside the lobby card HTML, so they got destroyed
+            // mid-interaction). Only touching innerHTML when the html string
+            // actually changes preserves open dropdowns.
+            let _lastLobbyStatusHtml = null;
+            function _writeLobbyStatusHtml(html) {
+                if (html === _lastLobbyStatusHtml) return;
+                _lastLobbyStatusHtml = html;
+                document.getElementById('lobbyStatus').innerHTML = html;
+            }
+
             async function getLobbyStatus() {
                 try {
                     const url = playerId
@@ -204,8 +218,7 @@
                     if (!response.ok) throw new Error(data.detail || 'Status failed');
 
                     if (data.in_game && data.game_id) {
-                        document.getElementById('lobbyStatus').innerHTML =
-                            `<p><strong>You are in game: ${data.game_id}</strong></p>`;
+                        _writeLobbyStatusHtml(`<p><strong>You are in game: ${data.game_id}</strong></p>`);
                         if (data.game_id !== currentGameId) {
                             openVisualGameClientTab(data.game_id);
                             currentGameId = data.game_id;
@@ -270,7 +283,7 @@
                         card += '</div>';
                         html += card;
                     });
-                    document.getElementById('lobbyStatus').innerHTML = html;
+                    _writeLobbyStatusHtml(html);
                 } catch (error) {
                     console.error('Error:', error);
                 }
@@ -1160,11 +1173,29 @@
 
                 const dukes = Array.isArray(subject.owned_dukes) ? subject.owned_dukes : [];
                 const duke = dukes.length ? dukes[0] : null;
-                const dukeName = duke ? (duke?.name || 'Duke') : 'None';
-                const dukeText = duke ? cardFullText(duke) : '';
+                const dukeVisible = !!duke && duke.is_visible !== false;
+                let dukeName;
+                if (!duke) dukeName = 'None';
+                else if (!dukeVisible) dukeName = 'Hidden (opponent)';
+                else dukeName = duke?.name || 'Duke';
+                const dukeText = dukeVisible ? cardFullText(duke) : '';
+                const proj = dukeVisible ? subject.duke_vp_projection : null;
+                let dukeProjectionBlock = '';
+                if (proj && typeof proj === 'object') {
+                    const lines = Array.isArray(proj.duke_vp_breakdown) ? proj.duke_vp_breakdown : [];
+                    const linesHtml = lines.length
+                        ? lines.map(l => `<li><strong>${escapeHtml(l.label || '')}:</strong> +${Number(l.vp || 0)} VP${l.detail ? ` <span style="color:#666;">(${escapeHtml(l.detail)})</span>` : ''}</li>`).join('')
+                        : '<li style="color:#666;font-style:italic;">No duke VP yet</li>';
+                    dukeProjectionBlock = `
+                        <div style="margin-top:8px;padding:6px 8px;background:rgba(0,0,0,0.04);border-radius:4px;">
+                            <ul style="margin:0 0 4px 16px;padding:0;font-size:13px;">${linesHtml}</ul>
+                            <div style="font-weight:700;font-size:13px;">${Number(proj.base_vp || 0)} base + ${Number(proj.duke_vp || 0)} Duke = ${Number(proj.total_vp || 0)} VP</div>
+                        </div>`;
+                }
                 const dukeLine = `<div class="mini" style="margin-bottom:12px;">
                     <strong>Duke:</strong> ${escapeHtml(dukeName)}
                     ${dukeText ? `<div style="margin-top:6px;white-space:pre-wrap;color:#333;">${escapeHtml(dukeText)}</div>` : ''}
+                    ${dukeProjectionBlock}
                 </div>`;
 
                 bodyEl.innerHTML = `
@@ -1410,7 +1441,18 @@
                         effectsEl.innerHTML = '<strong>Roll phase effects:</strong> none';
                     } else {
                         const rows = effects.map((e) => {
-                            return `<li><strong>${escapeHtml(e.domainName)}</strong>: set one die to <strong>${escapeHtml(String(e.target))}</strong> (cost: <code>${escapeHtml(e.costSpec)}</code>)</li>`;
+                            let effectText = '';
+                            if (e.mode === 'target') {
+                                effectText = `set one die to <strong>${escapeHtml(String(e.target))}</strong>`;
+                            } else if (e.mode === 'subtract') {
+                                effectText = `subtract <strong>${escapeHtml(String(e.delta))}</strong> from one die`;
+                            } else if (e.mode === 'add') {
+                                effectText = `add <strong>${escapeHtml(String(e.delta))}</strong> to one die`;
+                            } else {
+                                effectText = 'modify one die';
+                            }
+                            const costText = e.costSpec ? `<code>${escapeHtml(e.costSpec)}</code>` : 'free';
+                            return `<li><strong>${escapeHtml(e.domainName)}</strong>: ${effectText} (cost: ${costText})</li>`;
                         }).join('');
                         effectsEl.innerHTML = `<strong>Roll phase effects (active player):</strong><ul>${rows}</ul>`;
                     }
@@ -2159,12 +2201,13 @@
                     const label = `Pay ${n} ${labels[r] || r.toUpperCase()}`;
                     return `<button type="button" onclick="sendWildCostResource('${escapeHtml(r)}')">${escapeHtml(label)}</button>`;
                 }).join(' ');
+                const skipBtn = `<button type="button" onclick="sendHarvestExchangeSkip()">Skip (keep resources)</button>`;
 
                 panel.innerHTML = `
                     <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
                         <div style="font-weight:700;margin-bottom:8px;">Harvest: pay for +${escapeHtml(gainLabel)}</div>
-                        <div class="mini" style="margin-bottom:8px;color:#333;">Choose which resource to pay.</div>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;">${btns}</div>
+                        <div class="mini" style="margin-bottom:8px;color:#333;">Choose which resource to pay, or skip.</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">${btns}${skipBtn}</div>
                     </div>`;
             }
 
@@ -2213,12 +2256,13 @@
                     const label = `Gain ${gainAmt} ${labels[r] || r.toUpperCase()}`;
                     return `<button type="button" onclick="sendWildGainResource('${escapeHtml(r)}')">${escapeHtml(label)}</button>`;
                 }).join(' ');
+                const skipBtn = `<button type="button" onclick="sendHarvestExchangeSkip()">Skip (keep resources)</button>`;
 
                 panel.innerHTML = `
                     <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
                         <div style="font-weight:700;margin-bottom:8px;">Harvest: pay ${escapeHtml(costLabel)}</div>
-                        <div class="mini" style="margin-bottom:8px;color:#333;">Choose which resource to gain (${gainAmt}).</div>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;">${btns}</div>
+                        <div class="mini" style="margin-bottom:8px;color:#333;">Choose which resource to gain (${gainAmt}), or skip.</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">${btns}${skipBtn}</div>
                     </div>`;
             }
 
@@ -2629,18 +2673,20 @@
                 if (sub === 'harvest_wild_cost_exchange') {
                     const opts = Array.isArray(prc.cost_options) ? prc.cost_options : [];
                     const labels = { g: 'Gold', s: 'Strength', m: 'Magic', v: 'VP' };
-                    return opts.map(o => {
+                    const choices = opts.map(o => {
                         const r = (o?.resource || '').toLowerCase();
                         const n = Number(o?.amount || 0);
                         return `<button type="button" onclick="${act(`wild_cost_resource ${r}`)}">Pay ${n} ${escapeHtml(labels[r] || r.toUpperCase())}</button>`;
                     }).join(' ');
+                    return `${choices} <button type="button" onclick="${act('skip_harvest_exchange')}">Skip</button>`;
                 }
                 if (sub === 'harvest_wild_gain_exchange') {
                     const gainAmt = Number(prc.gain_amount || 0);
                     const labels = { g: 'Gold', s: 'Strength', m: 'Magic' };
-                    return ['g', 's', 'm'].map(r =>
+                    const choices = ['g', 's', 'm'].map(r =>
                         `<button type="button" onclick="${act(`wild_gain_resource ${r}`)}">Gain ${gainAmt} ${escapeHtml(labels[r])}</button>`
                     ).join(' ');
+                    return `${choices} <button type="button" onclick="${act('skip_harvest_exchange')}">Skip</button>`;
                 }
                 if (sub === 'bonus_resource_choice') {
                     return `

@@ -87,11 +87,41 @@ function render(state) {
   if (incomingGameId) lastRenderedGameId = incomingGameId;
   if (Number.isFinite(incomingTick)) lastRenderedTickId = incomingTick;
 
+  // Skip the heavy DOM rebuild when this state is byte-for-byte identical
+  // to what we already rendered. The passive poll (5s) and concurrent poll
+  // (1.5s while waiting on other players) both re-fetch the current state
+  // to recover from dropped WS pushes; before this guard, those polls
+  // rebuilt the entire tableau on every cycle and caused:
+  //   • brief scrollbar flicker on the bottom carousel every 5s
+  //   • prompt modal body/footer being destroyed every 1.5s during
+  //     concurrent gates, interrupting scrollbar drags in the duke
+  //     selection modal (Webkit cancels a drag when its scrolling
+  //     element's children are replaced underneath it)
+  // We compare full JSON rather than tick_id because tick_id is only
+  // bumped at phase boundaries in engines/lifecycle.py; mid-flow
+  // transitions (harvest steal stages, submit_concurrent_action
+  // completions, etc.) mutate state without changing tick_id, so a
+  // tick-only guard silently dropped real updates. The encoder in
+  // game_serialization.py emits keys in deterministic order, so two
+  // serializations of the same game state produce identical strings.
+  let incomingJson;
+  try {
+    incomingJson = JSON.stringify(state);
+  } catch (_) {
+    incomingJson = '';
+  }
+  if (incomingJson && incomingJson === lastRenderedStateJson) {
+    syncHurryUpDeadlineFromState(state);
+    tickHurryUpTimerElements();
+    return;
+  }
+  lastRenderedStateJson = incomingJson;
+
   latestGameState = state;
+  syncHurryUpDeadlineFromState(state);
   if (typeof refreshOpenCardInspectModal === 'function') {
     refreshOpenCardInspectModal();
   }
-  bumpIdleDeadline();
   // During blocking concurrent prompts (e.g. choose duke), we poll frequently.
   // Rebuilding the entire board every poll causes narrow-layout tableau/carousel
   // scroll resets + scrollbar flicker. While the prompt overlay is open and the
@@ -104,8 +134,8 @@ function render(state) {
   if (hasBlockingConcurrent && promptOverlayOpen) {
     syncConcurrentPolling(state);
     renderPromptModal(state);
-    tickIdleTimerElements();
-    ensureIdleTicking();
+    tickHurryUpTimerElements();
+    ensureHurryUpTicking();
     return;
   }
 
@@ -131,8 +161,8 @@ function render(state) {
   syncConcurrentPolling(state);
   maybeAutoFinalizeRoll(state);
   renderPromptModal(state);
-  tickIdleTimerElements();
-  ensureIdleTicking();
+  tickHurryUpTimerElements();
+  ensureHurryUpTicking();
 }
 
 function clearEl(id) {
@@ -387,7 +417,16 @@ function renderTableauCarousel(state, bottomEl) {
     const dot = document.createElement('button');
     dot.type = 'button';
     dot.className = 'board-tab';
-    dot.textContent = p.name || `Player ${i + 1}`;
+    const labelEl = document.createElement('span');
+    labelEl.className = 'board-tab-label';
+    labelEl.textContent = p.name || `Player ${i + 1}`;
+    dot.appendChild(labelEl);
+    if (PLAYER_ID && idsMatch(p.player_id, PLAYER_ID)) {
+      const youTag = document.createElement('span');
+      youTag.className = 'board-tab-you-tag';
+      youTag.textContent = 'You';
+      dot.appendChild(youTag);
+    }
     dot.addEventListener('click', () => {
       const slide = viewport.children[i];
       const pl = players[i];
@@ -635,7 +674,7 @@ function makeResourceActionBar(state) {
   resourceBar.className = 'resource-action-bar' + (canTake ? '' : ' resource-action-bar--inactive');
   ['gold', 'strength', 'magic'].forEach(r => {
     const lab = r.charAt(0).toUpperCase() + r.slice(1);
-    const btn = promptButton(`+1 ${lab}`, () => {
+    const btn = promptButton('', () => {
       if (!canOfferTakeResourceAction(latestGameState)) return;
       confirmAndPostGameAction(
         { player_id: PLAYER_ID, action_type: 'take_resource', resource: r },
@@ -645,6 +684,13 @@ function makeResourceActionBar(state) {
         },
       );
     });
+    btn.classList.add('resource-action-btn', `resource-action-btn--${r}`);
+    btn.appendChild(document.createTextNode(`+1 ${lab}`));
+    const icon = document.createElement('img');
+    icon.className = 'resource-action-btn-icon';
+    icon.alt = '';
+    icon.src = TABLEAU_RESOURCE_ICONS[r];
+    btn.appendChild(icon);
     if (!canTake) btn.disabled = true;
     resourceBar.appendChild(btn);
   });
@@ -718,23 +764,16 @@ function openDiceInfoModal(state) {
   closeBtn.addEventListener('click', () => overlay.remove());
   panel.appendChild(closeBtn);
 
+  // Hosts whose contents depend on live state. We replace their innerHTML on
+  // every refresh so the modal stays accurate as phase/turn change while open.
   const phase = mk('phase-label');
-  phase.textContent = fmtPhase(state.phase);
   panel.appendChild(phase);
 
   const tn = mk('turn-label');
-  const t = activeTurnNamePart(state);
-  const turnWho = t.hasActive ? ` — ${t.isMe ? 'your' : `${t.displayName}'s`} turn` : '';
-  tn.textContent = `Turn ${state.turn_number || 1}${turnWho}`;
-  tn.title = tn.textContent;
   panel.appendChild(tn);
 
-  if (state.end_game_triggered) {
-    const eg = mk('turn-label');
-    eg.textContent = '⚑ Final round';
-    eg.style.color = 'var(--gold)';
-    panel.appendChild(eg);
-  }
+  const endgameHost = document.createElement('div');
+  panel.appendChild(endgameHost);
 
   const lobby = document.createElement('a');
   lobby.href = '/';
@@ -762,7 +801,57 @@ function openDiceInfoModal(state) {
   rulebook.target = '_blank';
   rulebook.rel = 'noopener noreferrer';
   panel.appendChild(rulebook);
-  panel.appendChild(makeGameLog(state));
+
+  const logHost = document.createElement('div');
+  panel.appendChild(logHost);
+
+  // Cache of the last rendered log fingerprint. Used so we can skip the
+  // DOM swap when nothing changed — that's what was losing the user's scroll
+  // position on every state poll while the modal was open.
+  let lastLogFingerprint = null;
+
+  function logFingerprint(arr) {
+    if (!Array.isArray(arr) || !arr.length) return '0||';
+    const entryText = e => ((e && typeof e === 'object' ? e.msg : e) ?? '').toString();
+    const head = entryText(arr[0]);
+    const tail = entryText(arr[arr.length - 1]);
+    return `${arr.length}|${head}|${tail}`;
+  }
+
+  function renderFromState() {
+    const s = latestGameState || state;
+    if (!s) return;
+    phase.textContent = fmtPhase(s.phase);
+    const t = activeTurnNamePart(s);
+    const turnWho = t.hasActive ? ` — ${t.isMe ? 'your' : `${t.displayName}'s`} turn` : '';
+    tn.textContent = `Turn ${s.turn_number || 1}${turnWho}`;
+    tn.title = tn.textContent;
+
+    endgameHost.innerHTML = '';
+    if (s.end_game_triggered) {
+      const eg = mk('turn-label');
+      eg.textContent = '⚑ Final round';
+      eg.style.color = 'var(--gold)';
+      endgameHost.appendChild(eg);
+    }
+
+    // Only rebuild the log if it actually changed, and preserve the user's
+    // scroll position across the swap so polling doesn't yank them off
+    // whatever entry they were reading.
+    const fp = logFingerprint(s.game_log);
+    if (fp !== lastLogFingerprint) {
+      const existing = logHost.querySelector('.game-log');
+      const prevScrollTop = existing ? existing.scrollTop : 0;
+      logHost.innerHTML = '';
+      const rebuilt = makeGameLog(s);
+      logHost.appendChild(rebuilt);
+      rebuilt.scrollTop = prevScrollTop;
+      lastLogFingerprint = fp;
+    }
+  }
+
+  renderFromState();
+  overlay._refreshFromLiveState = renderFromState;
 
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
@@ -1101,13 +1190,31 @@ function makeHeader(player, state) {
   name.appendChild(document.createTextNode(player.name));
   nameRow.appendChild(name);
 
+  if (PLAYER_ID && idsMatch(player.player_id, PLAYER_ID)) {
+    const youTag = mk('player-you-tag');
+    youTag.textContent = 'You';
+    youTag.title = 'This is your tableau';
+    youTag.setAttribute('aria-label', 'This is your tableau');
+    nameRow.appendChild(youTag);
+  }
+
   if (isActiveTurnForPlayer(player, state)) {
+    const actions = Math.max(0, Number(state?.actions_remaining || 0));
+    const actionsBadge = mk('tableau-actions-remaining');
+    actionsBadge.textContent = `${actions} action${actions === 1 ? '' : 's'} remaining`;
+    actionsBadge.title = 'Standard actions remaining in this turn (turn ends when this hits 0).';
+    actionsBadge.setAttribute(
+      'aria-label',
+      `${actions} standard action${actions === 1 ? '' : 's'} remaining this turn`,
+    );
+    nameRow.appendChild(actionsBadge);
+
     const tim = mk('tableau-inactive-timer');
     tim.title =
-      'Approximate idle time before this table may close if nobody acts (resets on activity).';
+      'Hurry-up timer for this action. If it hits 0:00 the server auto-takes +1 of the active player\'s lowest resource.';
     tim.setAttribute(
       'aria-label',
-      'Approximate idle time before this table may close if nobody acts',
+      'Hurry-up timer for this action. If it hits zero the active player auto-takes their lowest resource.',
     );
     nameRow.appendChild(tim);
   }
@@ -1222,10 +1329,29 @@ function makeCard(card, mode) {
       _appendCardText(el, card, mode);
     };
 
-    if (card.is_flipped) {
-      // Flipped citizens: viewer knows the card, but it is physically face-down.
-      // Render both faces stacked in a 3D flip-stage so the CSS animation can
-      // periodically rotate between the back and the (already-known) front.
+    // Cards that are "physically face-down but the viewer is allowed to see
+    // them" use a shared cross-fade flip stage: the back rests as the steady
+    // state and the front periodically peeks through. Covers two distinct
+    // gameplay states:
+    //   - Flipped tableau citizens (`is_flipped`) — engine actually flipped
+    //     them; viewer still knows the identity.
+    //   - The viewer's OWN duke — technically face-down in the rules, but we
+    //     show it because it's their secret. The flicker is a "this is
+    //     secret" hint.
+    // Opponent dukes are obscured (the server emits a stub with
+    // `is_visible: false`) and intentionally fall through to the plain `<img>`
+    // path below, which uses the duke back image via `cardImageUrl`. Showing
+    // a flip stage with a back on both faces would just be wasted DOM.
+    // The wrapping `.card[data-card]` element still receives clicks (the
+    // flip-stage uses `pointer-events: none`), so the delegated handler in
+    // 03-modals.js continues to open the full card modal as usual.
+    const useFlipStage = card.is_flipped
+      || (card.duke_id !== undefined && !cardObscuredFromViewer(card));
+
+    if (useFlipStage) {
+      if (card.duke_id !== undefined && !card.is_flipped) {
+        el.classList.add('flipping');
+      }
       const stage = mk('card-flip-stage');
       const inner = mk('card-flip-inner');
 

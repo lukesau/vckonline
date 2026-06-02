@@ -10,6 +10,7 @@ import random
 import time
 from constants import *
 from cards import *
+from game_setup import DEBUG_DIE_ONE_VALUES, DEBUG_DIE_TWO_VALUES
 from game_helpers import (
     _n,
     _validate_hire_or_domain_gold_payment,

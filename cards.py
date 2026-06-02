@@ -29,6 +29,26 @@ class Card:
         self.is_accessible = toggle
 
 
+def _apply_persisted_card_flags(card, data):
+    """Restore Card-base visibility/accessibility from a `to_dict()` payload.
+
+    Subclass `from_dict()` methods construct a fresh instance via `__init__`,
+    which always re-runs `Card.__init__` and resets `is_visible`/`is_accessible`
+    to False. That breaks save/load round-trips (and the dev "Back one step"
+    button) because the client treats `is_visible == false` as "show the card
+    back" — so a rehydrated game would render every face-up card as obscured.
+    Each `from_dict` ends with a call to this helper so the persisted flags
+    survive the round-trip.
+    """
+    if not isinstance(data, dict) or card is None:
+        return card
+    if "is_visible" in data:
+        card.is_visible = bool(data["is_visible"])
+    if "is_accessible" in data:
+        card.is_accessible = bool(data["is_accessible"])
+    return card
+
+
 class Starter(Card):
     def __init__(self, starter_id, name, roll_match1, roll_match2, gold_payout_on_turn, gold_payout_off_turn,
                  strength_payout_on_turn, strength_payout_off_turn, magic_payout_on_turn, magic_payout_off_turn,
@@ -53,11 +73,13 @@ class Starter(Card):
         # Non-dice activation gate. Empty string -> use roll_match. Substrings
         # "doubles" and "no_payout" are recognized by the harvest engine.
         self.activation_trigger = activation_trigger or ""
+        # Starters are dealt directly to player tableaus and are always public.
+        self.toggle_visibility(True)
 
     def to_dict(self):
         return {
+            **super().to_dict(),
             "starter_id": self.starter_id,
-            "name": self.name,
             "roll_match1": self.roll_match1,
             "roll_match2": self.roll_match2,
             "gold_payout_on_turn": self.gold_payout_on_turn,
@@ -76,13 +98,14 @@ class Starter(Card):
 
     @classmethod
     def from_dict(cls, data):
-        return cls(data["starter_id"], data["name"], data["roll_match1"], data["roll_match2"],
+        card = cls(data["starter_id"], data["name"], data["roll_match1"], data["roll_match2"],
                    data["gold_payout_on_turn"], data["gold_payout_off_turn"], data["strength_payout_on_turn"],
                    data["strength_payout_off_turn"], data["magic_payout_on_turn"], data["magic_payout_off_turn"],
                    data["has_special_payout_on_turn"], data["has_special_payout_off_turn"],
                    data["special_payout_on_turn"],
                    data["special_payout_off_turn"], data["expansion"],
                    data.get("activation_trigger", ""))
+        return _apply_persisted_card_flags(card, data)
 
 
 class Citizen(Card):
@@ -157,7 +180,7 @@ class Citizen(Card):
 
     @classmethod
     def from_dict(cls, dict_):
-        return cls(citizen_id=dict_["citizen_id"],
+        card = cls(citizen_id=dict_["citizen_id"],
                    name=dict_["name"],
                    gold_cost=dict_["gold_cost"],
                    roll_match1=dict_["roll_match1"],
@@ -181,6 +204,7 @@ class Citizen(Card):
                    special_citizen=dict_["special_citizen"],
                    expansion=dict_["expansion"],
                    is_flipped=bool(dict_.get("is_flipped", False)))
+        return _apply_persisted_card_flags(card, dict_)
 
 
 class Domain(Card):
@@ -232,7 +256,7 @@ class Domain(Card):
 
     @classmethod
     def from_dict(cls, dict_):
-        return cls(
+        card = cls(
             domain_id=dict_['domain_id'],
             name=dict_['name'],
             gold_cost=dict_['gold_cost'],
@@ -249,6 +273,7 @@ class Domain(Card):
             expansion=dict_['expansion'],
             acquired_turn_number=dict_.get('acquired_turn_number'),
         )
+        return _apply_persisted_card_flags(card, dict_)
 
 
 class Monster(Card):
@@ -298,7 +323,7 @@ class Monster(Card):
 
     @classmethod
     def from_dict(cls, d):
-        return cls(
+        card = cls(
             d['monster_id'],
             d['name'],
             d['area'],
@@ -317,6 +342,7 @@ class Monster(Card):
             d['is_extra'],
             d['expansion'],
         )
+        return _apply_persisted_card_flags(card, d)
 
     def add_strength_cost(self, added_strength):
         self.strength_cost = self.strength_cost + added_strength
@@ -389,9 +415,10 @@ class Duke(Card):
         beast_mult = data["beast_multiplier"]
         titan_mult = data["titan_multiplier"]
         expansion = data["expansion"]
-        return cls(duke_id, name, gold_mult, strength_mult, magic_mult, shadow_mult, holy_mult, soldier_mult,
+        card = cls(duke_id, name, gold_mult, strength_mult, magic_mult, shadow_mult, holy_mult, soldier_mult,
                    worker_mult, monster_mult, citizen_mult, domain_mult, boss_mult, minion_mult, beast_mult,
                    titan_mult, expansion)
+        return _apply_persisted_card_flags(card, data)
 
 
 class Exhausted(Card):
@@ -410,7 +437,8 @@ class Exhausted(Card):
 
     @classmethod
     def from_dict(cls, d):
-        return cls(d["exhausted_id"])
+        card = cls(d["exhausted_id"])
+        return _apply_persisted_card_flags(card, d)
 
 
 class Event(Card):
@@ -477,7 +505,7 @@ class Event(Card):
 
     @classmethod
     def from_dict(cls, d):
-        return cls(
+        card = cls(
             event_id=d["event_id"],
             name=d["name"],
             roll_match1=d["roll_match1"],
@@ -502,3 +530,4 @@ class Event(Card):
             extra_magic_cost=d.get("extra_magic_cost", 0),
             extra_gold_cost=d.get("extra_gold_cost", 0),
         )
+        return _apply_persisted_card_flags(card, d)

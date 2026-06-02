@@ -72,9 +72,13 @@ class HarvestEngine:
         self.game._immediate_slay_source_label = card_name
         def _special_cmd(obj, which):
             """
-            Some DB rows historically relied on a boolean has_special_payout_* flag.
-            In practice, the command text being present is sufficient, so treat
-            non-empty special_payout_* as the source of truth (ignoring "0").
+            Normalize a `special_payout_*` column for dispatch. The
+            `has_special_payout_*` flag is the source of truth for whether
+            the special payout fires at all (checked by the caller); this
+            helper just trims whitespace and treats the legacy "0" sentinel
+            as empty so it never gets handed to `execute_special_payout`.
+            A stale, non-empty string with `has_special_payout_*=False` is
+            silently ignored — the flag wins.
             """
             raw = getattr(obj, which, None)
             cmd = ("" if raw is None else str(raw)).strip()
@@ -93,7 +97,7 @@ class HarvestEngine:
                     player.magic_score = int(player.magic_score) + dm
                     self._bump_harvest_delta(player, dg, ds, dm, 0)
                     cmd = _special_cmd(s, "special_payout_on_turn")
-                    if getattr(s, "has_special_payout_on_turn", False) or cmd:
+                    if getattr(s, "has_special_payout_on_turn", False):
                         payout = self.game.payouts.execute_special_payout(cmd or s.special_payout_on_turn, player.player_id)
                         player.gold_score = int(player.gold_score) + payout[0]
                         player.strength_score = int(player.strength_score) + payout[1]
@@ -109,7 +113,7 @@ class HarvestEngine:
                     player.magic_score = int(player.magic_score) + dm
                     self._bump_harvest_delta(player, dg, ds, dm, 0)
                     cmd = _special_cmd(s, "special_payout_off_turn")
-                    if getattr(s, "has_special_payout_off_turn", False) or cmd:
+                    if getattr(s, "has_special_payout_off_turn", False):
                         payout = self.game.payouts.execute_special_payout(cmd or s.special_payout_off_turn, player.player_id)
                         player.gold_score = int(player.gold_score) + payout[0]
                         player.strength_score = int(player.strength_score) + payout[1]
@@ -130,7 +134,7 @@ class HarvestEngine:
                 player.victory_score = int(player.victory_score) + dv
                 self._bump_harvest_delta(player, dg, ds, dm, dv)
                 cmd = _special_cmd(c, "special_payout_on_turn")
-                if getattr(c, "has_special_payout_on_turn", False) or cmd:
+                if getattr(c, "has_special_payout_on_turn", False):
                     payout = self.game.payouts.execute_special_payout(cmd or c.special_payout_on_turn, player.player_id)
                     player.gold_score = int(player.gold_score) + payout[0]
                     player.strength_score = int(player.strength_score) + payout[1]
@@ -148,7 +152,7 @@ class HarvestEngine:
                 player.victory_score = int(player.victory_score) + dv
                 self._bump_harvest_delta(player, dg, ds, dm, dv)
                 cmd = _special_cmd(c, "special_payout_off_turn")
-                if getattr(c, "has_special_payout_off_turn", False) or cmd:
+                if getattr(c, "has_special_payout_off_turn", False):
                     payout = self.game.payouts.execute_special_payout(cmd or c.special_payout_off_turn, player.player_id)
                     player.gold_score = int(player.gold_score) + payout[0]
                     player.strength_score = int(player.strength_score) + payout[1]
@@ -862,12 +866,12 @@ class HarvestEngine:
             gain_amt = int(parts[4])
         except (ValueError, IndexError):
             return [-9999, 0, 0, 0]
-        if cost_res not in self.game._WILD_SCORE_MAP or cost_amt <= 0 or gain_amt <= 0:
+        if cost_res not in self._WILD_SCORE_MAP or cost_amt <= 0 or gain_amt <= 0:
             return [-9999, 0, 0, 0]
         player = self.game._player_by_id(player_id)
         if not player:
             return [-9999, 0, 0, 0]
-        if int(getattr(player, self.game._WILD_SCORE_MAP[cost_res], 0) or 0) < cost_amt:
+        if int(getattr(player, self._WILD_SCORE_MAP[cost_res], 0) or 0) < cost_amt:
             return [0, 0, 0, 0]
         self.game.pending_required_choice = {
             "kind": "harvest_wild_gain_exchange",
@@ -890,10 +894,10 @@ class HarvestEngine:
         cost_amt = prc["cost_amount"]
         gain_amt = prc["gain_amount"]
         before = self.game._player_scores_line(player)
-        setattr(player, self.game._WILD_SCORE_MAP[cost_res],
-                int(getattr(player, self.game._WILD_SCORE_MAP[cost_res], 0)) - cost_amt)
-        setattr(player, self.game._WILD_SCORE_MAP[gain_res],
-                int(getattr(player, self.game._WILD_SCORE_MAP[gain_res], 0)) + gain_amt)
+        setattr(player, self._WILD_SCORE_MAP[cost_res],
+                int(getattr(player, self._WILD_SCORE_MAP[cost_res], 0)) - cost_amt)
+        setattr(player, self._WILD_SCORE_MAP[gain_res],
+                int(getattr(player, self._WILD_SCORE_MAP[gain_res], 0)) + gain_amt)
         dg = (-cost_amt if cost_res == "g" else 0) + (gain_amt if gain_res == "g" else 0)
         ds = (-cost_amt if cost_res == "s" else 0) + (gain_amt if gain_res == "s" else 0)
         dm = (-cost_amt if cost_res == "m" else 0) + (gain_amt if gain_res == "m" else 0)
@@ -916,7 +920,7 @@ class HarvestEngine:
         except (ValueError, IndexError):
             return [-9999, 0, 0, 0]
         gain_res = parts[3].lower()
-        if gain_res not in self.game._WILD_SCORE_MAP or cost_amt <= 0 or gain_amt <= 0:
+        if gain_res not in self._WILD_SCORE_MAP or cost_amt <= 0 or gain_amt <= 0:
             return [-9999, 0, 0, 0]
         player = self.game._player_by_id(player_id)
         if not player:
@@ -924,7 +928,7 @@ class HarvestEngine:
         options = [
             {"resource": res, "amount": cost_amt}
             for res in ("g", "s", "m")
-            if int(getattr(player, self.game._WILD_SCORE_MAP[res], 0) or 0) >= cost_amt
+            if int(getattr(player, self._WILD_SCORE_MAP[res], 0) or 0) >= cost_amt
         ]
         if not options:
             return [0, 0, 0, 0]
@@ -952,10 +956,10 @@ class HarvestEngine:
         gain_res = prc["gain_resource"]
         gain_amt = prc["gain_amount"]
         before = self.game._player_scores_line(player)
-        setattr(player, self.game._WILD_SCORE_MAP[cost_res],
-                int(getattr(player, self.game._WILD_SCORE_MAP[cost_res], 0)) - cost_amt)
-        setattr(player, self.game._WILD_SCORE_MAP[gain_res],
-                int(getattr(player, self.game._WILD_SCORE_MAP[gain_res], 0)) + gain_amt)
+        setattr(player, self._WILD_SCORE_MAP[cost_res],
+                int(getattr(player, self._WILD_SCORE_MAP[cost_res], 0)) - cost_amt)
+        setattr(player, self._WILD_SCORE_MAP[gain_res],
+                int(getattr(player, self._WILD_SCORE_MAP[gain_res], 0)) + gain_amt)
         dg = (-cost_amt if cost_res == "g" else 0) + (gain_amt if gain_res == "g" else 0)
         ds = (-cost_amt if cost_res == "s" else 0) + (gain_amt if gain_res == "s" else 0)
         dm = (-cost_amt if cost_res == "m" else 0) + (gain_amt if gain_res == "m" else 0)

@@ -848,20 +848,32 @@ function harvestPromptButtons(prompt, state) {
   if (sub === 'harvest_wild_cost_exchange') {
     const costOpts = Array.isArray(prc.cost_options) ? prc.cost_options : [];
     const labels = { g: 'Gold', s: 'Strength', m: 'Magic', v: 'VP' };
-    return costOpts.map(opt => {
+    const buttons = costOpts.map(opt => {
       const r = (opt?.resource || '').toLowerCase();
       const n = Number(opt?.amount || 0);
       return promptButton(`Pay ${n} ${labels[r] || r.toUpperCase()}`, () =>
         post(`wild_cost_resource ${r}`));
     });
+    buttons.push(promptButton('Skip', () => post('skip_harvest_exchange', {
+      title: 'Skip exchange?',
+      message: 'Keep your resources and skip this optional harvest exchange.',
+      confirmLabel: 'Skip',
+    }), true));
+    return buttons;
   }
 
   if (sub === 'harvest_wild_gain_exchange') {
     const gainAmt = Number(prc.gain_amount || 0);
     const labels = { g: 'Gold', s: 'Strength', m: 'Magic' };
-    return ['g', 's', 'm'].map(r =>
+    const buttons = ['g', 's', 'm'].map(r =>
       promptButton(`Gain ${gainAmt} ${labels[r]}`, () =>
         post(`wild_gain_resource ${r}`)));
+    buttons.push(promptButton('Skip', () => post('skip_harvest_exchange', {
+      title: 'Skip exchange?',
+      message: 'Keep your resources and skip this optional harvest exchange.',
+      confirmLabel: 'Skip',
+    }), true));
+    return buttons;
   }
 
   if (sub === 'bonus_resource_choice') {
@@ -1461,6 +1473,18 @@ function renderHarvestWildCostExchangePrompt(state) {
       action: `wild_cost_resource ${r}`,
     }));
   });
+  buttons.push(promptButton('Skip (keep resources)', () => confirmAndPostGameAction(
+    {
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: 'skip_harvest_exchange',
+    },
+    {
+      title: 'Skip exchange?',
+      message: 'Keep your resources and skip this optional harvest exchange.',
+      confirmLabel: 'Skip',
+    },
+  ), true));
 
   openPromptOverlayShell({
     title: `Harvest: gain ${gainLabel}`,
@@ -1512,6 +1536,18 @@ function renderHarvestWildGainExchangePrompt(state) {
       action: `wild_gain_resource ${r}`,
     }));
   });
+  buttons.push(promptButton('Skip (keep resources)', () => confirmAndPostGameAction(
+    {
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: 'skip_harvest_exchange',
+    },
+    {
+      title: 'Skip exchange?',
+      message: 'Keep your resources and skip this optional harvest exchange.',
+      confirmLabel: 'Skip',
+    },
+  ), true));
 
   openPromptOverlayShell({
     title: `Harvest: pay ${costLabel}`,

@@ -290,6 +290,129 @@ class GameStateRoundTripTests(unittest.TestCase):
         snapshot = serialize_game_to_save_dict(game)
         self.assertEqual(snapshot.get("save_format_version"), 1)
 
+    def test_card_visibility_and_accessibility_survive_roundtrip(self):
+        """Regression: every Card subclass had `from_dict` constructors that
+        ran `__init__` (resetting is_visible/is_accessible to False) and
+        ignored the persisted flags. The dev "Back one step" button then
+        rendered every owned/market card as the obscured back. Round-trip
+        must preserve those flags for every card subclass.
+        """
+        p = _build_player("p1", "Alice")
+
+        # Visible+accessible top-of-stack market monster.
+        top_monster = _monster(101, area="A1", order=2)
+        top_monster.toggle_visibility(True)
+        top_monster.toggle_accessibility(True)
+        # Buried (face-down) monster in the same stack.
+        buried_monster = _monster(102, area="A1", order=1)
+        buried_monster.toggle_visibility(False)
+        buried_monster.toggle_accessibility(False)
+        monster_grid = [[buried_monster, top_monster]]
+
+        # Visible citizen top-of-stack.
+        market_citizen = _citizen(201)
+        market_citizen.toggle_visibility(True)
+        market_citizen.toggle_accessibility(True)
+        citizen_grid = [[market_citizen]]
+
+        # Visible domain top-of-stack and a buried face-down domain.
+        market_domain_top = _domain(301)
+        market_domain_top.toggle_visibility(True)
+        market_domain_top.toggle_accessibility(True)
+        buried_domain = _domain(302)
+        buried_domain.toggle_visibility(False)
+        buried_domain.toggle_accessibility(False)
+        domain_grid = [[buried_domain, market_domain_top]]
+
+        # Owned-by-player flags: visible to viewer.
+        for card_list in (p.owned_citizens, p.owned_starters, p.owned_domains, p.owned_monsters, p.owned_dukes):
+            for c in card_list:
+                c.toggle_visibility(True)
+
+        game = Game({
+            "game_id": "test-vis",
+            "player_list": [p],
+            "monster_grid": monster_grid,
+            "citizen_grid": citizen_grid,
+            "domain_grid": domain_grid,
+            "die_one": 1, "die_two": 2, "die_sum": 3,
+            "exhausted_count": 0,
+            "exhausted_stack": [],
+            "effects": {},
+            "action_required": {"id": "test-vis", "action": ""},
+            "game_log": [],
+            "turn_index": 0,
+            "phase": "action",
+        })
+
+        snap = serialize_game_to_save_dict(game)
+        rebuilt = deserialize_save_dict_to_game(snap)
+
+        rb_top_monster = rebuilt.monster_grid[0][1]
+        rb_buried_monster = rebuilt.monster_grid[0][0]
+        rb_market_citizen = rebuilt.citizen_grid[0][0]
+        rb_market_domain_top = rebuilt.domain_grid[0][1]
+        rb_buried_domain = rebuilt.domain_grid[0][0]
+
+        self.assertTrue(rb_top_monster.is_visible, "Top of monster stack must remain face-up after round-trip.")
+        self.assertTrue(rb_top_monster.is_accessible, "Top of monster stack must remain accessible after round-trip.")
+        self.assertFalse(rb_buried_monster.is_visible, "Buried monster must remain face-down after round-trip.")
+        self.assertFalse(rb_buried_monster.is_accessible, "Buried monster must remain inaccessible after round-trip.")
+
+        self.assertTrue(rb_market_citizen.is_visible)
+        self.assertTrue(rb_market_citizen.is_accessible)
+
+        self.assertTrue(rb_market_domain_top.is_visible)
+        self.assertTrue(rb_market_domain_top.is_accessible)
+        self.assertFalse(rb_buried_domain.is_visible)
+        self.assertFalse(rb_buried_domain.is_accessible)
+
+        rb_player = rebuilt.player_list[0]
+        for c in rb_player.owned_citizens:
+            self.assertTrue(c.is_visible, f"Owned citizen {c.name!r} must stay visible after round-trip.")
+        for c in rb_player.owned_starters:
+            self.assertTrue(c.is_visible, f"Owned starter {c.name!r} must stay visible after round-trip.")
+        for c in rb_player.owned_domains:
+            self.assertTrue(c.is_visible, f"Owned domain {c.name!r} must stay visible after round-trip.")
+        for c in rb_player.owned_dukes:
+            self.assertTrue(c.is_visible, f"Owned duke {c.name!r} must stay visible after round-trip.")
+        for c in rb_player.owned_monsters:
+            self.assertTrue(c.is_visible, f"Owned monster {c.name!r} must stay visible after round-trip.")
+
+    def test_owned_starters_are_visible_even_from_old_false_snapshot(self):
+        starter = _starter(99)
+        self.assertTrue(starter.is_visible, "Newly-created starters should be public by default.")
+
+        p = Player("p1", "Alice")
+        old_snapshot_starter = _starter(100).to_dict()
+        old_snapshot_starter["is_visible"] = False
+        old_snapshot_starter["is_accessible"] = False
+        p.owned_starters = [Starter.from_dict(old_snapshot_starter)]
+
+        game = Game({
+            "game_id": "test-old-starter-visibility",
+            "player_list": [p],
+            "monster_grid": [],
+            "citizen_grid": [],
+            "domain_grid": [],
+            "die_one": 1, "die_two": 2, "die_sum": 3,
+            "exhausted_count": 0,
+            "exhausted_stack": [],
+            "effects": {},
+            "action_required": {"id": "test-old-starter-visibility", "action": ""},
+            "game_log": [],
+            "turn_index": 0,
+            "phase": "action",
+        })
+        snap = serialize_game_to_save_dict(game)
+        snap["player_list"][0]["owned_starters"][0]["is_visible"] = False
+
+        rebuilt = deserialize_save_dict_to_game(snap)
+        self.assertTrue(
+            rebuilt.player_list[0].owned_starters[0].is_visible,
+            "Owned starters from older snapshots should be normalized back to visible.",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

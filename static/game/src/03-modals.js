@@ -128,9 +128,10 @@ function renderPlayerDetailInner(state, playerId) {
 
   const dukes = Array.isArray(subject.owned_dukes) ? subject.owned_dukes : [];
   const duke = dukes.length ? dukes[0] : null;
-  const dukeName = duke ? duke.name || 'Duke' : 'Hidden';
-  const dukeText = duke ? tableauCardFullText(duke) : '';
-  const dukeLine = `<div class="player-detail-mini" style="margin-bottom:12px;"><strong>Duke:</strong> ${escapeHtml(duke ? dukeName : '(hidden from opponents)')}${dukeText ? `<div style="margin-top:6px;white-space:pre-wrap;">${escapeHtml(dukeText)}</div>` : ''}</div>`;
+  const dukeVisible = !!duke && !cardObscuredFromViewer(duke);
+  const dukeName = dukeVisible ? (duke.name || 'Duke') : 'Hidden';
+  const dukeText = dukeVisible ? tableauCardFullText(duke) : '';
+  const dukeLine = `<div class="player-detail-mini" style="margin-bottom:12px;"><strong>Duke:</strong> ${escapeHtml(dukeVisible ? dukeName : '(hidden from opponents)')}${dukeText ? `<div style="margin-top:6px;white-space:pre-wrap;">${escapeHtml(dukeText)}</div>` : ''}</div>`;
 
   const kv = `
     <div class="player-detail-kv">
@@ -163,13 +164,12 @@ function renderPlayerDetailInner(state, playerId) {
   `;
 }
 
-function openPlayerDetailModal(playerId) {
+function _renderPlayerDetailContents(playerId) {
   const state = latestGameState;
   const body = document.getElementById('player-detail-body');
   const panel = document.getElementById('player-detail-modal');
   const titleEl = document.getElementById('player-detail-title');
-  if (!body || !panel) return;
-  if (!state) return;
+  if (!body || !panel || !state) return;
   const players = state.player_list || [];
   const subject = players.find(p => idsMatch(p.player_id, playerId));
   if (titleEl) {
@@ -186,8 +186,23 @@ function openPlayerDetailModal(playerId) {
     }
   }
   body.innerHTML = renderPlayerDetailInner(state, playerId);
+}
+
+function openPlayerDetailModal(playerId) {
+  const panel = document.getElementById('player-detail-modal');
+  if (!panel) return;
+  if (!latestGameState) return;
+  _renderPlayerDetailContents(playerId);
   panel.classList.add('is-open');
   panel.setAttribute('aria-hidden', 'false');
+  // Keep the panel current as harvest payouts, hires, slays, etc. land while
+  // it's open. Stash the target player on the panel so `_refreshFromLiveState`
+  // knows which player to re-render against `latestGameState`.
+  panel._refreshPlayerId = playerId;
+  panel._refreshFromLiveState = () => {
+    if (!panel.classList.contains('is-open')) return;
+    _renderPlayerDetailContents(panel._refreshPlayerId);
+  };
 }
 
 function closePlayerDetailModal() {
@@ -195,6 +210,8 @@ function closePlayerDetailModal() {
   if (!panel) return;
   panel.classList.remove('is-open');
   panel.setAttribute('aria-hidden', 'true');
+  panel._refreshFromLiveState = null;
+  panel._refreshPlayerId = null;
 }
 
 function initPlayerDetailModal() {
@@ -611,7 +628,13 @@ function fillCardModalInspectInfo(infoEl, card) {
   const heading = document.createElement('h2');
   heading.className = 'modal-card-name';
   if (cardObscuredFromViewer(card)) {
-    heading.textContent = isDomainStackFaceDown(card) ? 'Face-down domain' : 'Hidden card';
+    if (isDomainStackFaceDown(card)) {
+      heading.textContent = 'Face-down domain';
+    } else if (card?.duke_id != null) {
+      heading.textContent = 'Hidden duke';
+    } else {
+      heading.textContent = 'Hidden card';
+    }
   } else {
     heading.textContent = card.name || '?';
   }
@@ -620,9 +643,13 @@ function fillCardModalInspectInfo(infoEl, card) {
   if (cardObscuredFromViewer(card)) {
     const note = document.createElement('p');
     note.className = 'modal-card-text';
-    note.textContent = isDomainStackFaceDown(card)
-      ? 'The next domain in this pile stays face-down until the end of the turn of the player who built from here.'
-      : 'This card is not visible to you right now.';
+    if (isDomainStackFaceDown(card)) {
+      note.textContent = 'The next domain in this pile stays face-down until the end of the turn of the player who built from here.';
+    } else if (card?.duke_id != null) {
+      note.textContent = "This duke is hidden from opponents. You'll see its identity at end-of-game scoring.";
+    } else {
+      note.textContent = 'This card is not visible to you right now.';
+    }
     infoEl.appendChild(note);
   } else {
     appendCardModalStatRows(infoEl, card);
@@ -632,7 +659,70 @@ function fillCardModalInspectInfo(infoEl, card) {
       t.textContent = card.text;
       infoEl.appendChild(t);
     }
+    if (card?.duke_id != null) {
+      appendDukeVpProjectionBlock(infoEl, card);
+    }
   }
+}
+
+// ── Duke modal: live "if the game ended right now" VP projection ─────────
+// The server attaches `duke_vp_projection` to the viewer's own player payload
+// (see _serialize_game_for_player). We surface it in the duke inspect modal
+// so the player can see how their resources / tableau translate to VP via
+// their duke's multipliers in real time.
+function findDukeOwnerInState(dukeCard) {
+  const state = latestGameState;
+  if (!state || !dukeCard || dukeCard.duke_id == null) return null;
+  const players = state.player_list || [];
+  for (const p of players) {
+    const owned = Array.isArray(p?.owned_dukes) ? p.owned_dukes : [];
+    if (owned.some(d => d && d.duke_id != null && d.duke_id === dukeCard.duke_id)) {
+      return p;
+    }
+  }
+  return null;
+}
+
+function appendDukeVpProjectionBlock(infoEl, dukeCard) {
+  const owner = findDukeOwnerInState(dukeCard);
+  const proj = owner && owner.duke_vp_projection;
+  if (!proj) return;
+
+  const wrap = mk('duke-vp-projection');
+
+  const lines = Array.isArray(proj.duke_vp_breakdown) ? proj.duke_vp_breakdown : [];
+  if (lines.length) {
+    const list = mk('duke-vp-breakdown');
+    lines.forEach(line => {
+      const li = mk('duke-vp-line');
+      const top = mk('duke-vp-line-top');
+      const lbl = mk('duke-vp-line-label');
+      lbl.textContent = line.label || '';
+      const val = mk('duke-vp-line-vp');
+      val.textContent = `+${Number(line.vp || 0)} VP`;
+      top.appendChild(lbl);
+      top.appendChild(val);
+      li.appendChild(top);
+      if (line.detail) {
+        const det = mk('duke-vp-line-detail');
+        det.textContent = line.detail;
+        li.appendChild(det);
+      }
+      list.appendChild(li);
+    });
+    wrap.appendChild(list);
+  } else {
+    const empty = mk('duke-vp-projection-empty');
+    empty.textContent = 'No duke VP yet — keep building toward this duke\'s multipliers.';
+    wrap.appendChild(empty);
+  }
+
+  const summary = mk('duke-vp-projection-summary');
+  summary.textContent =
+    `${Number(proj.base_vp || 0)} base + ${Number(proj.duke_vp || 0)} Duke = ${Number(proj.total_vp || 0)} VP`;
+  wrap.appendChild(summary);
+
+  infoEl.appendChild(wrap);
 }
 
 function openCardStackInspectModal(cards, startIndex) {
@@ -718,6 +808,12 @@ function openCardStackInspectModal(cards, startIndex) {
   document.addEventListener('keydown', onStackKey);
   overlay._stackArrowHandler = onStackKey;
 
+  // Keep the info panel of the currently-shown card in sync with live state
+  // (duke VP projection, visibility/flip toggles, etc.). Image + nav stay put.
+  overlay._refreshFromLiveState = () => {
+    fillCardModalInspectInfo(info, arr[idx]);
+  };
+
   renderAt(idx);
 
   overlay.appendChild(modal);
@@ -777,6 +873,13 @@ function openCardModal(card) {
   fillCardModalInspectInfo(info, card);
   modal.appendChild(info);
 
+  // Re-render the info panel whenever the global game state updates so
+  // anything live-derived (e.g. the duke VP projection) stays current.
+  // The image element doesn't depend on game state, so we leave it alone.
+  overlay._refreshFromLiveState = () => {
+    fillCardModalInspectInfo(info, card);
+  };
+
   overlay.appendChild(modal);
   mountCardInspectOverlay(overlay, modal);
   document.body.appendChild(overlay);
@@ -799,7 +902,6 @@ function buildCardStats(card) {
   if      (card.monster_id  != null) push('Type', 'Monster', null, null, false);
   else if (card.citizen_id  != null) push('Type', 'Citizen', null, null, false);
   else if (card.domain_id   != null) push('Type', 'Domain', null, null, false);
-  else if (card.duke_id     != null) push('Type', 'Duke', null, null, false);
   else if (card.starter_id  != null) push('Type', 'Starter', null, null, false);
 
   if (card.gold_cost)       push('Gold cost',    card.gold_cost,       'modal-gold', 'gold', false);
@@ -1001,10 +1103,32 @@ function dismissCardInspectModal() {
   overlay.remove();
 }
 
+// IDs of every long-lived panel that exposes a `_refreshFromLiveState` hook.
+// The main render loop calls `refreshOpenCardInspectModal()` on every state
+// change; we fan that out to all open modals so things like:
+//   • a slay/build/hire button becoming enabled when it becomes your turn
+//   • the duke VP projection updating as you collect resources
+//   • a player-detail panel reflecting just-applied harvest payouts
+//   • the dice/turn info popup tracking phase/turn changes
+// all happen without the user having to close and reopen the modal.
+const LIVE_REFRESH_PANEL_IDS = [
+  'card-modal-overlay',
+  'player-detail-modal',
+  'dice-info-modal-overlay',
+];
+
 function refreshOpenCardInspectModal() {
-  const overlay = document.getElementById('card-modal-overlay');
-  if (!overlay || typeof overlay._refreshFromLiveState !== 'function') return;
-  overlay._refreshFromLiveState();
+  for (const id of LIVE_REFRESH_PANEL_IDS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const fn = el._refreshFromLiveState;
+    if (typeof fn !== 'function') continue;
+    try {
+      fn();
+    } catch (err) {
+      console.error(`live-refresh failed for #${id}`, err);
+    }
+  }
 }
 
 /** Shared close control for any panel using `.card-modal` (inspect, market, dismissible prompts). */

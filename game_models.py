@@ -45,6 +45,8 @@ class Player:
         name = data["name"]
         player = cls(player_id, name)
         player.owned_starters = [Starter.from_dict(s) for s in data["owned_starters"]]
+        for starter in player.owned_starters:
+            starter.toggle_visibility(True)
         player.owned_citizens = [Citizen.from_dict(c) for c in data["owned_citizens"]]
         player.owned_domains = [Domain.from_dict(d) for d in data["owned_domains"]]
         player.owned_dukes = [Duke.from_dict(d) for d in data["owned_dukes"]]

@@ -266,6 +266,25 @@ html, body {
   cursor: default;
 }
 
+.resource-action-bar .resource-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.resource-action-btn-icon {
+  display: block;
+  height: 1.15em;
+  max-height: 20px;
+  width: auto;
+  object-fit: contain;
+}
+
+.resource-action-bar .resource-action-btn--gold     { color: var(--gold); }
+.resource-action-bar .resource-action-btn--strength { color: var(--str); }
+.resource-action-bar .resource-action-btn--magic    { color: var(--mag); }
+
 .tableau-carousel-slide {
   flex: 0 0 100%;
   width: 100%;
@@ -431,6 +450,20 @@ html, body {
   cursor: help;
 }
 
+.player-you-tag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(240, 192, 64, 0.25);
+  color: var(--gold);
+  border: 1px solid rgba(240, 192, 64, 0.45);
+  cursor: help;
+}
+
 .score-pill {
   display: inline-flex;
   align-items: center;
@@ -470,7 +503,11 @@ html, body {
   flex-shrink: 0;
 }
 
-/* Idle countdown on whoever’s turn it is (all seats); ring above is viewer-only */
+/* Hurry-up countdown on whoever’s turn it is (all seats). The server arms
+   this for the active player's standard action and auto-takes +1 of their
+   lowest resource when it hits 0:00 (random tie-break among tied lowest).
+   Polls do NOT reset the deadline -- the server's value is authoritative
+   and is re-synced on every state payload. */
 .tableau-inactive-timer {
   margin-left: auto;
   padding: 2px 8px;
@@ -482,6 +519,32 @@ html, body {
   color: rgba(200, 230, 210, 0.95);
   background: rgba(0, 0, 0, 0.35);
   flex-shrink: 0;
+  transition: background 200ms ease, color 200ms ease;
+}
+
+.tableau-inactive-timer:empty {
+  display: none;
+}
+
+.tableau-inactive-timer--warn {
+  color: #fff1c4;
+  background: rgba(196, 64, 64, 0.55);
+}
+
+/* Standard-action counter on whoever's turn it is; mirrors the timer's gating. */
+.tableau-actions-remaining {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(240, 192, 64, 0.25);
+  color: var(--gold);
+  border: 1px solid rgba(240, 192, 64, 0.45);
+  cursor: help;
 }
 
 /* ── My tableau ─────────────────────────────────────────────────────── */
@@ -876,34 +939,52 @@ html, body {
 .card-exhausted{ background: var(--card-x); border-color: var(--card-x-border); }
 .card-exhausted .card-name { color: #444; }
 
-/* Flipped tableau citizens: viewer knows the card but it is physically face-down,
-   so we stack both faces and cross-fade the front in on top of the back to make
-   the face-down state legible. The viewer can still see / inspect the card. The
-   front never reaches full opacity (peaks at 75%) so the back always shows
-   through, and the back rests on its own between cycles. */
-.card.flipped .card-flip-stage {
+/* Cross-fade flip stage. Two states share the same DOM:
+   - `.card.flipped`: tableau citizens the engine actually flipped face-down;
+     the viewer still knows the identity. Steady state is the back; the front
+     peeks through periodically.
+   - `.card.flipping`: cards that are technically face-down in the rules but
+     we always render them anyway so the player can read them (e.g. dukes).
+     Same visual treatment so the "this is secret" hint reads consistently.
+   The front never reaches full opacity (peaks at 75%) so the back always
+   shows through, and the back rests on its own between cycles. The flip
+   stage has `pointer-events: none` so clicks still hit the wrapping `.card`
+   element and open the full card modal. */
+.card.flipped .card-flip-stage,
+.card.flipping .card-flip-stage {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
-.card.flipped .card-flip-inner {
+.card.flipped .card-flip-inner,
+.card.flipping .card-flip-inner {
   position: relative;
   width: 100%;
   height: 100%;
 }
-.card.flipped .card-flip-face {
+.card.flipped .card-flip-face,
+.card.flipping .card-flip-face {
   position: absolute;
   inset: 0;
   border-radius: 4px;
   overflow: hidden;
 }
-.card.flipped .card-flip-back  { opacity: 1; }
+.card.flipped .card-flip-back,
+.card.flipping .card-flip-back  { opacity: 1; }
 .card.flipped .card-flip-front {
   opacity: 0;
   animation: card-flip-cycle 5s ease-in-out infinite;
   will-change: opacity;
 }
-.card.flipped .card-flip-face > .card-img {
+/* Dukes sit in the tableau the whole game, so use a slower cycle with a
+   longer rest period to keep the effect from feeling busy. */
+.card.flipping .card-flip-front {
+  opacity: 0;
+  animation: card-flip-cycle 8s ease-in-out infinite;
+  will-change: opacity;
+}
+.card.flipped .card-flip-face > .card-img,
+.card.flipping .card-flip-face > .card-img {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -912,16 +993,17 @@ html, body {
   border-radius: 4px;
   display: block;
 }
-/* 5s total cycle: 0%–60% (3s) is the back→front→back pulse, peaking at 0.75
-   opacity so the back always shows through by at least 25%. 60%–100% (2s) is
-   the rest period where only the back is visible. */
+/* 0%–60% is the back→front→back pulse, peaking at 0.75 opacity so the back
+   always shows through by at least 25%. 60%–100% is the rest period where
+   only the back is visible. The duration is set per-class above. */
 @keyframes card-flip-cycle {
   0%        { opacity: 0; }
   30%       { opacity: 0.75; }
   60%, 100% { opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .card.flipped .card-flip-front { animation: none; opacity: 0; }
+  .card.flipped .card-flip-front,
+  .card.flipping .card-flip-front { animation: none; opacity: 0; }
 }
 
 /* ── Center board ───────────────────────────────────────────────────── */
@@ -1367,6 +1449,38 @@ html, body {
   color: var(--gold);
   border-color: rgba(240, 192, 64, 0.45);
   background: rgba(240, 192, 64, 0.08);
+}
+
+/* Tabs that contain a "You" badge use flex layout so the label can ellipsis
+   independently of the badge. Plain board-tabs (without a child label span)
+   keep the simpler block-with-ellipsis layout above. */
+.board-tab:has(.board-tab-you-tag) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.board-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-tab-you-tag {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(240, 192, 64, 0.25);
+  color: var(--gold);
+  border: 1px solid rgba(240, 192, 64, 0.45);
+  line-height: 1.4;
 }
 
 
@@ -2893,6 +3007,27 @@ select.lobby-input:disabled {
   border-top: 1px solid rgba(255,255,255,0.1);
   overflow-wrap: break-word;
   word-break: break-word;
+}
+
+/* Live end-game VP projection shown inside the duke inspect modal. Reuses
+   the .duke-vp-breakdown line styling already defined for the game-over
+   screen, and renders without a header or divider so the rows read as a
+   natural continuation of the modal's stat block. */
+.duke-vp-projection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.duke-vp-projection-empty {
+  font-size: 13px;
+  color: var(--muted);
+  font-style: italic;
+}
+.duke-vp-projection-summary {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 2px;
 }
 
 .card-modal--market .card-modal-info {
