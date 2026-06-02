@@ -20,6 +20,21 @@
   --vp:    #a060f0;
   --text:  #ddd;
   --muted: #888;
+
+  /* Single source of truth for the card-size cap. On big monitors the page
+     pads out around the cards (see .game-layout max-width and .gl-bottom flex
+     behavior) instead of letting cards balloon past this height. Mobile
+     viewports are well below the cap so phone sizing is unchanged.
+
+     Center-board cards size by width with aspect-ratio 128:188 (portrait), so
+     capping the grid-slot max-width at --card-max-w (= --card-max-h × 128/188)
+     caps the rendered height at --card-max-h. Tableau cards size by height via
+     container queries, so they cap by --card-max-h directly. */
+  --card-max-h: 275px;
+  --card-native-w: calc(var(--card-max-h) * 128 / 188);
+  --card-native-h: var(--card-max-h);
+  --tableau-card-max-h: var(--card-max-h);
+  --tableau-strip-max-h: calc(var(--card-max-h) * 2);
 }
 
 html, body {
@@ -52,6 +67,15 @@ html, body {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  /* Constrain the game width so wide / fullscreen-desktop viewports get
+     green-felt padding on either side instead of the cards-grid stretching
+     edge-to-edge (and, paired with --card-max-h, blowing past the printed
+     card size). The 1000px target ≈ 5 columns of --card-native-w (~187px)
+     plus the center-section gaps/paddings, with a little breathing room.
+     Mobile viewports sit well under this so the layout is unchanged there. */
+  width: 100%;
+  max-width: 1000px;
+  margin-inline: auto;
 }
 
 .gl-top {
@@ -649,6 +673,9 @@ html, body {
   grid-template-columns: auto max-content;
   grid-template-rows: minmax(0, auto);
   align-items: stretch;
+  /* When the strip is taller than the capped stacks (tall viewport + native
+     card height cap), center the row vertically instead of pinning it to top. */
+  align-content: center;
   align-self: stretch;
   flex-shrink: 0;
   min-width: 0;
@@ -667,22 +694,24 @@ html, body {
   margin-right: 0;
 }
 
-/* Two rows (50cqh each); fill columns top→bottom, then new column → width grows every 2 stacks. */
+/* Two rows (50cqh each); fill columns top→bottom, then new column → width grows every 2 stacks.
+   Rows / overall stacks box are capped at native card height so tall viewports get
+   vertical padding inside the strip instead of cards taller than the printed size. */
 .seat-carousel .card-group-stacks {
   display: grid;
   grid-column: 2;
   grid-row: 1;
   grid-template-rows: repeat(2, minmax(0, clamp(40px, 50cqh, 200px)));
-  grid-template-rows: repeat(2, minmax(0, 50cqh));
+  grid-template-rows: repeat(2, minmax(0, min(50cqh, var(--tableau-card-max-h))));
   grid-auto-flow: column dense;
   grid-auto-columns: max-content;
   gap: 4px;
   max-height: clamp(88px, 100cqh, 900px);
-  max-height: 100cqh;
+  max-height: min(100cqh, var(--tableau-strip-max-h));
   min-width: 0;
   overflow-y: auto;
   overflow-x: auto;
-  align-content: start;
+  align-content: center;
   justify-items: center;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -697,7 +726,7 @@ html, body {
   align-self: stretch;
   min-height: 0;
   max-height: clamp(40px, 50cqh, 200px);
-  max-height: 50cqh;
+  max-height: min(50cqh, var(--tableau-card-max-h));
   min-width: 0;
   width: auto;
   overflow: hidden;
@@ -708,7 +737,7 @@ html, body {
   align-self: stretch;
   min-height: 0;
   max-height: clamp(88px, 100cqh, 900px);
-  max-height: 100cqh;
+  max-height: min(100cqh, var(--tableau-strip-max-h));
   /* hidden, not visible: the fan is sized to fit exactly inside the 1×2 slot,
      and clipping any sub-pixel slop prevents the slop from propagating into
      `.card-group-stacks`' scrollHeight and turning the parent into a barely-
@@ -716,13 +745,14 @@ html, body {
   overflow: hidden;
 }
 
-/* One “row” target height = half the tableau strip (50cqh); second row can be added later at same size. */
+/* One “row” target height = half the tableau strip (50cqh); second row can be added later at same size.
+   Capped at native card height so tall viewports get extra padding instead of upscaled cards. */
 .seat-carousel .grid-stack .card.card-has-image {
   flex-direction: column;
   flex: 0 0 auto;
   box-sizing: border-box;
   height: clamp(56px, 22vmin, 160px);
-  height: 50cqh;
+  height: min(50cqh, var(--tableau-card-max-h));
   min-height: 52px;
   width: auto;
   aspect-ratio: 108 / 158;
@@ -735,7 +765,7 @@ html, body {
   flex: 0 1 auto;
   min-height: 0;
   max-height: clamp(56px, 22vmin, 160px);
-  max-height: 50cqh;
+  max-height: min(50cqh, var(--tableau-card-max-h));
   width: auto;
   min-width: clamp(56px, 22vw, 108px);
   max-width: 100%;
@@ -993,7 +1023,9 @@ html, body {
 .center-board.board-use-tabs .grid-row > .card-slot-empty {
   flex: 1 1 0;
   min-width: 0;
-  max-width: none;
+  /* Cap each slot at native card width so wide viewports get side padding
+     instead of huge cards. .grid-row already has justify-content: center. */
+  max-width: var(--card-native-w);
 }
 
 .center-board.board-use-tabs .grid-stack {

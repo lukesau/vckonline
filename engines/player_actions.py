@@ -1309,7 +1309,7 @@ class PlayerActionsEngine:
         if not handler:
             raise ValueError(f"Unknown concurrent action kind: {ca.get('kind')!r}.")
 
-        handler.apply(self, player_id, response)
+        handler.apply(self.game, player_id, response)
         self.game._log_game_event(
             f"{self.game._player_label(player_id)} submitted ({ca.get('kind')})."
         )
@@ -1319,7 +1319,7 @@ class PlayerActionsEngine:
 
         if not ca["pending"]:
             self.game._log_game_event(f"All players finished: {ca.get('kind')}.")
-            handler.finalize(self)
+            handler.finalize(self.game)
             self.game.concurrent_action = None
             # Drive the engine forward after the concurrent action resolves.
             if self.game.phase == "setup":
