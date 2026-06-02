@@ -380,12 +380,7 @@ class ChooseEngine:
             citizen_stack[-1].toggle_accessibility(True)
             return
         if self.game.exhausted_stack:
-            exhausted = self.game.exhausted_stack.pop()
-            if isinstance(exhausted, Event):
-                exhausted.toggle_visibility(True)
-                exhausted.toggle_accessibility(True)
-            citizen_stack.append(exhausted)
-            self.game.exhausted_count = int(self.game.exhausted_count) + 1
+            self.game.events.reveal_exhausted_onto_stack(citizen_stack)
 
     def _claim_specific_board_citizen(self, player_id, citizen_id):
         target = self.game._player_by_id(player_id)

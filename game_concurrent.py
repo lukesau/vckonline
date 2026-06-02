@@ -62,8 +62,24 @@ class _ChooseDukeConcurrentHandler:
         return
 
 
+def _mark_concurrent_player_done(game, player_id, response):
+    """Shared bookkeeping: stash the response and move the player from pending to completed."""
+    ca = getattr(game, "concurrent_action", None) or {}
+    ca.setdefault("responses", {})[player_id] = response
+    pending = ca.get("pending") or []
+    if player_id in pending:
+        ca["pending"] = [pid for pid in pending if pid != player_id]
+    ca.setdefault("completed", [])
+    if player_id not in ca["completed"]:
+        ca["completed"].append(player_id)
+
+
 class _FlipOneCitizenConcurrentHandler:
-    """Each pending player chooses one unflipped citizen on their tableau to flip face-down (e.g. Cursed Cavern)."""
+    """Each pending player chooses one unflipped citizen on their tableau to flip face-down.
+
+    Used by both Cursed Cavern (domain) and "A Betrayal of Bonds" (event). The
+    source label shown in the log is read from `concurrent_action.data.source_label`.
+    """
 
     def apply(self, game, player_id, response):
         try:
@@ -80,18 +96,140 @@ class _FlipOneCitizenConcurrentHandler:
         if getattr(cit, "is_flipped", False):
             raise ValueError("That citizen is already flipped.")
         game._citizen_set_flipped(cit, True)
+        ca = getattr(game, "concurrent_action", None) or {}
+        source_label = ((ca.get("data") or {}).get("source_label")) or "Cursed Cavern"
         game._log_game_event(
             f"{game._player_label(player_id)} flipped citizen \"{getattr(cit, 'name', '?')}\" face-down "
-            f"(Cursed Cavern)."
+            f"({source_label})."
         )
+        _mark_concurrent_player_done(game, player_id, response)
+
+    def finalize(self, game):
+        return
+
+
+class _EventSelfConvertConcurrentHandler:
+    """Each pending player may optionally pay a resource for a bank gain (e.g. event "Support The Empire").
+
+    `concurrent_action.data` carries:
+      name        -- event name (for logs)
+      pay_kind    -- 'g'/'s'/'m'/'v' for a fixed cost, or 'wild' (player picks g/s/m)
+      pay_amount  -- int
+      gain_kind   -- 'g'/'s'/'m'/'v'
+      gain_amount -- int
+
+    Per-player response:
+      'skip'                 -- decline
+      'g' / 's' / 'm'        -- (wild only) which resource to pay
+      'accept'               -- (fixed cost) pay the fixed resource
+    """
+
+    _SCORE = {"g": "gold_score", "s": "strength_score", "m": "magic_score", "v": "victory_score"}
+
+    def apply(self, game, player_id, response):
         ca = getattr(game, "concurrent_action", None) or {}
-        ca.setdefault("responses", {})[player_id] = response
-        pending = ca.get("pending") or []
-        if player_id in pending:
-            ca["pending"] = [pid for pid in pending if pid != player_id]
-        ca.setdefault("completed", [])
-        if player_id not in ca["completed"]:
-            ca["completed"].append(player_id)
+        data = ca.get("data") or {}
+        player = game._player_by_id(player_id)
+        if not player:
+            raise ValueError("Player not found.")
+        resp = str(response).strip().lower()
+        name = data.get("name", "Event")
+        pay_kind = (data.get("pay_kind") or "").lower()
+        pay_amount = int(data.get("pay_amount") or 0)
+        gain_kind = (data.get("gain_kind") or "v").lower()
+        gain_amount = int(data.get("gain_amount") or 0)
+        if resp == "skip":
+            game._log_game_event(
+                f"{game._player_label(player_id)} declined event \"{name}\"."
+            )
+            _mark_concurrent_player_done(game, player_id, response)
+            return
+        if pay_kind == "wild":
+            if resp not in ("g", "s", "m"):
+                raise ValueError("Choose a resource to pay (g/s/m) or skip.")
+            pay_res = resp
+        else:
+            if resp not in ("accept", pay_kind):
+                raise ValueError("Send 'accept' to pay or 'skip' to decline.")
+            pay_res = pay_kind
+        if int(getattr(player, self._SCORE[pay_res], 0) or 0) < pay_amount:
+            raise ValueError("You cannot afford this.")
+        before = game._player_scores_line(player)
+        setattr(player, self._SCORE[pay_res],
+                int(getattr(player, self._SCORE[pay_res], 0)) - pay_amount)
+        setattr(player, self._SCORE[gain_kind],
+                int(getattr(player, self._SCORE[gain_kind], 0)) + gain_amount)
+        after = game._player_scores_line(player)
+        game._log_game_event(
+            f"{game._player_label(player_id)} resolved event \"{name}\" "
+            f"(paid {pay_amount}{pay_res}); scores {before} -> {after}"
+        )
+        _mark_concurrent_player_done(game, player_id, response)
+
+    def finalize(self, game):
+        return
+
+
+class _EventBanishCitizenForRewardConcurrentHandler:
+    """Each pending player may optionally banish one owned citizen (filtered by role)
+    for a bank reward (e.g. event "A Call To Arms": banish a Soldier for 3 VP).
+
+    `concurrent_action.data` carries:
+      name        -- event name
+      role        -- '' or one of shadow/holy/soldier/worker (role pip filter)
+      gain_kind   -- 'g'/'s'/'m'/'v'
+      gain_amount -- int
+
+    Per-player response:
+      'skip'      -- decline
+      <int>       -- tableau index of the owned citizen to banish
+    """
+
+    _SCORE = {"g": "gold_score", "s": "strength_score", "m": "magic_score", "v": "victory_score"}
+    _ROLE_ATTR = {"shadow": "shadow_count", "holy": "holy_count", "soldier": "soldier_count", "worker": "worker_count"}
+
+    def apply(self, game, player_id, response):
+        ca = getattr(game, "concurrent_action", None) or {}
+        data = ca.get("data") or {}
+        player = game._player_by_id(player_id)
+        if not player:
+            raise ValueError("Player not found.")
+        name = data.get("name", "Event")
+        role = (data.get("role") or "").lower()
+        gain_kind = (data.get("gain_kind") or "v").lower()
+        gain_amount = int(data.get("gain_amount") or 0)
+        resp = str(response).strip().lower()
+        if resp == "skip":
+            game._log_game_event(
+                f"{game._player_label(player_id)} declined event \"{name}\"."
+            )
+            _mark_concurrent_player_done(game, player_id, response)
+            return
+        try:
+            idx = int(resp)
+        except (TypeError, ValueError):
+            raise ValueError("Send a tableau index to banish, or 'skip'.")
+        oc = list(getattr(player, "owned_citizens", []) or [])
+        if idx < 0 or idx >= len(oc):
+            raise ValueError("Invalid citizen index.")
+        cit = oc[idx]
+        if getattr(cit, "is_flipped", False):
+            raise ValueError("That citizen is flipped; choose a face-up citizen.")
+        if role:
+            attr = self._ROLE_ATTR.get(role)
+            if not attr or int(getattr(cit, attr, 0) or 0) <= 0:
+                raise ValueError(f"That citizen is not a {role.title()}.")
+        player.owned_citizens.remove(cit)
+        game.banish_pile.append(cit)
+        before = game._player_scores_line(player)
+        setattr(player, self._SCORE[gain_kind],
+                int(getattr(player, self._SCORE[gain_kind], 0)) + gain_amount)
+        after = game._player_scores_line(player)
+        game._log_game_event(
+            f"{game._player_label(player_id)} banished \"{getattr(cit, 'name', '?')}\" "
+            f"for event \"{name}\"; scores {before} -> {after}"
+        )
+        _mark_concurrent_player_done(game, player_id, response)
 
     def finalize(self, game):
         return
@@ -199,6 +337,8 @@ CONCURRENT_HANDLERS = {
     "choose_duke": _ChooseDukeConcurrentHandler(),
     "flip_one_citizen": _FlipOneCitizenConcurrentHandler(),
     "harvest_choices": _HarvestChoicesConcurrentHandler(),
+    "event_self_convert": _EventSelfConvertConcurrentHandler(),
+    "event_banish_citizen_for_reward": _EventBanishCitizenForRewardConcurrentHandler(),
 }
 
 

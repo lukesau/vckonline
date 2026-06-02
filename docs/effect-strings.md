@@ -47,6 +47,47 @@ This document covers how effect strings work across the three card tables (citiz
 | The Orb of Urdr | `action.end manipulate_resources mode=take_from_player take=m:1 optional=true` | End of action: optionally take 1m from a player |
 | Castle of the Seven Suns | `immunity.take` | Opponents cannot take resources or cards from the holder. Covers `steal`, `take_from_player`, and `take_owned`; does NOT cover `banish` / `flip` / event `all_lose`. The legacy string `immunity.steal` is also accepted for back-compat. |
 
+### Events — `activation_effect` / `passive_effect`
+
+Non-monster Event cards (`is_monster = 0`) fire when flipped off the Exhausted
+stack onto a board stack (slay / hire / build / banish / free-take / harvest
+payout — all routed through `EventsEngine.reveal_exhausted_onto_stack`). An
+`activation_effect` fires once per reveal; a `passive_effect` applies while the
+card sits in play on a board stack. Because returning a card to a center stack
+un-exhausts the event back into the deck, the same event can be re-revealed and
+re-fire later. (Monster events keep their `roll_effect` / slay behavior — see
+`docs/game.md`.)
+
+Audience prefixes decide who resolves an activation:
+
+| Prefix | Who | Resolution |
+|---|---|---|
+| `active_may` | active player | optional sequential prompt |
+| `all_may` | every eligible player | optional, concurrent (unordered) |
+| `all_must` | every eligible player | mandatory, concurrent (unordered) |
+| `active_lose` / `others_lose` / `all_lose` | active / non-active / everyone | immediate, no prompt |
+
+The resting seat (5-player) is "not in play" and is excluded from every event
+audience. Immediate losses floor at 0.
+
+| Card | Column | String | Meaning |
+|---|---|---|---|
+| A Call To Arms | activation | `all_may banish_owned_citizen role=soldier gain=v:3` | Each player may banish one owned Soldier citizen for 3 VP |
+| The Wizards of Nae | activation | `active_may gain_action pay=m:3` | Active player may pay 3m for +1 action (Action Phase only) |
+| Support The Empire | activation | `all_may self_convert pay=wild:5 gain=v:3` | Each player may pay 5 of one chosen resource (g/s/m) for 3 VP |
+| The Key and Blade | activation | `active_lose g 3 + others_lose g 1` | Active player loses 3g; every other player loses 1g |
+| A Betrayal of Bonds | activation | `all_must flip_citizen` | Each player with a citizen must flip one face-down (reuses Cursed Cavern's concurrent flip) |
+| Curse of The North | passive | `roll.on_event doubles all_lose m 3` | While in play: on a doubles roll, all players lose 3m |
+
+Notes on reuse:
+
+- `self_convert pay=<r>:N gain=<r>:M` mirrors the domain bank-trade verb;
+  `pay=wild:N` lets each player choose which resource (g/s/m) to spend.
+- `flip_citizen` reuses the `flip_one_citizen` concurrent handler (Cursed Cavern).
+- `roll.on_event <event> all_lose <res> <amt>` is the event sibling of the
+  domain `roll.on_event <event> <res> <amt>` per-owner gain passive; it applies
+  globally instead of to the owner.
+
 ### Monsters — `special_reward`
 
 | Card | String | Meaning |

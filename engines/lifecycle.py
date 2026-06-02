@@ -81,8 +81,21 @@ class LifecycleEngine:
                 or aa == "domain_self_convert"
                 or aa == "domain_choose_resource"
                 or aa == "event_slay_cost_choice"
+                or aa == "event_gain_action"
                 or aa == "choose_domain_to_build"
             ):
+                return False
+
+        # Fire any activation effects from non-monster Event cards that were
+        # revealed while the engine was busy. Draining one may itself open a
+        # prompt / concurrent action; if so, the loop above will block on the
+        # next advance_tick until it resolves.
+        if getattr(self.game, "pending_event_activations", None):
+            self.game.events.drain_pending_event_activations()
+            if self.is_blocked_on_concurrent_action():
+                return False
+            ar2 = self.game.action_required or {}
+            if ar2.get("id") and ar2.get("id") != self.game.game_id and str(ar2.get("action", "") or "") not in ("", "standard_action"):
                 return False
 
         if self.game.phase == "setup":
@@ -200,6 +213,10 @@ class LifecycleEngine:
             )
             active = self.game._player_by_id(self.current_player_id())
             self.game.domain_effects._apply_action_start_domain_passives(active)
+            # Offer any additional-action grant (e.g. The Wizards of Nae) that was
+            # revealed earlier this turn outside the Action Phase. Drained here so
+            # the active player can pay for the extra action and spend it now.
+            self.game.events.drain_pending_event_activations()
             return True
 
         if self.game.phase == 'action':
@@ -306,6 +323,7 @@ class LifecycleEngine:
                 "choose_monster_slay",
                 "slay_monster_payment",
                 "choose_domain_to_build",
+                "event_gain_action",
             ) or aa.startswith("choose ") or aa.startswith("choose_player") or aa.startswith(
                 "choose_monster"
             ) or aa.startswith("choose_owned")
@@ -428,6 +446,7 @@ class LifecycleEngine:
         self.game.roll_events = self.game.dice._compute_roll_events(fd1, fd2)
         self.game.dice._apply_roll_on_event_passives()
         self.game.dice._apply_board_event_roll_effects(fd1, fd2)
+        self.game.events.apply_board_event_passive_roll_effects()
 
         self.game.pending_roll = None
         # Move into harvest exactly like the old post-roll transition.

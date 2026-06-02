@@ -114,6 +114,18 @@ class PlayerActionsEngine:
                 self.game.action_required['id'] = self.game.game_id
                 return
 
+            # Event "pay N for an additional action" (e.g. The Wizards of Nae).
+            if current_required == "event_gain_action":
+                prc_ga = getattr(self.game, "pending_required_choice", None) or {}
+                if prc_ga.get("kind") != "event_gain_action" or prc_ga.get("player_id") != player_id:
+                    return
+                act_ga = (action or "").strip().lower()
+                if act_ga in ("accept", "confirm", "pay", "yes"):
+                    self.game.events.resolve_gain_action(player_id, True)
+                elif act_ga in ("skip", "decline", "no"):
+                    self.game.events.resolve_gain_action(player_id, False)
+                return
+
             if current_required == "harvest_optional_exchange":
                 prc_h = getattr(self.game, "pending_required_choice", None) or {}
                 if prc_h.get("kind") != "harvest_optional_exchange" or prc_h.get("player_id") != player_id:
@@ -1561,14 +1573,9 @@ class PlayerActionsEngine:
                 placeholder.toggle_visibility(True)
                 monster_stack.append(placeholder)
             elif self.game.exhausted_stack:
-                exhausted = self.game.exhausted_stack.pop()
-                monster_stack.append(exhausted)
-                # Always count the slot as exhausted, whether the drawn card is a plain
-                # Exhausted token or an Event card (Events ARE exhausted cards).
-                self.game.exhausted_count = int(self.game.exhausted_count) + 1
-                if isinstance(exhausted, Event):
-                    exhausted.toggle_visibility(True)
-                    exhausted.toggle_accessibility(True)
+                # Draw the next exhausted card onto the emptied slot. A revealed
+                # activation/passive Event fires its effect here (see EventsEngine).
+                self.game.events.reveal_exhausted_onto_stack(monster_stack)
             after = self.game._player_scores_line(player)
             pay = self.game._format_resource_payment(gp, sp, mp)
             self.game._log_game_event(
@@ -1643,15 +1650,13 @@ class PlayerActionsEngine:
                 player.victory_score = int(getattr(player, "victory_score", 0) or 0) + vp_gain
                 self.game.harvest._bump_harvest_delta(player, 0, 0, 0, vp_gain)
 
-            if not domain_stack and self.game.exhausted_stack:
-                exhausted = self.game.exhausted_stack.pop()
-                if isinstance(exhausted, Event):
-                    exhausted.toggle_visibility(True)
-                    exhausted.toggle_accessibility(True)
-                domain_stack.append(exhausted)
-                self.game.exhausted_count = int(self.game.exhausted_count) + 1
+            # Resolve the purchased domain's own activation/passive first so that,
+            # if buying empties this stack, a revealed Event's activation does not
+            # collide with the domain's prompt (the event defers if a prompt is open).
             self.game.domain_effects._apply_domain_activation_effect(player, bought)
             self.game.domain_effects._apply_action_event_gain_passives(player, "build")
+            if not domain_stack and self.game.exhausted_stack:
+                self.game.events.reveal_exhausted_onto_stack(domain_stack)
             after = self.game._player_scores_line(player)
             pay = self.game._format_resource_payment(gp, sp, mp)
             self.game._log_game_event(

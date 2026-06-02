@@ -665,6 +665,7 @@ function renderConcurrentFlipCitizen(state, concurrent) {
   const totalParticipants = pending.length + completed.length;
   const data = concurrent.data || {};
   const buyerId = (data.buyer_id || '').toString();
+  const sourceLabel = (data.source_label || 'Cursed Cavern').toString();
 
   const buyer = playerById(state, buyerId);
   const buyerTag = buyer?.name || buyerId || '';
@@ -674,7 +675,7 @@ function renderConcurrentFlipCitizen(state, concurrent) {
 
   const status = mk('prompt-modal-note');
   status.textContent =
-    `Cursed Cavern — flip one citizen face-down: ${completed.length}/${totalParticipants} player choice(s) submitted.` +
+    `${sourceLabel} — flip one citizen face-down: ${completed.length}/${totalParticipants} player choice(s) submitted.` +
     (pending.length ? ` Waiting on: ${waitingLabels.join(', ')}.` : '') +
     (buyerTag ? ` Triggered by ${buyerTag}.` : '');
   body.appendChild(status);
@@ -752,6 +753,135 @@ function renderConcurrentFlipCitizen(state, concurrent) {
 
   openPromptOverlayShell({
     title: 'Choose 1 citizen to flip face-down',
+    dismissible: false,
+    bodyEl: body,
+    footerEl: null,
+  });
+}
+
+// Event: each player may pay a resource for a bank gain (e.g. Support The Empire).
+// A 'wild' cost lets the player pick which resource (g/s/m) to spend.
+function renderConcurrentEventSelfConvert(state, concurrent) {
+  const pending = Array.isArray(concurrent.pending) ? concurrent.pending : [];
+  const completed = Array.isArray(concurrent.completed) ? concurrent.completed : [];
+  const isPending = !!(PLAYER_ID && pending.some(pid => idsMatch(pid, PLAYER_ID)));
+  const totalParticipants = pending.length + completed.length;
+  const data = concurrent.data || {};
+  const name = (data.name || 'Event').toString();
+  const payKind = (data.pay_kind || 'g').toString();
+  const payAmount = Number(data.pay_amount || 0);
+  const gainKind = (data.gain_kind || 'v').toString();
+  const gainAmount = Number(data.gain_amount || 0);
+  const labels = { g: 'gold', s: 'strength', m: 'magic', v: 'victory points' };
+  const waitingLabels = pendingPlayerLabels(state, pending);
+
+  const body = mk('prompt-modal-body');
+  const status = mk('prompt-modal-note');
+  status.textContent =
+    `${name}: ${completed.length}/${totalParticipants} player choice(s) submitted.` +
+    (pending.length ? ` Waiting on: ${waitingLabels.join(', ')}.` : '');
+  body.appendChild(status);
+
+  if (!isPending) {
+    const youDone = !!(PLAYER_ID && completed.some(pid => idsMatch(pid, PLAYER_ID)));
+    const line = mk('prompt-modal-note');
+    line.textContent = youDone
+      ? 'You already responded. Waiting on other players.'
+      : 'You have no pending response in this event.';
+    body.appendChild(line);
+    openPromptOverlayShell({ title: name, dismissible: true, bodyEl: body, footerEl: null });
+    return;
+  }
+
+  const desc = mk('prompt-modal-note');
+  desc.textContent = `Pay ${payAmount} ${payKind === 'wild' ? '(your choice of gold/strength/magic)' : (labels[payKind] || payKind)} for ${gainAmount} ${labels[gainKind] || gainKind}?`;
+  body.appendChild(desc);
+
+  const post = (response, message) => confirmAndPostGameAction(
+    { player_id: PLAYER_ID, action_type: 'submit_concurrent_action', kind: 'event_self_convert', response: String(response) },
+    { title: name, message },
+  );
+
+  const row = mk('prompt-choice-card-actions');
+  if (payKind === 'wild') {
+    ['g', 's', 'm'].forEach(r => {
+      row.appendChild(promptButton(`Pay ${payAmount} ${labels[r]}`, () =>
+        post(r, `Pay ${payAmount} ${labels[r]} for ${gainAmount} ${labels[gainKind] || gainKind}.`)));
+    });
+  } else {
+    row.appendChild(promptButton(`Pay ${payAmount} ${labels[payKind] || payKind}`, () =>
+      post('accept', `Pay ${payAmount} ${labels[payKind] || payKind} for ${gainAmount} ${labels[gainKind] || gainKind}.`)));
+  }
+  row.appendChild(promptButton('Decline', () => post('skip', 'Decline this event.')));
+  body.appendChild(row);
+
+  openPromptOverlayShell({ title: name, dismissible: false, bodyEl: body, footerEl: null });
+}
+
+// Event: each player may banish one owned citizen (optionally role-filtered)
+// for a bank reward (e.g. A Call To Arms: banish a Soldier for 3 VP).
+function renderConcurrentEventBanishForReward(state, concurrent) {
+  const pending = Array.isArray(concurrent.pending) ? concurrent.pending : [];
+  const completed = Array.isArray(concurrent.completed) ? concurrent.completed : [];
+  const isPending = !!(PLAYER_ID && pending.some(pid => idsMatch(pid, PLAYER_ID)));
+  const totalParticipants = pending.length + completed.length;
+  const data = concurrent.data || {};
+  const name = (data.name || 'Event').toString();
+  const role = (data.role || '').toString();
+  const gainKind = (data.gain_kind || 'v').toString();
+  const gainAmount = Number(data.gain_amount || 0);
+  const labels = { g: 'gold', s: 'strength', m: 'magic', v: 'victory points' };
+  const roleAttr = { shadow: 'shadow_count', holy: 'holy_count', soldier: 'soldier_count', worker: 'worker_count' }[role];
+  const waitingLabels = pendingPlayerLabels(state, pending);
+
+  const body = mk('prompt-modal-body');
+  const status = mk('prompt-modal-note');
+  status.textContent =
+    `${name}: ${completed.length}/${totalParticipants} player choice(s) submitted.` +
+    (pending.length ? ` Waiting on: ${waitingLabels.join(', ')}.` : '');
+  body.appendChild(status);
+
+  if (!isPending) {
+    const youDone = !!(PLAYER_ID && completed.some(pid => idsMatch(pid, PLAYER_ID)));
+    const line = mk('prompt-modal-note');
+    line.textContent = youDone
+      ? 'You already responded. Waiting on other players.'
+      : 'You have no pending response in this event.';
+    body.appendChild(line);
+    openPromptOverlayShell({ title: name, dismissible: true, bodyEl: body, footerEl: null });
+    return;
+  }
+
+  const post = (response, message) => confirmAndPostGameAction(
+    { player_id: PLAYER_ID, action_type: 'submit_concurrent_action', kind: 'event_banish_citizen_for_reward', response: String(response) },
+    { title: name, message },
+  );
+
+  const you = playerById(state, PLAYER_ID);
+  const citizens = Array.isArray(you?.owned_citizens) ? you.owned_citizens : [];
+  const list = mk('prompt-choice-list');
+  citizens.forEach((c, idx) => {
+    if (!c || c.is_flipped) return;
+    if (roleAttr && !(Number(c[roleAttr] || 0) > 0)) return;
+    const nm = (c.name || `Citizen #${idx}`).toString();
+    const cardEl = mk('prompt-choice-card');
+    const titleEl = mk('prompt-choice-card-title');
+    titleEl.textContent = `${nm} (slot #${idx})`;
+    cardEl.appendChild(titleEl);
+    const actions = mk('prompt-choice-card-actions');
+    actions.appendChild(promptButton(`Banish for ${gainAmount} ${labels[gainKind] || gainKind}`, () =>
+      post(idx, `Banish ${nm} for ${gainAmount} ${labels[gainKind] || gainKind}.`)));
+    cardEl.appendChild(actions);
+    list.appendChild(cardEl);
+  });
+  body.appendChild(list);
+
+  const declineRow = mk('prompt-choice-card-actions');
+  declineRow.appendChild(promptButton('Decline', () => post('skip', 'Decline this event.')));
+  body.appendChild(declineRow);
+
+  openPromptOverlayShell({
+    title: `${name}: banish a${role ? ' ' + role : ''} citizen`,
     dismissible: false,
     bodyEl: body,
     footerEl: null,
@@ -1047,6 +1177,8 @@ function renderConcurrentPanel(state, concurrent) {
   if (kind === 'choose_duke') return renderConcurrentChooseDuke(state, concurrent);
   if (kind === 'flip_one_citizen') return renderConcurrentFlipCitizen(state, concurrent);
   if (kind === 'harvest_choices') return renderConcurrentHarvestChoices(state, concurrent);
+  if (kind === 'event_self_convert') return renderConcurrentEventSelfConvert(state, concurrent);
+  if (kind === 'event_banish_citizen_for_reward') return renderConcurrentEventBanishForReward(state, concurrent);
 
   const pending = Array.isArray(concurrent.pending) ? concurrent.pending : [];
   const body = mk('prompt-modal-body');
@@ -1307,6 +1439,46 @@ function renderDomainSelfConvertPrompt(state) {
     bodyEl: body,
     footerEl: foot,
   });
+}
+
+function renderEventGainActionPrompt(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const name = (prc?.event_name || 'Event').toString();
+  const payKind = (prc?.pay_kind || 'm').toString();
+  const payAmount = Number(prc?.pay_amount || 0);
+  const labels = { g: 'gold', s: 'strength', m: 'magic' };
+  const payLabel = `${payAmount} ${labels[payKind] || payKind}`;
+
+  const body = mk('prompt-modal-body');
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — ${name} additional-action choice.`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({ title: name, dismissible: true, bodyEl: body, footerEl: null });
+    return;
+  }
+
+  const sub = mk('prompt-modal-note');
+  sub.textContent = `Pay ${payLabel} for an additional action?`;
+  body.appendChild(sub);
+  appendPromptResourcesPanel(body, state);
+
+  const foot = promptActionsRow([
+    promptButton(`Pay ${payLabel}`, () => confirmAndPostGameAction(
+      { player_id: PLAYER_ID, action_type: 'act_on_required_action', action: 'accept' },
+      { title: 'Pay for an action?', message: `Pay ${payLabel} to gain an additional action.` },
+    )),
+    promptButton('Decline', () => confirmAndPostGameAction(
+      { player_id: PLAYER_ID, action_type: 'act_on_required_action', action: 'skip' },
+      { title: 'Decline?', message: 'Skip the additional action.', confirmLabel: 'Decline' },
+    ), true),
+  ]);
+
+  openPromptOverlayShell({ title: name, dismissible: false, bodyEl: body, footerEl: foot });
 }
 
 function renderDomainChooseResourcePrompt(state) {
@@ -2729,6 +2901,11 @@ function renderPromptModal(state) {
 
   if (reqAction === 'domain_self_convert') {
     renderDomainSelfConvertPrompt(state);
+    return;
+  }
+
+  if (reqAction === 'event_gain_action') {
+    renderEventGainActionPrompt(state);
     return;
   }
 

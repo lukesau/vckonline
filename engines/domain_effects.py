@@ -879,11 +879,20 @@ class DomainEffectsEngine:
         return None
 
     def _unexhaust_stack_top_if_present(self, stack):
-        """If stack's top card is an Exhausted token, pop it back to the pool. Returns True if popped."""
+        """If stack's top card is an exhausted-slot card, pop it back to the pool. Returns True if popped.
+
+        Recognized exhausted-slot cards: a plain Exhausted token, or a revealed
+        non-monster Event (a spent activation or in-play passive event). Returning
+        the event to the exhausted stack lets it be re-revealed and re-fire later;
+        an in-play passive stops applying while it is back in the deck. Monster
+        events are slayable board cards and are never recycled here.
+        """
         if not stack:
             return False
         top = stack[-1]
-        if getattr(top, "name", "") != "Exhausted":
+        is_plain_exhausted = getattr(top, "name", "") == "Exhausted"
+        is_nonmonster_event = isinstance(top, Event) and not bool(getattr(top, "is_monster", 0))
+        if not (is_plain_exhausted or is_nonmonster_event):
             return False
         stack.pop(-1)
         self.game.exhausted_stack.append(top)

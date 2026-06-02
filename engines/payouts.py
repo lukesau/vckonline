@@ -88,12 +88,7 @@ class PayoutsEngine:
             player.victory_score = int(getattr(player, "victory_score", 0)) + vp_gain
             self.game.harvest._bump_harvest_delta(player, 0, 0, 0, vp_gain)
         if not domain_stack and self.game.exhausted_stack:
-            exhausted = self.game.exhausted_stack.pop()
-            if isinstance(exhausted, Event):
-                exhausted.toggle_visibility(True)
-                exhausted.toggle_accessibility(True)
-            domain_stack.append(exhausted)
-            self.game.exhausted_count = int(self.game.exhausted_count) + 1
+            self.game.events.reveal_exhausted_onto_stack(domain_stack)
         after = self.game._player_scores_line(player)
         self.game._log_game_event(
             f"{self.game._player_label(player_id)} took domain \"{acquired.name}\" "
@@ -257,12 +252,7 @@ class PayoutsEngine:
         if stack:
             stack[-1].toggle_accessibility(True)
         elif self.game.exhausted_stack:
-            exhausted = self.game.exhausted_stack.pop()
-            stack.append(exhausted)
-            self.game.exhausted_count = int(self.game.exhausted_count) + 1
-            if isinstance(exhausted, _Event):
-                exhausted.toggle_visibility(True)
-                exhausted.toggle_accessibility(True)
+            self.game.events.reveal_exhausted_onto_stack(stack)
         return banished
 
     def _maybe_fire_northern_wall_banish(self, player_id):

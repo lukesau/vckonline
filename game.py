@@ -44,6 +44,7 @@ from engines.slay import SlayEngine
 from engines.domain_effects import DomainEffectsEngine
 from engines.player_actions import PlayerActionsEngine
 from engines.endgame import EndgameEngine
+from engines.events import EventsEngine
 
 
 class Game:
@@ -57,6 +58,7 @@ class Game:
         "domain_effects",
         "player_actions",
         "endgame",
+        "events",
     )
 
     def __init__(self, game_state):
@@ -144,6 +146,11 @@ class Game:
         # may legally change the dice. When present, the engine blocks in roll_pending until finalized.
         self.pending_roll = game_state.get('pending_roll') or None
         self.pending_event_slay_cost = game_state.get('pending_event_slay_cost') or None
+        # Activation effects from non-monster Event cards that were revealed while
+        # the engine was busy with another prompt. Drained (fired) one at a time
+        # at the next idle point. Each entry is a JSON-friendly dict:
+        # {"event_id", "name", "activation_effect", "revealing_player_id"}.
+        self.pending_event_activations = list(game_state.get('pending_event_activations') or [])
         # When a may-slay flow's slay opens a follow-up prompt via the slain
         # monster's `special_reward` (e.g. Warg's `choose m 3 <citizens where
         # name==Peasant>`), we stash the resume info here instead of clobbering
@@ -182,6 +189,7 @@ class Game:
         self.domain_effects = DomainEffectsEngine(self)
         self.player_actions = PlayerActionsEngine(self)
         self.endgame = EndgameEngine(self)
+        self.events = EventsEngine(self)
         self._assert_no_engine_method_conflicts()
 
     def _assert_no_engine_method_conflicts(self):

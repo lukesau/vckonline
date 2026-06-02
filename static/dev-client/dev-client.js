@@ -813,6 +813,7 @@
                     trimmed === 'choose_monster_strength' ||
                     trimmed === 'choose_owned_card' ||
                     trimmed === 'domain_self_convert' ||
+                    trimmed === 'event_gain_action' ||
                     trimmed === 'harvest_optional_exchange' ||
                     trimmed === 'harvest_wild_gain_exchange' ||
                     trimmed === 'harvest_wild_cost_exchange'
@@ -1548,6 +1549,10 @@
                     return renderDomainSelfConvertPrompt(gameState);
                 }
 
+                if (reqAction === 'event_gain_action') {
+                    return renderEventGainActionPrompt(gameState);
+                }
+
                 if (reqAction === 'harvest_optional_exchange') {
                     return renderHarvestOptionalExchangePrompt(gameState);
                 }
@@ -2064,6 +2069,52 @@
                     </div>`;
             }
 
+            function renderEventGainActionPrompt(gameState) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+                const req = gameState?.action_required || {};
+                const reqId = (req?.id || '').toString();
+                const isYou = (playerId && reqId === playerId);
+                const prc = gameState?.pending_required_choice || null;
+                const name = (prc?.event_name || 'Event').toString();
+                const payKind = (prc?.pay_kind || 'm').toString();
+                const payAmount = Number(prc?.pay_amount || 0);
+                const long = { g: 'gold', s: 'strength', m: 'magic' }[payKind] || payKind;
+                if (!isYou) {
+                    panel.innerHTML = `<div style="padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        Waiting on <code>${escapeHtml(reqId)}</code> for <strong>${escapeHtml(name)}</strong> additional-action choice.
+                    </div>`;
+                    return;
+                }
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(name)}</div>
+                        <div class="mini" style="margin-bottom:8px;color:#333;">Pay ${payAmount} ${escapeHtml(long)} for an additional action?</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button type="button" onclick="sendRequiredSimple('accept')">Pay ${payAmount} ${escapeHtml(long)}</button>
+                            <button type="button" onclick="sendRequiredSimple('skip')">Decline</button>
+                        </div>
+                    </div>`;
+            }
+
+            async function sendRequiredSimple(action) {
+                if (!playerId || !currentGameId) return;
+                try {
+                    await fetch(`/api/game/${currentGameId}/action`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            player_id: playerId,
+                            action_type: 'act_on_required_action',
+                            action: action
+                        })
+                    });
+                    getGameState(false);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
             async function sendSelfConvertConfirm() {
                 if (!playerId || !currentGameId) return;
                 try {
@@ -2455,6 +2506,8 @@
                 choose_duke: renderChooseDukeConcurrent,
                 flip_one_citizen: renderFlipOneCitizenConcurrent,
                 harvest_choices: renderConcurrentHarvestChoices,
+                event_self_convert: renderEventSelfConvertConcurrent,
+                event_banish_citizen_for_reward: renderEventBanishForRewardConcurrent,
             };
 
             function renderConcurrentActionPanel(gameState, concurrent) {
@@ -2551,6 +2604,7 @@
                 const totalParticipants = pending.length + completed.length;
                 const data = concurrent.data || {};
                 const buyerId = (data.buyer_id || '').toString();
+                const sourceLabel = (data.source_label || 'Cursed Cavern').toString();
 
                 const players = Array.isArray(gameState?.player_list) ? gameState.player_list : [];
                 const buyer = players.find(p => (p?.player_id || '') === buyerId) || null;
@@ -2559,7 +2613,7 @@
                 const waitingLabels = pendingPlayerLabels(gameState, pending);
 
                 const statusLine = `<div class="mini" style="margin-bottom:8px;">
-                    Cursed Cavern — flip one citizen face-down: ${completed.length}/${totalParticipants} player choice(s) submitted.
+                    ${escapeHtml(sourceLabel)} — flip one citizen face-down: ${completed.length}/${totalParticipants} player choice(s) submitted.
                     ${pending.length ? `Waiting on: <strong>${escapeHtml(waitingLabels.join(', '))}</strong>.` : ''}
                     ${buyerTag ? `<div style="margin-top:6px;">Triggered by <strong>${buyerTag}</strong>.</div>` : ''}
                 </div>`;
@@ -2609,6 +2663,120 @@
                         ${statusLine}
                         <div style="font-weight:800;margin-bottom:8px;">Choose 1 citizen to flip face-down</div>
                         <div style="display:flex;flex-direction:column;">${buttons}</div>
+                    </div>
+                `;
+            }
+
+            // Event: each player may pay a resource for a bank gain (e.g. Support The Empire).
+            // For a 'wild' cost the player picks which resource (g/s/m) to spend.
+            function renderEventSelfConvertConcurrent(gameState, concurrent) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+                const pending = Array.isArray(concurrent.pending) ? concurrent.pending : [];
+                const completed = Array.isArray(concurrent.completed) ? concurrent.completed : [];
+                const isPending = !!(playerId && pending.includes(playerId));
+                const totalParticipants = pending.length + completed.length;
+                const data = concurrent.data || {};
+                const name = (data.name || 'Event').toString();
+                const payKind = (data.pay_kind || 'g').toString();
+                const payAmount = Number(data.pay_amount || 0);
+                const gainKind = (data.gain_kind || 'v').toString();
+                const gainAmount = Number(data.gain_amount || 0);
+                const waitingLabels = pendingPlayerLabels(gameState, pending);
+
+                const statusLine = `<div class="mini" style="margin-bottom:8px;">
+                    ${escapeHtml(name)}: ${completed.length}/${totalParticipants} player choice(s) submitted.
+                    ${pending.length ? `Waiting on: <strong>${escapeHtml(waitingLabels.join(', '))}</strong>.` : ''}
+                </div>`;
+
+                if (!isPending) {
+                    const youDone = !!(playerId && completed.includes(playerId));
+                    panel.innerHTML = `<div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        ${statusLine}<div>${youDone ? 'You already responded. Waiting on other players.' : 'You have no pending response in this event.'}</div>
+                    </div>`;
+                    return;
+                }
+
+                let payButtons;
+                if (payKind === 'wild') {
+                    payButtons = ['g', 's', 'm'].map(r => {
+                        const long = { g: 'gold', s: 'strength', m: 'magic' }[r];
+                        return `<button type="button" onclick="submitConcurrentAction('event_self_convert', '${r}')">Pay ${payAmount} ${long}</button>`;
+                    }).join(' ');
+                } else {
+                    payButtons = `<button type="button" onclick="submitConcurrentAction('event_self_convert', 'accept')">Pay ${payAmount}${escapeHtml(payKind)}</button>`;
+                }
+
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        ${statusLine}
+                        <div style="font-weight:800;margin-bottom:8px;">${escapeHtml(name)}: pay ${payAmount}${payKind === 'wild' ? ' (your choice of g/s/m)' : escapeHtml(payKind)} for ${gainAmount}${escapeHtml(gainKind)}?</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            ${payButtons}
+                            <button type="button" onclick="submitConcurrentAction('event_self_convert', 'skip')">Decline</button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Event: each player may banish one owned citizen (optionally role-filtered)
+            // for a bank reward (e.g. A Call To Arms: banish a Soldier for 3 VP).
+            function renderEventBanishForRewardConcurrent(gameState, concurrent) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+                const pending = Array.isArray(concurrent.pending) ? concurrent.pending : [];
+                const completed = Array.isArray(concurrent.completed) ? concurrent.completed : [];
+                const isPending = !!(playerId && pending.includes(playerId));
+                const totalParticipants = pending.length + completed.length;
+                const data = concurrent.data || {};
+                const name = (data.name || 'Event').toString();
+                const role = (data.role || '').toString();
+                const gainKind = (data.gain_kind || 'v').toString();
+                const gainAmount = Number(data.gain_amount || 0);
+                const roleAttr = { shadow: 'shadow_count', holy: 'holy_count', soldier: 'soldier_count', worker: 'worker_count' }[role];
+                const waitingLabels = pendingPlayerLabels(gameState, pending);
+
+                const statusLine = `<div class="mini" style="margin-bottom:8px;">
+                    ${escapeHtml(name)}: ${completed.length}/${totalParticipants} player choice(s) submitted.
+                    ${pending.length ? `Waiting on: <strong>${escapeHtml(waitingLabels.join(', '))}</strong>.` : ''}
+                </div>`;
+
+                const players = Array.isArray(gameState?.player_list) ? gameState.player_list : [];
+                const you = players.find(p => p?.player_id === playerId) || null;
+
+                if (!isPending) {
+                    const youDone = !!(playerId && completed.includes(playerId));
+                    panel.innerHTML = `<div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        ${statusLine}<div>${youDone ? 'You already responded. Waiting on other players.' : 'You have no pending response in this event.'}</div>
+                    </div>`;
+                    return;
+                }
+
+                const citizens = Array.isArray(you?.owned_citizens) ? you.owned_citizens : [];
+                const choices = [];
+                citizens.forEach((c, idx) => {
+                    if (!c || c.is_flipped) return;
+                    if (roleAttr && !(Number(c[roleAttr] || 0) > 0)) return;
+                    choices.push({ idx, nm: (c.name || `Citizen #${idx}`).toString() });
+                });
+
+                const buttons = choices.map(({ idx, nm }) =>
+                    `<div style="border:1px solid #e6e6e6;background:#fff;border-radius:10px;padding:10px;margin-bottom:8px;">
+                        <div style="font-weight:800;">${escapeHtml(nm)} <span style="color:#666;font-weight:600;">(slot #${idx})</span></div>
+                        <div style="margin-top:8px;">
+                            <button type="button" onclick="submitConcurrentAction('event_banish_citizen_for_reward', '${idx}')">Banish for ${gainAmount}${escapeHtml(gainKind)}</button>
+                        </div>
+                    </div>`
+                ).join('');
+
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        ${statusLine}
+                        <div style="font-weight:800;margin-bottom:8px;">${escapeHtml(name)}: banish a${role ? ' ' + escapeHtml(role) : ''} citizen for ${gainAmount}${escapeHtml(gainKind)}?</div>
+                        <div style="display:flex;flex-direction:column;">${buttons || '<div class="mini">No eligible citizen.</div>'}</div>
+                        <div style="margin-top:8px;">
+                            <button type="button" onclick="submitConcurrentAction('event_banish_citizen_for_reward', 'skip')">Decline</button>
+                        </div>
                     </div>
                 `;
             }
