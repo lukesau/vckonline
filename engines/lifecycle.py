@@ -171,6 +171,12 @@ class LifecycleEngine:
                     active = self.game._player_by_id(self.current_player_id())
                     self.game.harvest._apply_harvest_jousting_passive(active)
                 self.game.harvest._harvest_run_automation_until_blocked()
+            # Harvest may open an unordered concurrent gate (e.g. concurrent
+            # non-steal harvest decisions). If that happens inside this
+            # advance_tick call, we must pause here so we don't jump into the
+            # action phase while `concurrent_action.pending` is still non-empty.
+            if self.is_blocked_on_concurrent_action():
+                return False
 
             # If harvest triggered a required choice, pause progression here.
             if self.game.action_required and self.game.action_required.get("id") and self.game.action_required.get("id") != self.game.game_id:

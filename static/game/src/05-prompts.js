@@ -19,6 +19,39 @@ function syncConcurrentPolling(state) {
   }
 }
 
+// Returns true if a passive poll would clobber UI the player is actively
+// using (an open confirm modal, a focused number/text input — e.g. the slay
+// payment fields). The poll itself is safe to skip; the next poll tick or
+// the next WS push will reconcile.
+function passivePollWouldDisruptUi() {
+  const confirmModal = document.getElementById('action-confirm-modal');
+  if (confirmModal && confirmModal.classList.contains('is-open')) return true;
+  const active = document.activeElement;
+  if (active && active !== document.body) {
+    const tag = (active.tagName || '').toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (active.isContentEditable) return true;
+  }
+  return false;
+}
+
+function startPassiveStatePolling() {
+  if (passiveStatePollTimer) return;
+  passiveStatePollTimer = setInterval(() => {
+    if (!GAME_ID || !PLAYER_ID) return;
+    if (document.hidden) return;
+    if (concurrentPollTimer) return;
+    if (passivePollWouldDisruptUi()) return;
+    fetchGameStateFromApi();
+  }, PASSIVE_GAME_POLL_MS);
+}
+
+function stopPassiveStatePolling() {
+  if (!passiveStatePollTimer) return;
+  clearInterval(passiveStatePollTimer);
+  passiveStatePollTimer = null;
+}
+
 async function fetchGameStateFromApi() {
   if (!GAME_ID || !PLAYER_ID) return;
   try {
@@ -725,10 +758,283 @@ function renderConcurrentFlipCitizen(state, concurrent) {
   });
 }
 
+// ── Concurrent harvest gate ──────────────────────────────────────────────
+//
+// Single roster modal: one row per harvest participant. Each row shows
+// the player's name, a short prompt summary, and an action cell that
+// switches between buttons (for the viewer's own prompt), a spinner
+// (for other players still pending), or a check (for completed players).
+// The modal stays open until every participant has resolved their
+// decisions — including any follow-up prompts opened by re-drain.
+
+function harvestPromptSubKindBadge(subKind) {
+  switch ((subKind || '').toString()) {
+    case 'harvest_optional_exchange':  return 'Optional exchange';
+    case 'harvest_wild_cost_exchange': return 'Wild-cost exchange';
+    case 'harvest_wild_gain_exchange': return 'Wild-gain exchange';
+    case 'bonus_resource_choice':      return 'Harvest bonus';
+    case 'harvest_choose':             return 'Choose one';
+    default:                           return 'Harvest decision';
+  }
+}
+
+function harvestPromptSummary(prompt) {
+  if (!prompt) return '';
+  const sub = (prompt.sub_kind || '').toString();
+  const prc = prompt.pending_required_choice || {};
+
+  if (sub === 'harvest_optional_exchange') {
+    const cmd = (prc.command || '').toString();
+    return harvestExchangeExplain(cmd);
+  }
+  if (sub === 'harvest_wild_cost_exchange') {
+    const gainRes = (prc.gain_resource || '').toLowerCase();
+    const gainAmt = Number(prc.gain_amount || 0);
+    const labels = { g: 'gold', s: 'strength', m: 'magic', v: 'victory points' };
+    const gainLabel = `${gainAmt} ${labels[gainRes] || gainRes}`;
+    return `Choose what to pay; gain ${gainLabel}.`;
+  }
+  if (sub === 'harvest_wild_gain_exchange') {
+    const costRes = (prc.cost_resource || '').toLowerCase();
+    const costAmt = Number(prc.cost_amount || 0);
+    const gainAmt = Number(prc.gain_amount || 0);
+    const labels = { g: 'gold', s: 'strength', m: 'magic', v: 'victory points' };
+    return `Pay ${costAmt} ${labels[costRes] || costRes}; choose gain (${gainAmt}).`;
+  }
+  if (sub === 'bonus_resource_choice') {
+    return 'Pick +1 resource (no harvest payouts this round).';
+  }
+  if (sub === 'harvest_choose') {
+    const cmd = (prompt.action || prc.command || '').toString();
+    return `Choose one: ${cmd}`;
+  }
+  return harvestPromptSubKindBadge(sub);
+}
+
+function harvestPromptButtons(prompt, state) {
+  if (!prompt) return [];
+  const sub = (prompt.sub_kind || '').toString();
+  const prc = prompt.pending_required_choice || {};
+  const action = (prompt.action || '').toString();
+
+  const post = (response, confirmCopy) => confirmAndPostGameAction(
+    {
+      player_id: PLAYER_ID,
+      action_type: 'submit_concurrent_action',
+      kind: 'harvest_choices',
+      response: String(response),
+    },
+    confirmCopy || {
+      title: 'Confirm harvest choice?',
+      message: String(response),
+    },
+  );
+
+  if (sub === 'harvest_optional_exchange') {
+    const explain = harvestExchangeExplain((prc.command || '').toString());
+    return [
+      promptButton('Take', () => post('confirm_harvest_exchange', {
+        title: 'Take exchange?',
+        message: explain,
+      })),
+      promptButton('Skip', () => post('skip_harvest_exchange', {
+        title: 'Skip exchange?',
+        message: 'Keep your resources and skip this optional harvest exchange.',
+        confirmLabel: 'Skip',
+      }), true),
+    ];
+  }
+
+  if (sub === 'harvest_wild_cost_exchange') {
+    const costOpts = Array.isArray(prc.cost_options) ? prc.cost_options : [];
+    const labels = { g: 'Gold', s: 'Strength', m: 'Magic', v: 'VP' };
+    return costOpts.map(opt => {
+      const r = (opt?.resource || '').toLowerCase();
+      const n = Number(opt?.amount || 0);
+      return promptButton(`Pay ${n} ${labels[r] || r.toUpperCase()}`, () =>
+        post(`wild_cost_resource ${r}`));
+    });
+  }
+
+  if (sub === 'harvest_wild_gain_exchange') {
+    const gainAmt = Number(prc.gain_amount || 0);
+    const labels = { g: 'Gold', s: 'Strength', m: 'Magic' };
+    return ['g', 's', 'm'].map(r =>
+      promptButton(`Gain ${gainAmt} ${labels[r]}`, () =>
+        post(`wild_gain_resource ${r}`)));
+  }
+
+  if (sub === 'bonus_resource_choice') {
+    return [
+      promptButton('+1 Gold', () => post('gold')),
+      promptButton('+1 Strength', () => post('strength')),
+      promptButton('+1 Magic', () => post('magic')),
+    ];
+  }
+
+  if (sub === 'harvest_choose') {
+    let options = parseChooseCommand(action);
+    if (
+      prc &&
+      prc.kind === 'special_payout_choose' &&
+      Array.isArray(prc.options) &&
+      prc.options.length
+    ) {
+      options = prc.options;
+    }
+    return options.map((opt, idx) => {
+      const optLabel = chooseOptionButtonLabel(opt, idx, state);
+      return promptButton(optLabel, () => post(`choose ${idx + 1}`, {
+        title: 'Confirm choice?',
+        message: optLabel,
+      }));
+    });
+  }
+
+  return [];
+}
+
+function makeHarvestStatusSpinner() {
+  const wrap = mk('prompt-harvest-status prompt-harvest-status--waiting');
+  const spin = mk('prompt-harvest-spinner');
+  spin.setAttribute('role', 'progressbar');
+  spin.setAttribute('aria-label', 'Waiting');
+  const label = mk('prompt-harvest-status-label');
+  label.textContent = 'Waiting';
+  wrap.appendChild(spin);
+  wrap.appendChild(label);
+  return wrap;
+}
+
+function makeHarvestStatusCheck() {
+  const wrap = mk('prompt-harvest-status prompt-harvest-status--done');
+  const check = mk('prompt-harvest-check');
+  check.textContent = '✓';
+  check.setAttribute('aria-hidden', 'true');
+  const label = mk('prompt-harvest-status-label');
+  label.textContent = 'Done';
+  wrap.appendChild(check);
+  wrap.appendChild(label);
+  return wrap;
+}
+
+function renderConcurrentHarvestChoices(state, concurrent) {
+  const pending = Array.isArray(concurrent.pending) ? concurrent.pending : [];
+  const completed = Array.isArray(concurrent.completed) ? concurrent.completed : [];
+  const prompts = (concurrent?.data && typeof concurrent.data === 'object'
+    ? (concurrent.data.prompts || {})
+    : {}) || {};
+  const phase = (concurrent?.data && concurrent.data.phase) || 'scan';
+
+  const myPid = (PLAYER_ID || '').toString();
+
+  // Preserve harvest seat order if known; otherwise fall back to player_list
+  // order. We always include every participant (pending + completed) so the
+  // viewer can see whose decisions are still outstanding.
+  const harvestOrder = Array.isArray(state?.harvest_player_order)
+    ? state.harvest_player_order : null;
+  const playerOrder = Array.isArray(state?.player_list)
+    ? state.player_list.map(p => p?.player_id).filter(Boolean) : [];
+  const orderRef = harvestOrder && harvestOrder.length ? harvestOrder : playerOrder;
+  const participantSet = new Set([...pending.map(String), ...completed.map(String)]);
+  const participantIds = [];
+  orderRef.forEach(pid => {
+    const s = String(pid);
+    if (participantSet.has(s) && !participantIds.includes(s)) participantIds.push(s);
+  });
+  participantSet.forEach(s => {
+    if (!participantIds.includes(s)) participantIds.push(s);
+  });
+
+  const total = participantIds.length;
+  const done = completed.length;
+
+  const body = mk('prompt-modal-body');
+
+  const status = mk('prompt-modal-note');
+  status.textContent = phase === 'finalize_bonus'
+    ? `End-of-harvest bonus: ${done}/${total} player(s) submitted.`
+    : `Harvest decisions: ${done}/${total} player(s) submitted.`;
+  body.appendChild(status);
+
+  appendPromptResourcesPanel(body, state);
+
+  const roster = mk('prompt-harvest-roster');
+  participantIds.forEach(pid => {
+    const isMe = String(pid) === myPid;
+    const isPending = pending.some(p => String(p) === String(pid));
+    const prompt = prompts[String(pid)] || prompts[pid] || null;
+
+    const row = mk('prompt-harvest-row');
+    if (isMe) row.classList.add('is-you');
+    if (isPending) row.classList.add('is-pending');
+    else row.classList.add('is-done');
+
+    const nameEl = mk('prompt-harvest-name');
+    const nameText = document.createElement('span');
+    nameText.className = 'prompt-harvest-name-text';
+    nameText.textContent = playerDisplayName(state, pid);
+    nameEl.appendChild(nameText);
+    if (isMe) {
+      const tag = mk('prompt-harvest-you-tag');
+      tag.textContent = 'You';
+      nameEl.appendChild(tag);
+    }
+    if (prompt) {
+      const badge = mk('prompt-harvest-sub-badge');
+      badge.textContent = harvestPromptSubKindBadge(prompt.sub_kind);
+      nameEl.appendChild(badge);
+    }
+    row.appendChild(nameEl);
+
+    const summaryEl = mk('prompt-harvest-summary');
+    if (prompt) {
+      summaryEl.textContent = harvestPromptSummary(prompt);
+    } else {
+      summaryEl.textContent = isPending
+        ? 'Resolving harvest…'
+        : 'All decisions complete.';
+      summaryEl.classList.add('is-muted');
+    }
+    row.appendChild(summaryEl);
+
+    const actionEl = mk('prompt-harvest-action');
+    if (!isPending) {
+      actionEl.appendChild(makeHarvestStatusCheck());
+    } else if (isMe && prompt) {
+      const buttons = harvestPromptButtons(prompt, state);
+      if (buttons.length) {
+        const actions = mk('prompt-harvest-buttons');
+        buttons.forEach(b => actions.appendChild(b));
+        actionEl.appendChild(actions);
+      } else {
+        actionEl.appendChild(makeHarvestStatusSpinner());
+      }
+    } else {
+      actionEl.appendChild(makeHarvestStatusSpinner());
+    }
+    row.appendChild(actionEl);
+
+    roster.appendChild(row);
+  });
+  body.appendChild(roster);
+
+  openPromptOverlayShell({
+    title: phase === 'finalize_bonus' ? 'Harvest bonus' : 'Harvest decisions',
+    subtitle: pending.length
+      ? `Waiting on ${pendingPlayerLabels(state, pending).join(', ')}.`
+      : 'Finalizing harvest…',
+    dismissible: false,
+    bodyEl: body,
+    footerEl: null,
+  });
+}
+
 function renderConcurrentPanel(state, concurrent) {
   const kind = concurrent?.kind || '';
   if (kind === 'choose_duke') return renderConcurrentChooseDuke(state, concurrent);
   if (kind === 'flip_one_citizen') return renderConcurrentFlipCitizen(state, concurrent);
+  if (kind === 'harvest_choices') return renderConcurrentHarvestChoices(state, concurrent);
 
   const pending = Array.isArray(concurrent.pending) ? concurrent.pending : [];
   const body = mk('prompt-modal-body');

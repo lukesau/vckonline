@@ -65,6 +65,12 @@ html, body {
 .game-layout {
   display: flex;
   flex-direction: column;
+  /* When the natural game height (gl-mid auto + gl-bottom capped via its
+     max-height) is shorter than the viewport, distribute the leftover felt
+     above and below so the game stays vertically centered. On mobile / short
+     viewports gl-bottom's flex-grow eats all the space anyway, so this is a
+     no-op there. */
+  justify-content: center;
   height: 100%;
   min-height: 0;
   /* Constrain the game width so wide / fullscreen-desktop viewports get
@@ -148,6 +154,16 @@ html, body {
 .gl-bottom {
   flex: 1 1 auto;
   min-height: 160px;
+  /* Cap the tableau area at roughly its natural content height: two card
+     rows (--card-max-h × 2 = strip cap) + chrome (player header, carousel
+     nav dots, seat/carousel paddings & gaps, with a little headroom for
+     larger headers when a player has long names or many resource pills).
+     Without this cap, gl-bottom's flex-grow would absorb all extra viewport
+     height on tall monitors, leaving a wide band of felt below the cards
+     instead of letting .game-layout's justify-content: center pad above
+     and below the game. Mobile / short viewports stay below this cap so
+     the layout is unchanged there. */
+  max-height: calc(var(--card-max-h) * 2 + 175px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -696,7 +712,12 @@ html, body {
 
 /* Two rows (50cqh each); fill columns top→bottom, then new column → width grows every 2 stacks.
    Rows / overall stacks box are capped at native card height so tall viewports get
-   vertical padding inside the strip instead of cards taller than the printed size. */
+   vertical padding inside the strip instead of cards taller than the printed size.
+   row-gap is 0 (cards in the same column touch vertically, with their 1px borders
+   forming the visible separator) so the grid's max-height = 2 × row exactly. With
+   any row-gap, the grid would shrink each row by ~gap/2 below 50cqh / --tableau-
+   card-max-h, the card (sized at the unclipped formula) would overflow the row by
+   that gap/2, and the row's overflow:hidden would clip the card's bottom border. */
 .seat-carousel .card-group-stacks {
   display: grid;
   grid-column: 2;
@@ -705,7 +726,8 @@ html, body {
   grid-template-rows: repeat(2, minmax(0, min(50cqh, var(--tableau-card-max-h))));
   grid-auto-flow: column dense;
   grid-auto-columns: max-content;
-  gap: 4px;
+  column-gap: 4px;
+  row-gap: 0;
   max-height: clamp(88px, 100cqh, 900px);
   max-height: min(100cqh, var(--tableau-strip-max-h));
   min-width: 0;
@@ -3601,4 +3623,159 @@ body.is-virtual-keyboard-open .card-modal {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ── Concurrent harvest roster ─────────────────────────────────────────── */
+.prompt-harvest-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.prompt-harvest-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.2fr) minmax(180px, 2fr) minmax(180px, auto);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.prompt-harvest-row.is-you {
+  background: rgba(240, 192, 64, 0.08);
+  border-color: rgba(240, 192, 64, 0.4);
+}
+
+.prompt-harvest-row.is-done {
+  opacity: 0.85;
+}
+
+.prompt-harvest-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.prompt-harvest-name-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.prompt-harvest-you-tag {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(240, 192, 64, 0.25);
+  color: var(--gold);
+  border: 1px solid rgba(240, 192, 64, 0.45);
+}
+
+.prompt-harvest-sub-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.prompt-harvest-summary {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.prompt-harvest-summary.is-muted {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.prompt-harvest-action {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.prompt-harvest-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.prompt-harvest-buttons .prompt-btn {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.prompt-harvest-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.prompt-harvest-status--waiting .prompt-harvest-status-label {
+  color: var(--muted);
+}
+
+.prompt-harvest-status--done .prompt-harvest-status-label {
+  color: var(--vp);
+}
+
+.prompt-harvest-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-top-color: var(--gold);
+  animation: prompt-harvest-spin 0.85s linear infinite;
+}
+
+.prompt-harvest-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(64, 208, 128, 0.15);
+  border: 1px solid rgba(64, 208, 128, 0.5);
+  color: var(--vp);
+  font-size: 13px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+@keyframes prompt-harvest-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 640px) {
+  .prompt-harvest-row {
+    grid-template-columns: 1fr;
+  }
+  .prompt-harvest-action {
+    justify-content: flex-start;
+  }
+  .prompt-harvest-buttons {
+    justify-content: flex-start;
+  }
 }

@@ -795,7 +795,15 @@
                 if (reqAction === 'bonus_resource_choice') return true;
                 const trimmed = reqAction.trim();
                 if (trimmed.startsWith('choose ')) return true;
-                if (trimmed === 'choose_player' || trimmed === 'choose_monster_strength' || trimmed === 'choose_owned_card' || trimmed === 'domain_self_convert' || trimmed === 'harvest_optional_exchange') return true;
+                if (
+                    trimmed === 'choose_player' ||
+                    trimmed === 'choose_monster_strength' ||
+                    trimmed === 'choose_owned_card' ||
+                    trimmed === 'domain_self_convert' ||
+                    trimmed === 'harvest_optional_exchange' ||
+                    trimmed === 'harvest_wild_gain_exchange' ||
+                    trimmed === 'harvest_wild_cost_exchange'
+                ) return true;
                 if (reqAction === 'standard_action' && (gameState.phase || '') === 'action') return true;
                 return false;
             }
@@ -1502,6 +1510,14 @@
                     return renderHarvestOptionalExchangePrompt(gameState);
                 }
 
+                if (reqAction === 'harvest_wild_gain_exchange') {
+                    return renderHarvestWildGainExchangePrompt(gameState);
+                }
+
+                if (reqAction === 'harvest_wild_cost_exchange') {
+                    return renderHarvestWildCostExchangePrompt(gameState);
+                }
+
                 if (reqAction === 'choose_player') {
                     return renderDomainChoosePlayer(gameState);
                 }
@@ -2115,6 +2131,115 @@
                 }
             }
 
+            function renderHarvestWildCostExchangePrompt(gameState) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+                const req = gameState?.action_required || {};
+                const reqId = (req?.id || '').toString();
+                const isYou = (playerId && reqId === playerId);
+                const prc = gameState?.pending_required_choice || null;
+
+                const gainRes = (prc?.gain_resource || '').toLowerCase();
+                const gainAmt = Number(prc?.gain_amount || 0);
+                const costOpts = Array.isArray(prc?.cost_options) ? prc.cost_options : [];
+                const labels = { g: 'gold', s: 'strength', m: 'magic', v: 'victory points' };
+
+                const gainLabel = `${gainAmt} ${labels[gainRes] || gainRes.toUpperCase()}`;
+
+                if (!isYou) {
+                    panel.innerHTML = `<div style="padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        Waiting on <code>${escapeHtml(reqId)}</code> — choosing what to pay for +${escapeHtml(gainLabel)}.
+                    </div>`;
+                    return;
+                }
+
+                const btns = costOpts.map(opt => {
+                    const r = (opt?.resource || '').toLowerCase();
+                    const n = Number(opt?.amount || 0);
+                    const label = `Pay ${n} ${labels[r] || r.toUpperCase()}`;
+                    return `<button type="button" onclick="sendWildCostResource('${escapeHtml(r)}')">${escapeHtml(label)}</button>`;
+                }).join(' ');
+
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        <div style="font-weight:700;margin-bottom:8px;">Harvest: pay for +${escapeHtml(gainLabel)}</div>
+                        <div class="mini" style="margin-bottom:8px;color:#333;">Choose which resource to pay.</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">${btns}</div>
+                    </div>`;
+            }
+
+            async function sendWildCostResource(res) {
+                if (!playerId || !currentGameId) return;
+                try {
+                    await fetch(`/api/game/${currentGameId}/action`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            player_id: playerId,
+                            action_type: 'act_on_required_action',
+                            action: `wild_cost_resource ${String(res).trim()}`
+                        })
+                    });
+                    getGameState(false);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
+            function renderHarvestWildGainExchangePrompt(gameState) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+                const req = gameState?.action_required || {};
+                const reqId = (req?.id || '').toString();
+                const isYou = (playerId && reqId === playerId);
+                const prc = gameState?.pending_required_choice || null;
+
+                const costRes = (prc?.cost_resource || '').toLowerCase();
+                const costAmt = Number(prc?.cost_amount || 0);
+                const gainAmt = Number(prc?.gain_amount || 0);
+                const labels = { g: 'gold', s: 'strength', m: 'magic', v: 'victory points' };
+
+                const costLabel = `${costAmt} ${labels[costRes] || costRes.toUpperCase()}`;
+                const gainOptions = ['g', 's', 'm'];
+
+                if (!isYou) {
+                    panel.innerHTML = `<div style="padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        Waiting on <code>${escapeHtml(reqId)}</code> — choosing what to gain for ${escapeHtml(costLabel)}.
+                    </div>`;
+                    return;
+                }
+
+                const btns = gainOptions.map(r => {
+                    const label = `Gain ${gainAmt} ${labels[r] || r.toUpperCase()}`;
+                    return `<button type="button" onclick="sendWildGainResource('${escapeHtml(r)}')">${escapeHtml(label)}</button>`;
+                }).join(' ');
+
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        <div style="font-weight:700;margin-bottom:8px;">Harvest: pay ${escapeHtml(costLabel)}</div>
+                        <div class="mini" style="margin-bottom:8px;color:#333;">Choose which resource to gain (${gainAmt}).</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">${btns}</div>
+                    </div>`;
+            }
+
+            async function sendWildGainResource(res) {
+                if (!playerId || !currentGameId) return;
+                try {
+                    await fetch(`/api/game/${currentGameId}/action`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            player_id: playerId,
+                            action_type: 'act_on_required_action',
+                            action: `wild_gain_resource ${String(res).trim()}`
+                        })
+                    });
+                    getGameState(false);
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
             function renderDomainChoosePlayer(gameState) {
                 const panel = document.getElementById('choicePanel');
                 if (!panel) return;
@@ -2285,6 +2410,7 @@
             const CONCURRENT_RENDERERS = {
                 choose_duke: renderChooseDukeConcurrent,
                 flip_one_citizen: renderFlipOneCitizenConcurrent,
+                harvest_choices: renderConcurrentHarvestChoices,
             };
 
             function renderConcurrentActionPanel(gameState, concurrent) {
@@ -2441,6 +2567,204 @@
                         <div style="display:flex;flex-direction:column;">${buttons}</div>
                     </div>
                 `;
+            }
+
+            // Per-player harvest roster (concurrent gate).
+            //
+            // Renders ALL participants in one panel. Each row has:
+            //   - Player name (with 'You' tag for the viewer)
+            //   - A short summary of their current decision
+            //   - An action cell: buttons (your own row, with a pending
+            //     prompt), a spinner (other players still pending), or
+            //     a check (players who finished).
+            function harvestPromptSubKindLabel(subKind) {
+                switch ((subKind || '').toString()) {
+                    case 'harvest_optional_exchange':  return 'Optional exchange';
+                    case 'harvest_wild_cost_exchange': return 'Wild-cost exchange';
+                    case 'harvest_wild_gain_exchange': return 'Wild-gain exchange';
+                    case 'bonus_resource_choice':      return 'Harvest bonus';
+                    case 'harvest_choose':             return 'Choose one';
+                    default:                           return 'Harvest decision';
+                }
+            }
+            function harvestPromptSummaryText(prompt) {
+                if (!prompt) return '';
+                const sub = (prompt.sub_kind || '').toString();
+                const prc = prompt.pending_required_choice || {};
+                if (sub === 'harvest_optional_exchange') {
+                    return harvestExchangeExplain((prc.command || '').toString());
+                }
+                if (sub === 'harvest_wild_cost_exchange') {
+                    const gainRes = (prc.gain_resource || '').toLowerCase();
+                    const gainAmt = Number(prc.gain_amount || 0);
+                    const labels = { g: 'gold', s: 'strength', m: 'magic', v: 'victory points' };
+                    return `Choose what to pay; gain ${gainAmt} ${labels[gainRes] || gainRes}.`;
+                }
+                if (sub === 'harvest_wild_gain_exchange') {
+                    const costRes = (prc.cost_resource || '').toLowerCase();
+                    const costAmt = Number(prc.cost_amount || 0);
+                    const gainAmt = Number(prc.gain_amount || 0);
+                    const labels = { g: 'gold', s: 'strength', m: 'magic', v: 'victory points' };
+                    return `Pay ${costAmt} ${labels[costRes] || costRes}; choose gain (${gainAmt}).`;
+                }
+                if (sub === 'bonus_resource_choice') {
+                    return 'Pick +1 resource (no harvest payouts this round).';
+                }
+                if (sub === 'harvest_choose') {
+                    return `Choose one: ${(prompt.action || prc.command || '').toString()}`;
+                }
+                return harvestPromptSubKindLabel(sub);
+            }
+            function harvestPromptButtonsHtml(prompt) {
+                if (!prompt) return '';
+                const sub = (prompt.sub_kind || '').toString();
+                const prc = prompt.pending_required_choice || {};
+                const act = (resp) => `submitConcurrentAction('harvest_choices', '${escapeHtml(String(resp).replace(/'/g, "\\'"))}')`;
+                if (sub === 'harvest_optional_exchange') {
+                    return `
+                        <button type="button" onclick="${act('confirm_harvest_exchange')}">Take</button>
+                        <button type="button" onclick="${act('skip_harvest_exchange')}">Skip</button>
+                    `;
+                }
+                if (sub === 'harvest_wild_cost_exchange') {
+                    const opts = Array.isArray(prc.cost_options) ? prc.cost_options : [];
+                    const labels = { g: 'Gold', s: 'Strength', m: 'Magic', v: 'VP' };
+                    return opts.map(o => {
+                        const r = (o?.resource || '').toLowerCase();
+                        const n = Number(o?.amount || 0);
+                        return `<button type="button" onclick="${act(`wild_cost_resource ${r}`)}">Pay ${n} ${escapeHtml(labels[r] || r.toUpperCase())}</button>`;
+                    }).join(' ');
+                }
+                if (sub === 'harvest_wild_gain_exchange') {
+                    const gainAmt = Number(prc.gain_amount || 0);
+                    const labels = { g: 'Gold', s: 'Strength', m: 'Magic' };
+                    return ['g', 's', 'm'].map(r =>
+                        `<button type="button" onclick="${act(`wild_gain_resource ${r}`)}">Gain ${gainAmt} ${escapeHtml(labels[r])}</button>`
+                    ).join(' ');
+                }
+                if (sub === 'bonus_resource_choice') {
+                    return `
+                        <button type="button" onclick="${act('gold')}">+1 Gold</button>
+                        <button type="button" onclick="${act('strength')}">+1 Strength</button>
+                        <button type="button" onclick="${act('magic')}">+1 Magic</button>
+                    `;
+                }
+                if (sub === 'harvest_choose') {
+                    const options = parseChooseCommand((prompt.action || '').toString());
+                    if (!options.length) return '';
+                    return options.map((opt, idx) => {
+                        const token = (opt?.token || '').toString();
+                        const label = labelForChoiceToken(token);
+                        const amt = Number(opt.amount);
+                        const prettyAmt = Number.isFinite(amt) ? amt : opt.amount;
+                        return `<button type="button" onclick="${act(`choose ${idx + 1}`)}">+${prettyAmt} ${escapeHtml(label)}</button>`;
+                    }).join(' ');
+                }
+                return '';
+            }
+            function renderConcurrentHarvestChoices(gameState, concurrent) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+
+                const pending = Array.isArray(concurrent.pending) ? concurrent.pending : [];
+                const completed = Array.isArray(concurrent.completed) ? concurrent.completed : [];
+                const prompts = (concurrent?.data && concurrent.data.prompts && typeof concurrent.data.prompts === 'object')
+                    ? concurrent.data.prompts
+                    : {};
+                const phase = (concurrent?.data && concurrent.data.phase) || 'scan';
+
+                const myPid = (playerId || '').toString();
+
+                const order = Array.isArray(gameState?.harvest_player_order) && gameState.harvest_player_order.length
+                    ? gameState.harvest_player_order
+                    : (Array.isArray(gameState?.player_list) ? gameState.player_list.map(p => p?.player_id).filter(Boolean) : []);
+                const participantSet = new Set([...pending.map(String), ...completed.map(String)]);
+                const participantIds = [];
+                order.forEach(pid => {
+                    const s = String(pid);
+                    if (participantSet.has(s) && !participantIds.includes(s)) participantIds.push(s);
+                });
+                participantSet.forEach(s => {
+                    if (!participantIds.includes(s)) participantIds.push(s);
+                });
+
+                const total = participantIds.length;
+                const done = completed.length;
+                const titleLine = phase === 'finalize_bonus'
+                    ? `End-of-harvest bonus: ${done}/${total} player(s) submitted.`
+                    : `Harvest decisions: ${done}/${total} player(s) submitted.`;
+                const waitingLabels = pendingPlayerLabels(gameState, pending);
+                const subtitle = pending.length
+                    ? `Waiting on: <strong>${escapeHtml(waitingLabels.join(', '))}</strong>.`
+                    : 'Finalizing harvest…';
+
+                const players = Array.isArray(gameState?.player_list) ? gameState.player_list : [];
+                function nameFor(pid) {
+                    const p = players.find(x => (x?.player_id || '') === pid);
+                    return (p?.name ?? pid ?? 'Player').toString();
+                }
+
+                const rowsHtml = participantIds.map(pid => {
+                    const isMe = String(pid) === String(myPid);
+                    const isPending = pending.some(p => String(p) === String(pid));
+                    const prompt = prompts[pid] || prompts[String(pid)] || null;
+
+                    const youTag = isMe
+                        ? `<span style="font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:1px 6px;border-radius:999px;background:#fce29a;color:#7a560b;border:1px solid #c7972a;margin-left:6px;">You</span>`
+                        : '';
+                    const subBadge = prompt
+                        ? `<span style="font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 6px;border-radius:999px;background:#eee;color:#555;border:1px solid #ddd;margin-left:6px;">${escapeHtml(harvestPromptSubKindLabel(prompt.sub_kind))}</span>`
+                        : '';
+                    const nameCell = `<div style="font-weight:700;">${escapeHtml(nameFor(pid))}${youTag}${subBadge}</div>`;
+
+                    let summaryText;
+                    if (prompt) summaryText = harvestPromptSummaryText(prompt);
+                    else summaryText = isPending ? 'Resolving harvest…' : 'All decisions complete.';
+                    const summaryCell = `<div style="font-size:13px;color:#333;">${escapeHtml(summaryText)}</div>`;
+
+                    let actionHtml;
+                    if (!isPending) {
+                        actionHtml = `
+                            <div style="display:inline-flex;align-items:center;gap:6px;color:#1f6a3a;font-weight:700;">
+                                <span style="display:inline-flex;width:18px;height:18px;border-radius:50%;background:#e3f5e9;border:1px solid #8ad0a4;align-items:center;justify-content:center;color:#1f6a3a;font-weight:800;font-size:13px;">&#10003;</span>
+                                <span>Done</span>
+                            </div>`;
+                    } else if (isMe && prompt) {
+                        const btns = harvestPromptButtonsHtml(prompt);
+                        if (btns.trim().length) {
+                            actionHtml = `<div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;">${btns}</div>`;
+                        } else {
+                            actionHtml = `
+                                <div style="display:inline-flex;align-items:center;gap:6px;color:#666;font-weight:600;">
+                                    <span class="harvest-spinner" style="display:inline-block;width:16px;height:16px;border-radius:50%;border:2px solid #ddd;border-top-color:#7a7a7a;animation:harvest-spin .85s linear infinite;"></span>
+                                    <span>Waiting</span>
+                                </div>`;
+                        }
+                    } else {
+                        actionHtml = `
+                            <div style="display:inline-flex;align-items:center;gap:6px;color:#666;font-weight:600;">
+                                <span class="harvest-spinner" style="display:inline-block;width:16px;height:16px;border-radius:50%;border:2px solid #ddd;border-top-color:#7a7a7a;animation:harvest-spin .85s linear infinite;"></span>
+                                <span>Waiting</span>
+                            </div>`;
+                    }
+                    const rowBg = isMe ? '#fff8e0' : '#fff';
+                    const rowBorder = isMe ? '#e0b941' : '#e6e6e6';
+                    return `
+                        <div style="display:grid;grid-template-columns:minmax(140px,1.2fr) minmax(160px,2fr) minmax(160px,auto);gap:10px;align-items:center;padding:8px 10px;border:1px solid ${rowBorder};border-radius:8px;background:${rowBg};">
+                            ${nameCell}
+                            ${summaryCell}
+                            <div style="display:flex;justify-content:flex-end;align-items:center;">${actionHtml}</div>
+                        </div>`;
+                }).join('');
+
+                panel.innerHTML = `
+                    <style>@keyframes harvest-spin { to { transform: rotate(360deg); } }</style>
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        <div style="font-weight:800;margin-bottom:4px;">${escapeHtml(phase === 'finalize_bonus' ? 'Harvest bonus' : 'Harvest decisions')}</div>
+                        <div class="mini" style="margin-bottom:6px;">${escapeHtml(titleLine)}</div>
+                        <div class="mini" style="margin-bottom:10px;color:#444;">${subtitle}</div>
+                        <div style="display:flex;flex-direction:column;gap:6px;">${rowsHtml}</div>
+                    </div>`;
             }
 
             async function submitConcurrentAction(kind, response) {

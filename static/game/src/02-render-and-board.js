@@ -70,7 +70,27 @@ function tableauGroupsForPlayer(player) {
 
 // ── Main render ───────────────────────────────────────────────────────────
 function render(state) {
+  // Drop out-of-order state pushes from older ticks. WebSocket messages can
+  // arrive after a fresher HTTP-response render, and without this guard the
+  // older payload would overwrite the newer prompt — making the new prompt
+  // disappear until the next state arrives (or a manual refresh).
+  const incomingGameId = (state && state.game_id) ? String(state.game_id) : '';
+  const incomingTick = Number(state && state.tick_id);
+  if (
+    incomingGameId &&
+    incomingGameId === lastRenderedGameId &&
+    Number.isFinite(incomingTick) &&
+    incomingTick < lastRenderedTickId
+  ) {
+    return;
+  }
+  if (incomingGameId) lastRenderedGameId = incomingGameId;
+  if (Number.isFinite(incomingTick)) lastRenderedTickId = incomingTick;
+
   latestGameState = state;
+  if (typeof refreshOpenCardInspectModal === 'function') {
+    refreshOpenCardInspectModal();
+  }
   bumpIdleDeadline();
   // During blocking concurrent prompts (e.g. choose duke), we poll frequently.
   // Rebuilding the entire board every poll causes narrow-layout tableau/carousel

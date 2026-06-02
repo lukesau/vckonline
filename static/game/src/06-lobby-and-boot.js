@@ -774,6 +774,20 @@ function initLobbyModal() {
   let lobbyWs = null;
   let lobbyWsReconnectTimer = null;
   let lastLobbySnapshot = null;
+  // Safety nets for silent WS disconnects + reconnect/identify races.
+  // The lobby WS goes flaky on long-running draft lobbies (browser
+  // throttling backgrounded tabs, OS suspends, transient network
+  // blips). When it dies silently the user keeps seeing the last
+  // snapshot but stops receiving updates from other players' votes,
+  // and clicks against stale state silently no-op. The passive poll
+  // refetches lobby state every few seconds so we always recover, and
+  // the visibilitychange handler forces an immediate refetch the
+  // moment the tab regains focus. The dedupe timer collapses the
+  // burst of refetches that can fire when several missing-draft
+  // broadcasts arrive back-to-back.
+  const PASSIVE_LOBBY_POLL_MS = 5000;
+  let passiveLobbyPollTimer = null;
+  let lobbyRefetchPending = false;
   // In-lobby rename UX: the pencil next to the user's own row swaps the
   // name span for an inline input. The flag survives WS broadcasts so a
   // ready/unready by another player doesn't wipe an in-progress edit;
@@ -832,6 +846,53 @@ function initLobbyModal() {
     if (!lobbyWs || lobbyWs.readyState !== WebSocket.OPEN) return;
     const pid = lobbyPlayerId || vckStoredPlayerId() || '';
     lobbyWs.send(JSON.stringify({ type: 'identify', player_id: pid || null }));
+  }
+
+  // Coalesce rapid-fire HTTP refetches into one. Used when an incoming
+  // WS broadcast is missing draft data (identify race) or when the
+  // passive poll fires.
+  function _scheduleLobbyRefetch() {
+    if (lobbyRefetchPending) return;
+    lobbyRefetchPending = true;
+    Promise.resolve().then(async () => {
+      try {
+        const fresh = await fetchLobbyPayload();
+        if (fresh) applyLobbyStatusPayload(fresh);
+      } catch (_) { /* ignore */ } finally {
+        lobbyRefetchPending = false;
+      }
+    });
+  }
+
+  // Decide whether we should be passively polling lobby state. We only
+  // poll when the user is "in" a lobby/draft and the tab is visible.
+  // Anything else (browsing the lobby list, name entry, hidden tab) is
+  // either already kept fresh on user action, or shouldn't burn the
+  // server with HTTP requests.
+  function _lobbyPassivePollEligible() {
+    if (document.hidden) return false;
+    if (!currentLobbyId) return false;
+    const pid = lobbyPlayerId || vckStoredPlayerId();
+    if (!pid) return false;
+    const stepWaitEl = document.getElementById('lobby-step-wait');
+    const stepDraftEl = document.getElementById('lobby-step-draft');
+    const inWait = stepWaitEl && !stepWaitEl.classList.contains('lobby-hidden');
+    const inDraft = stepDraftEl && !stepDraftEl.classList.contains('lobby-hidden');
+    return !!(inWait || inDraft);
+  }
+
+  function _startPassiveLobbyPoll() {
+    if (passiveLobbyPollTimer) return;
+    passiveLobbyPollTimer = setInterval(() => {
+      if (_lobbyPassivePollEligible()) _scheduleLobbyRefetch();
+    }, PASSIVE_LOBBY_POLL_MS);
+  }
+
+  function _stopPassiveLobbyPoll() {
+    if (passiveLobbyPollTimer) {
+      clearInterval(passiveLobbyPollTimer);
+      passiveLobbyPollTimer = null;
+    }
   }
 
   function connectLobbyWs() {
@@ -933,6 +994,19 @@ function initLobbyModal() {
   }
 
   function applyLobbyStatusPayload(data) {
+    // Defensive: WS broadcasts that race ahead of `identify` (e.g. just after
+    // a silent reconnect) arrive with `pid=None` on the server and therefore
+    // omit the `draft` key for participants who ARE in an active draft. If
+    // we blindly overwrite lastLobbySnapshot with that thin payload, the
+    // draft vote click handler later reads `lastLobbySnapshot.draft` as
+    // undefined and silently no-ops. Preserve the previous draft data,
+    // and trigger a re-identify + HTTP refetch so the next snapshot is
+    // authoritative.
+    if (lastLobbySnapshot && lastLobbySnapshot.draft && !data.draft) {
+      data = { ...data, draft: lastLobbySnapshot.draft };
+      try { sendLobbyIdentify(); } catch (_) { /* ignore */ }
+      _scheduleLobbyRefetch();
+    }
     lastLobbySnapshot = data;
     if (data.in_game && data.game_id) {
       const pid = lobbyPlayerId || vckStoredPlayerId();
@@ -1431,22 +1505,55 @@ function initLobbyModal() {
   const draftVoteBtn = document.getElementById('draft-vote-btn');
   if (draftVoteBtn) {
     draftVoteBtn.addEventListener('click', async () => {
+      // The previous handler had six different silent `return` paths.
+      // The bug we were chasing — "Confirm Vote does nothing after
+      // someone else votes; refresh fixes it" — was a WS race that
+      // leaves lastLobbySnapshot without a `draft` key. From the
+      // user's POV the button just stops working. Defensive rules:
+      //   * Never bail silently — every failure path surfaces a
+      //     lobby error so the user has a reason to retry.
+      //   * If we somehow lost the draft snapshot, do one HTTP
+      //     refetch before giving up.
+      //   * On any error, re-enable the button so the user can retry.
       const pid = lobbyPlayerId || vckStoredPlayerId();
-      if (!pid) return;
-      if (_draftVoteSubmitted) return;
+      if (!pid) {
+        showLobbyError('No player ID — please refresh.');
+        return;
+      }
+      if (_draftVoteSubmitted) {
+        showLobbyError('Vote already submitted — waiting for others or timer.');
+        return;
+      }
 
-      const st = lastLobbySnapshot;
-      const draft = st && st.draft;
-      if (!draft) return;
+      let draft = lastLobbySnapshot && lastLobbySnapshot.draft;
+      if (!draft) {
+        try { sendLobbyIdentify(); } catch (_) { /* ignore */ }
+        try {
+          const fresh = await fetchLobbyPayload();
+          if (fresh) applyLobbyStatusPayload(fresh);
+          draft = lastLobbySnapshot && lastLobbySnapshot.draft;
+        } catch (_) { /* ignore */ }
+      }
+      if (!draft) {
+        showLobbyError('Lost connection to draft. Please refresh.');
+        return;
+      }
 
       let vote;
       if (draft.phase === 'monsters') {
-        if (_draftMonsterVotes.length === 0) return;
+        if (_draftMonsterVotes.length === 0) {
+          showLobbyError('Pick at least one monster stack before voting.');
+          return;
+        }
         vote = [..._draftMonsterVotes];
       } else if (draft.phase === 'citizens') {
-        if (_draftCitizenVote == null) return;
+        if (_draftCitizenVote == null) {
+          showLobbyError('Pick a citizen before voting.');
+          return;
+        }
         vote = _draftCitizenVote;
       } else {
+        showLobbyError(`Draft is in an unexpected phase (${draft.phase}). Refresh to recover.`);
         return;
       }
 
@@ -1505,6 +1612,22 @@ function initLobbyModal() {
   if (bgCanvas) initLobbyBackgroundCanvas(bgCanvas).catch(() => {});
   connectLobbyWs();
   tryResumeStoredPlayer();
+
+  // Belt-and-suspenders: passively poll lobby state every few seconds
+  // while we're in a lobby or draft, and immediately refetch when the
+  // tab regains focus. Together these recover from silent WS deaths
+  // (browser throttling, OS suspends, transient network blips) where
+  // the broadcast loop on the server never reaches us and the UI
+  // would otherwise sit on stale state until the user manually
+  // refreshes — the specific failure mode players hit in draft
+  // mode where another player's vote made the page require a refresh.
+  _startPassiveLobbyPoll();
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    if (!_lobbyPassivePollEligible()) return;
+    try { sendLobbyIdentify(); } catch (_) { /* ignore */ }
+    _scheduleLobbyRefetch();
+  });
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────
@@ -1517,6 +1640,18 @@ if (!GAME_ID || !PLAYER_ID) {
   initOpponentTableauWheelScroll();
   initPlayerDetailModal();
   initActionConfirmModal();
+  // Defense-in-depth against lost WS state pushes: poll at a low cadence so
+  // a dropped broadcast still surfaces the next prompt within a few seconds.
+  startPassiveStatePolling();
+  // When the tab returns from being backgrounded (mobile, switched apps,
+  // screen lock) browsers commonly suspend the WS — anything broadcast
+  // during the suspend is gone. Force an immediate refetch on revisit so
+  // we don't sit on a stale board waiting for the next event.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!GAME_ID || !PLAYER_ID) return;
+    fetchGameStateFromApi();
+  });
   window.addEventListener('resize', () => {
     const zone = document.getElementById('zone-center');
     if (zone) syncBoardTabState(zone);

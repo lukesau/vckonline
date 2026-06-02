@@ -367,11 +367,19 @@ lobbies: Dict[str, Lobby] = {}
 games: Dict[str, Game] = {}
 gamers: List[GameMember] = []
 
-# Per-game ring buffer of save-dict snapshots taken right after every state
-# mutation (game boot + every successful action endpoint). Powers the dev
-# client's "Back one step" button. Bounded so a long-running debug game
-# doesn't grow without limit; each snapshot is ~tens of KB. Eventually this
-# will be the unit of disk persistence (see docs/game.md "save/load").
+# Per-game ring buffer of save-dict snapshots taken right after each
+# "real" player action (game boot baseline + each successful take_resource /
+# hire_citizen / build_domain / slay_monster). Powers the dev client's "Back
+# one step" button. Bounded so a long-running debug game doesn't grow without
+# limit; each snapshot is ~tens of KB. Eventually this will be the unit of
+# disk persistence (see docs/game.md "save/load").
+#
+# Why this is gated: harvest decisions, required-action prompt resolutions,
+# concurrent-action submissions, rolls / rerolls, and engine-driven phase
+# advances are NOT snapshotable. Otherwise "Back one step" would either land
+# you in the middle of a multi-step prompt or undo only a fragment of a
+# harvest, neither of which is useful. The action-phase player actions are the
+# natural undo boundaries.
 _GAME_HISTORY_MAX_LEN = 200
 game_histories: Dict[str, deque] = {}
 
@@ -379,9 +387,9 @@ game_histories: Dict[str, deque] = {}
 def _record_snapshot(game_id: str, game: Game) -> None:
     """Append the current game state to its history ring buffer.
 
-    Called after every successful state mutation: post-boot, after each action
-    endpoint completes, and after the event-slay-cost endpoint. Failures here
-    must NEVER abort the action — log and continue.
+    Called only after the "real" player actions (take_resource, hire_citizen,
+    build_domain, slay_monster) and once at game boot to seed the baseline.
+    Failures here must NEVER abort the action — log and continue.
     """
     if not game_id or not game:
         return
@@ -1225,7 +1233,15 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
         return game_not_found_json()
     
     game.last_active_time = time.time()
-    
+
+    # Snapshots back the dev "Back one step" button. We only record snapshots
+    # for action-phase player actions (take resource / hire / build / slay).
+    # Harvests, required-action prompt resolutions, concurrent submissions,
+    # rolls, rerolls, and engine-driven phase advances are not snapshotable so
+    # a single "back" step undoes one real action and not half of a harvest or
+    # one button-press inside a multi-step prompt.
+    should_snapshot = False
+
     try:
         if request.action_type == "hire_citizen":
             if request.citizen_id is None:
@@ -1244,6 +1260,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 _rollback_consumed_action(game)
                 raise
             game.finish_turn_if_no_actions_remaining()
+            should_snapshot = True
 
         elif request.action_type == "build_domain":
             if request.domain_id is None:
@@ -1262,7 +1279,8 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 _rollback_consumed_action(game)
                 raise
             game.finish_turn_if_no_actions_remaining()
-        
+            should_snapshot = True
+
         elif request.action_type == "slay_monster":
             if request.monster_id is None and request.event_id is None:
                 raise HTTPException(status_code=400, detail="monster_id or event_id required")
@@ -1285,6 +1303,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 _rollback_consumed_action(game)
                 raise
             game.finish_turn_if_no_actions_remaining()
+            should_snapshot = True
         
         elif request.action_type == "take_resource":
             if request.resource is None or not str(request.resource).strip():
@@ -1303,6 +1322,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 _rollback_consumed_action(game)
                 raise
             game.finish_turn_if_no_actions_remaining()
+            should_snapshot = True
 
         elif request.action_type == "act_on_required_action":
             if request.action is None:
@@ -1371,7 +1391,8 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
         else:
             raise HTTPException(status_code=400, detail=f"Unknown action type: {request.action_type}")
 
-        _record_snapshot(game_id, game)
+        if should_snapshot:
+            _record_snapshot(game_id, game)
         # Push updated state to all WebSocket subscribers for this game.
         await manager.broadcast(game_id, game)
         # If this action ended the game, start the countdown once.
@@ -1409,7 +1430,9 @@ async def apply_event_slay_cost(game_id: str, request: ApplyEventSlayCostRequest
         raise HTTPException(status_code=400, detail=str(e))
     while game.advance_tick():
         pass
-    _record_snapshot(game_id, game)
+    # Event-slay-cost is a pre-slay payment, not one of the three real
+    # player actions, so it does not record a snapshot. The follow-up
+    # slay_monster call will be the snapshot anchor.
     await manager.broadcast(game_id, game)
     return {"message": "Event slay cost applied", "game_state": _serialize_game_for_player(game, request.player_id)}
 

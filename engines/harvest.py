@@ -24,6 +24,14 @@ from game_helpers import (
 from game_concurrent import CONCURRENT_HANDLERS, _new_concurrent_action
 
 
+HARVEST_CONCURRENT_SUB_KINDS = {
+    "harvest_optional_exchange",
+    "harvest_wild_gain_exchange",
+    "harvest_wild_cost_exchange",
+    "bonus_resource_choice",
+}
+
+
 class HarvestEngine:
     def __init__(self, game):
         self.game = game
@@ -291,7 +299,26 @@ class HarvestEngine:
             if p.player_id not in activated_pids:
                 self.game.pending_harvest_choices.append(p.player_id)
         if self.game.pending_harvest_choices:
-            self._activate_finalize_bonus_for(self.game.pending_harvest_choices[0])
+            bonus_targets = list(self.game.pending_harvest_choices)
+            prompts = {}
+            # Build per-player prompt payloads without mutating the legacy
+            # pending_harvest_choices queue in-place.
+            for pid in bonus_targets:
+                self._activate_finalize_bonus_for(pid)
+                snap = self._snapshot_pending_harvest_prompt_for(pid)
+                if snap is not None:
+                    prompts[pid] = snap
+            # Stop using the sequential bonus queue: concurrent gate owns resolution.
+            self.game.pending_harvest_choices = []
+            if prompts:
+                self.game.concurrent_action = _new_concurrent_action(
+                    "harvest_choices",
+                    list(prompts.keys()),
+                    data={"phase": "finalize_bonus", "prompts": prompts},
+                )
+            else:
+                self.game.action_required["id"] = self.game.game_id
+                self.game.action_required["action"] = ""
         else:
             self.game.action_required["id"] = self.game.game_id
             self.game.action_required["action"] = ""
@@ -310,40 +337,27 @@ class HarvestEngine:
     def _activate_finalize_bonus_for(self, player_id):
         """Open the end-of-harvest bonus prompt for `player_id`.
 
-        If the player owns a starter with a `no_payout` activation trigger
-        (Herald), fire it via the normal harvest activation pipeline (which
-        opens its `choose g 1 s 1 m 1` prompt). Otherwise fall back to the
-        legacy hard-coded `bonus_resource_choice` action so players without
-        Herald still get the missed-harvest consolation.
+        This method is now *non-iterative*: it opens exactly one prompt for
+        `player_id` and does not walk `pending_harvest_choices`. The concurrent
+        wrapper (finalize_bonus) is responsible for opening the gate for all
+        relevant players at once.
         """
         player = self.game._player_by_id(player_id)
         if not player:
-            if self.game.pending_harvest_choices and self.game.pending_harvest_choices[0] == player_id:
-                self.game.pending_harvest_choices.pop(0)
-            if self.game.pending_harvest_choices:
-                self._activate_finalize_bonus_for(self.game.pending_harvest_choices[0])
-            else:
-                self.game.action_required["id"] = self.game.game_id
-                self.game.action_required["action"] = ""
             return
         starter = self._find_owned_starter_with_trigger(player, "no_payout")
         if starter is not None:
             on_turn = player_id == self.game.lifecycle.current_player_id()
             self._apply_harvest_activation(player, starter, "starter", on_turn)
-            # Activation normally opens a `choose ...` prompt; if it didn't (e.g.
-            # malformed special_payout), advance the queue so we don't stall.
             aa = (self.game.action_required.get("action") or "").strip()
             aid = self.game.action_required.get("id")
-            if aid == player_id and aa:
-                return
-            if self.game.pending_harvest_choices and self.game.pending_harvest_choices[0] == player_id:
-                self.game.pending_harvest_choices.pop(0)
-            if self.game.pending_harvest_choices:
-                self._activate_finalize_bonus_for(self.game.pending_harvest_choices[0])
-            else:
-                self.game.action_required["id"] = self.game.game_id
-                self.game.action_required["action"] = ""
+            # Activation normally opens a `choose ...` prompt; if it didn't (e.g.
+            # malformed special_payout), fall back to the legacy bonus prompt.
+            if not (aid == player_id and aa):
+                self.game.action_required["id"] = player_id
+                self.game.action_required["action"] = "bonus_resource_choice"
             return
+
         # Legacy fallback: hard-coded bonus_resource_choice prompt.
         self.game.action_required["id"] = player_id
         self.game.action_required["action"] = "bonus_resource_choice"
@@ -380,7 +394,20 @@ class HarvestEngine:
                     break  # no more steals across any player
             self.game._harvest_steal_phase_done = True
 
-        # Normal harvest: process each player's remaining cards in turn order.
+        # Normal harvest:
+        # - In silent batch mode (local automation / harvest_phase), keep the
+        #   legacy sequential deterministic scan.
+        # - In interactive mode, open a concurrent umbrella gate so non-steal
+        #   harvest prompts can be resolved by all players simultaneously.
+        if not getattr(self.game, "_silent_harvest_batch", False):
+            # After `_harvest_complete_finalize()` the harvest is fully resolved
+            # and any remaining concurrent gate is owned by the concurrent
+            # handler itself (not by re-running the scan).
+            if getattr(self.game, "harvest_processed", False):
+                return
+            self._open_or_resume_harvest_concurrent()
+            return
+
         while not getattr(self.game, "harvest_processed", False):
             if self._harvest_action_blocked():
                 return
@@ -414,6 +441,157 @@ class HarvestEngine:
             consumed_list.append(slot["slot_key"])
             if self._harvest_action_blocked():
                 return
+
+    def _harvest_drain_player(self, player_id):
+        """Process harvest slots for `player_id` until a snapshotable prompt opens.
+
+        Returns:
+          - prompt payload dict (for concurrent harvest choices), or
+          - None when the player has no more harvest slots (non-prompt exhaustion).
+        """
+        player = self.game._player_by_id(player_id)
+        if not player:
+            return None
+        consumed_list = self.game.harvest_consumed.setdefault(player_id, [])
+        on_turn = player_id == self.game.lifecycle.current_player_id()
+        while True:
+            # If a prompt was opened by the previous choice resolution, snapshot it
+            # immediately instead of consuming another harvest slot.
+            pr = self._snapshot_pending_harvest_prompt_for(player_id)
+            if pr is not None:
+                return pr
+
+            ar = getattr(self.game, "action_required", None) or {}
+            if ar.get("id") == player_id and (ar.get("action") or "").strip():
+                return {"__unsupported_prompt_action": ar.get("action")}
+
+            # Harvest finalization already applied all queued payouts and
+            # computed bonus targets. Don't re-run the harvest scan or
+            # re-apply per-round passives during the concurrent bonus gate.
+            if getattr(self.game, "harvest_processed", False):
+                return None
+
+            slots = self._build_harvest_slots(player, consumed_list, on_turn)
+            if not slots:
+                self._apply_harvest_on_any_magic_gain_passives(player)
+                return None
+
+            slot = self._harvest_slots_sorted_for_simulation(slots)[0]
+            self._apply_harvest_activation(player, slot["_obj"], slot["kind"], on_turn)
+            consumed_list.append(slot["slot_key"])
+
+            pr = self._snapshot_pending_harvest_prompt_for(player_id)
+            if pr is not None:
+                return pr
+
+            # A prompt opened, but it isn't concurrentable (e.g. steals / slay prompts).
+            # Leave it in place so the caller can fall back to sequential mode.
+            ar = getattr(self.game, "action_required", None) or {}
+            if ar.get("id") == player_id and (ar.get("action") or "").strip():
+                return {"__unsupported_prompt_action": ar.get("action")}
+
+    def _snapshot_pending_harvest_prompt_for(self, player_id):
+        """Snapshot the global action_required for `player_id` into a dict.
+
+        For concurrent harvest choices we need per-player prompt payloads. This
+        function converts the singular prompt state (`action_required` +
+        `pending_required_choice`) into an explicit payload and clears the
+        global state so other players can be drained.
+        """
+        ar = getattr(self.game, "action_required", None) or {}
+        if ar.get("id") != player_id:
+            return None
+        action = (ar.get("action") or "").strip()
+        if not action:
+            return None
+
+        # Classify prompt types that we support as concurrent harvest choices.
+        if action in HARVEST_CONCURRENT_SUB_KINDS:
+            sub_kind = action
+        elif action.startswith("choose "):
+            sub_kind = "harvest_choose"
+        else:
+            return None
+
+        prc = getattr(self.game, "pending_required_choice", None)
+        snapshot = {
+            "sub_kind": sub_kind,
+            "action": action,
+            "pending_required_choice": dict(prc or {}),
+        }
+
+        # Clear singular prompt state; the concurrent wrapper owns it now.
+        self.game.action_required["id"] = self.game.game_id
+        self.game.action_required["action"] = ""
+        self.game.pending_required_choice = None
+        return snapshot
+
+    def _open_or_resume_harvest_concurrent(self):
+        """Open (or re-open) the concurrent non-steal harvest choices gate.
+
+        The concurrent gate is responsible for collecting per-player prompt
+        payloads and letting each participant answer independently.
+
+        Returns:
+          - True if we opened/resumed concurrent harvest choices (gate set),
+          - False if there was nothing to gate and callers should continue via
+            the legacy (sequential) path.
+        """
+        if "harvest_choices" not in CONCURRENT_HANDLERS:
+            # Handler not implemented yet (or intentionally disabled).
+            return False
+
+        ca = getattr(self.game, "concurrent_action", None) or None
+        if ca and ca.get("kind") == "harvest_choices":
+            # Gate is already active; draining happens inside the concurrent handler.
+            if ca.get("pending"):
+                return True
+
+        existing_prompts = {}
+        if ca and ca.get("kind") == "harvest_choices":
+            existing_prompts = ((ca.get("data") or {}).get("prompts") or {}) or {}
+
+        prompts = {}
+        for pid in self.game.harvest_player_order or []:
+            if pid in existing_prompts:
+                prompts[pid] = existing_prompts[pid]
+                continue
+            nxt = self._harvest_drain_player(pid)
+            # Unsupported prompt: caller should fall back to legacy sequential.
+            if isinstance(nxt, dict) and nxt.get("__unsupported_prompt_action"):
+                return False
+            if nxt is not None:
+                prompts[pid] = nxt
+
+        if prompts:
+            if not ca or ca.get("kind") != "harvest_choices":
+                self.game.concurrent_action = _new_concurrent_action(
+                    "harvest_choices",
+                    list(prompts.keys()),
+                    data={"phase": "scan", "prompts": prompts},
+                )
+            else:
+                # Preserve the same concurrent_action dict; just update prompt payloads.
+                ca.setdefault("data", {})
+                ca["data"]["phase"] = "scan"
+                ca["data"]["prompts"] = prompts
+                ca["pending"] = [pid for pid in prompts.keys()]
+            return True
+
+        # No prompts: drain may-slay queue or finalize harvest normally.
+        if self.game.pending_harvest_slays:
+            self._drain_pending_harvest_slays()
+            return True
+
+        # If harvest is already fully resolved (e.g. the end-of-harvest bonus
+        # gate just cleared), do NOT call `_harvest_complete_finalize` again.
+        # That re-entry would recompute `activated_pids` against an already
+        # cleared `harvest_consumed` and reopen the same bonus gate forever.
+        if getattr(self.game, "harvest_processed", False):
+            return True
+
+        self._harvest_complete_finalize()
+        return True
 
     def harvest_slots_for_api(self):
         if self.game.action_required.get("action") != "manual_harvest":
@@ -529,6 +707,13 @@ class HarvestEngine:
                   f"Citizens: {len(player.owned_citizens)}, Domains {len(player.owned_domains)}")
 
     def _maybe_resume_harvest_prompt(self):
+        # During concurrent harvest decisions, the concurrent handler owns the
+        # prompt lifecycle. Sequential auto-resume would re-enter the legacy
+        # scan mid-gate and desync prompt state.
+        ca = getattr(self.game, "concurrent_action", None) or None
+        if ca and isinstance(ca, dict) and ca.get("kind") == "harvest_choices":
+            return
+
         # A may-slay flow that opened a follow-up prompt via the slain monster's
         # special_reward stashes its resume here; once the chain finishes (which
         # is what brought us back to this resume point) we have to drain it

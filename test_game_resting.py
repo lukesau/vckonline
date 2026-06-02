@@ -109,14 +109,19 @@ class FivePlayerRestingTests(unittest.TestCase):
         game, players = make_n_player_game(5, turn_index=0, with_match_citizens=False)
 
         # Drive the harvest forward; nobody has matching cards, so the engine
-        # finalizes harvest and queues `bonus_resource_choice` for everyone
-        # except the resting seat.
+        # finalizes harvest and opens a `harvest_choices` concurrent gate for
+        # the missed-harvest bonus decisions (excluding the resting seat).
         game.advance_tick()
 
-        self.assertNotIn(players[4].player_id, game.pending_harvest_choices,
+        ca = game.concurrent_action or {}
+        self.assertEqual(ca.get("kind"), "harvest_choices")
+        self.assertEqual((ca.get("data") or {}).get("phase"), "finalize_bonus")
+
+        pending = list(ca.get("pending") or [])
+        self.assertNotIn(players[4].player_id, pending,
                          "Resting player must not get the no-payout consolation")
         for p in players[:4]:
-            self.assertIn(p.player_id, game.pending_harvest_choices)
+            self.assertIn(p.player_id, pending)
 
     def test_four_player_game_has_no_resting_seat(self):
         game, players = make_n_player_game(4, turn_index=0)

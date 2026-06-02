@@ -356,8 +356,14 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
                 citizen_stack.append(my_citizen)
 
         results = _fetch_pool_rows(domain_query, "domains", domain_expansion_filters)
-        if apply_implemented_image_filter:
-            results = [r for r in results if keep_for_random("domain", r)]
+        # Expansion-filtered presets (shadowvale, flamesandfrost) take the inline
+        # SELECT branch in _fetch_pool_rows, which has no ORDER BY RAND(); rows
+        # come back in PK order. The duke/domain deal pops from the end of the
+        # list, so without a Python-side shuffle the highest-id (= expansion-set)
+        # cards always pop first. Shuffling here makes the pool order random
+        # regardless of fetch source, and is a no-op for the named-proc branch
+        # which is already ORDER BY RAND().
+        random.shuffle(results)
         skip_domains = set(banned_domain_ids())
         # Debug mode duplicates these onto every player's tableau, so also
         # filter them out of the random board deal -- no one can purchase a
@@ -412,8 +418,11 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             debug_roll_modifier_domain_rows = list(my_cursor.fetchall() or [])
 
         results = _fetch_pool_rows(duke_query, "dukes", duke_expansion_filters)
-        if apply_implemented_image_filter:
-            results = [r for r in results if keep_for_random("duke", r)]
+        # See the matching comment above the domains shuffle: the inline
+        # SELECT branch is not random, and players pop dukes off the end,
+        # so without this shuffle expansion-filtered presets always hand
+        # the highest-id (= expansion-set) dukes to the first players.
+        random.shuffle(results)
         skip_dukes = banned_duke_ids()
         if skip_dukes:
             results = [r for r in results if int(r["id_dukes"]) not in skip_dukes]

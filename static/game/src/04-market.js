@@ -513,6 +513,7 @@ function openBoardMarketStackModal(initialTopCard) {
   };
   document.addEventListener('keydown', onStackKey);
   overlay._stackArrowHandler = onStackKey;
+  overlay._refreshFromLiveState = renderAt;
 
   renderAt();
 
@@ -1050,33 +1051,40 @@ function openMarketCardModal(card) {
 
   const info = mk('card-modal-info');
 
-  const heading = document.createElement('h2');
-  heading.className = 'modal-card-name';
-  if (isDomainStackFaceDown(card)) {
-    heading.textContent = 'Face-down domain';
-  } else if (cardObscuredFromViewer(card)) {
-    heading.textContent = 'Hidden card';
-  } else {
-    heading.textContent = card.name || '?';
-  }
-  info.appendChild(heading);
+  function renderInfo() {
+    info.innerHTML = '';
 
-  if (isDomainStackFaceDown(card)) {
-    const note = document.createElement('p');
-    note.className = 'modal-card-text';
-    note.textContent =
-      'The next domain in this pile stays face-down until the end of the turn of the player who built from here.';
-    info.appendChild(note);
-  } else if (cardObscuredFromViewer(card)) {
-    const note = document.createElement('p');
-    note.className = 'modal-card-text';
-    note.textContent = 'This card is not visible to you right now.';
-    info.appendChild(note);
-  } else {
-    const cardCtx = evaluateMarketCardContext(card, latestGameState);
-    appendMarketFaceUpInspectBody(info, card, cardCtx);
-    appendMarketActionUI(info, card, cardCtx);
+    const heading = document.createElement('h2');
+    heading.className = 'modal-card-name';
+    if (isDomainStackFaceDown(card)) {
+      heading.textContent = 'Face-down domain';
+    } else if (cardObscuredFromViewer(card)) {
+      heading.textContent = 'Hidden card';
+    } else {
+      heading.textContent = card.name || '?';
+    }
+    info.appendChild(heading);
+
+    if (isDomainStackFaceDown(card)) {
+      const note = document.createElement('p');
+      note.className = 'modal-card-text';
+      note.textContent =
+        'The next domain in this pile stays face-down until the end of the turn of the player who built from here.';
+      info.appendChild(note);
+    } else if (cardObscuredFromViewer(card)) {
+      const note = document.createElement('p');
+      note.className = 'modal-card-text';
+      note.textContent = 'This card is not visible to you right now.';
+      info.appendChild(note);
+    } else {
+      const cardCtx = evaluateMarketCardContext(card, latestGameState);
+      appendMarketFaceUpInspectBody(info, card, cardCtx);
+      appendMarketActionUI(info, card, cardCtx);
+    }
   }
+
+  overlay._refreshFromLiveState = renderInfo;
+  renderInfo();
 
   modal.appendChild(info);
   overlay.appendChild(modal);

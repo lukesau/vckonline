@@ -47,6 +47,14 @@ class _ChooseDukeConcurrentHandler:
             if chosen is None:
                 raise ValueError("Selected duke not found.")
             p.owned_dukes = [chosen]
+            ca = getattr(game, "concurrent_action", None) or {}
+            ca.setdefault("responses", {})[player_id] = response
+            pending = ca.get("pending") or []
+            if player_id in pending:
+                ca["pending"] = [pid for pid in pending if pid != player_id]
+            ca.setdefault("completed", [])
+            if player_id not in ca["completed"]:
+                ca["completed"].append(player_id)
             return
         raise ValueError("Player not found.")
 
@@ -76,14 +84,121 @@ class _FlipOneCitizenConcurrentHandler:
             f"{game._player_label(player_id)} flipped citizen \"{getattr(cit, 'name', '?')}\" face-down "
             f"(Cursed Cavern)."
         )
+        ca = getattr(game, "concurrent_action", None) or {}
+        ca.setdefault("responses", {})[player_id] = response
+        pending = ca.get("pending") or []
+        if player_id in pending:
+            ca["pending"] = [pid for pid in pending if pid != player_id]
+        ca.setdefault("completed", [])
+        if player_id not in ca["completed"]:
+            ca["completed"].append(player_id)
 
     def finalize(self, game):
         return
 
 
+class _HarvestChoicesConcurrentHandler:
+    """Concurrent wrapper for non-steal harvest decisions.
+
+    Each participant has its own snapshotted prompt payload stored in
+    `concurrent_action.data.prompts[player_id]`.
+    """
+
+    def _apply_bonus_resource_choice(self, game, player_id, choice):
+        choice = (choice or "").strip().lower()
+        if choice not in ("gold", "strength", "magic"):
+            raise ValueError("Invalid harvest bonus choice (send gold/strength/magic).")
+
+        target = game._player_by_id(player_id)
+        if not target:
+            raise ValueError("Player not found.")
+
+        before = game._player_scores_line(target)
+        if choice == "gold":
+            target.gold_score = int(target.gold_score) + 1
+            target.harvest_delta["gold"] = int(target.harvest_delta.get("gold", 0)) + 1
+        elif choice == "strength":
+            target.strength_score = int(target.strength_score) + 1
+            target.harvest_delta["strength"] = int(target.harvest_delta.get("strength", 0)) + 1
+        else:
+            target.magic_score = int(target.magic_score) + 1
+            target.harvest_delta["magic"] = int(target.harvest_delta.get("magic", 0)) + 1
+
+        after = game._player_scores_line(target)
+        game._log_game_event(
+            f"{game._player_label(player_id)} harvest bonus +1 {choice} (no gold/strength/magic spent); "
+            f"scores {before} -> {after}"
+        )
+
+        # Concurrent mode doesn't rely on sequential pending_harvest_choices.
+        if isinstance(getattr(game, "pending_harvest_choices", None), list):
+            game.pending_harvest_choices = [
+                pid for pid in game.pending_harvest_choices if pid != player_id
+            ]
+
+        # Clear the singular prompt fields; the concurrent wrapper owns the gate.
+        game.action_required["id"] = game.game_id
+        game.action_required["action"] = ""
+        game.pending_required_choice = None
+
+    def apply(self, game, player_id, response):
+        ca = getattr(game, "concurrent_action", None) or {}
+        prompts = ((ca.get("data") or {}).get("prompts") or {}) if isinstance(ca, dict) else {}
+        prompt = prompts.get(player_id)
+        if not prompt:
+            raise ValueError("No pending harvest prompt for this player.")
+
+        sub_kind = prompt.get("sub_kind")
+        action = prompt.get("action") or ""
+        pending_prc = prompt.get("pending_required_choice") or {}
+
+        # Restore singular prompt state so we can reuse the existing resolvers.
+        game.action_required["id"] = player_id
+        game.action_required["action"] = action
+        game.pending_required_choice = dict(pending_prc) if isinstance(pending_prc, dict) else None
+
+        # Apply the player's response.
+        if sub_kind in ("harvest_optional_exchange", "harvest_wild_gain_exchange", "harvest_wild_cost_exchange", "harvest_choose"):
+            game.player_actions.act_on_required_action(player_id, response)
+        elif sub_kind == "bonus_resource_choice":
+            self._apply_bonus_resource_choice(game, player_id, response)
+        else:
+            raise ValueError(f"Unknown harvest sub_kind: {sub_kind!r}.")
+
+        # Re-drain just this player's harvest pipeline to the next prompt.
+        nxt = game.harvest._harvest_drain_player(player_id)
+
+        ca.setdefault("responses", {})[player_id] = response
+        ca.setdefault("completed", [])
+
+        if nxt is None:
+            # Player is fully done with this concurrent gate.
+            prompts.pop(player_id, None)
+            pending = ca.get("pending") or []
+            if player_id in pending:
+                ca["pending"] = [pid for pid in pending if pid != player_id]
+            if player_id not in ca["completed"]:
+                ca["completed"].append(player_id)
+            return
+
+        if isinstance(nxt, dict) and nxt.get("__unsupported_prompt_action"):
+            raise ValueError(f"Concurrent harvest hit unsupported prompt: {nxt.get('__unsupported_prompt_action')!r}.")
+
+        # Stay pending with a new prompt payload.
+        prompts[player_id] = nxt
+        ca.setdefault("data", {})
+        ca["data"]["prompts"] = prompts
+
+    def finalize(self, game):
+        # If the last submitted player unlocked additional prompts for others,
+        # reopen (or update) the concurrent gate.
+        game.harvest._open_or_resume_harvest_concurrent()
+
+
 CONCURRENT_HANDLERS = {
     "choose_duke": _ChooseDukeConcurrentHandler(),
     "flip_one_citizen": _FlipOneCitizenConcurrentHandler(),
+    "harvest_choices": _HarvestChoicesConcurrentHandler(),
 }
 
 

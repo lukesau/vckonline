@@ -50,6 +50,23 @@ let finalizeRollInFlight = false;
 /** Set each render — board card modal reads latest grids / phase */
 let latestGameState = null;
 
+// ── State delivery safety net ─────────────────────────────────────────────
+// The server pushes state via WebSocket on every action. In practice WS
+// messages get dropped (silent disconnects, mobile/tab suspend, proxy idle
+// timeouts), which leaves the UI stuck on a stale view. The next prompt
+// never appears for the player and they time out. To make this self-heal we:
+//   1. Track the highest tick_id we've rendered so out-of-order pushes
+//      (e.g. a late WS message arriving after a fresher HTTP response)
+//      can be ignored.
+//   2. Poll state every PASSIVE_GAME_POLL_MS, skipping when the user is
+//      mid-edit (so we don't blow away typed slay-payment values) or when
+//      concurrent polling is already running.
+//   3. Refetch state whenever the tab becomes visible again.
+const PASSIVE_GAME_POLL_MS = 5000;
+let lastRenderedGameId = '';
+let lastRenderedTickId = -1;
+let passiveStatePollTimer = null;
+
 /** Narrow layout: max-width breakpoint matches CSS tabbed / carousel mode */
 function isViewportNarrow() {
   return true;

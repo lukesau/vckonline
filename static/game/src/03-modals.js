@@ -1001,6 +1001,12 @@ function dismissCardInspectModal() {
   overlay.remove();
 }
 
+function refreshOpenCardInspectModal() {
+  const overlay = document.getElementById('card-modal-overlay');
+  if (!overlay || typeof overlay._refreshFromLiveState !== 'function') return;
+  overlay._refreshFromLiveState();
+}
+
 /** Shared close control for any panel using `.card-modal` (inspect, market, dismissible prompts). */
 function syncCardShellCloseButton(modal, visible, onClose) {
   if (!modal) return;

@@ -1296,6 +1296,7 @@ class PlayerActionsEngine:
           we advance the engine so it lands on the next actionable phase.
         """
         ca = getattr(self.game, "concurrent_action", None) or None
+        prior_ca = ca
         if not ca:
             raise ValueError("No concurrent action is pending.")
         if kind and kind != ca.get("kind"):
@@ -1313,20 +1314,34 @@ class PlayerActionsEngine:
         self.game._log_game_event(
             f"{self.game._player_label(player_id)} submitted ({ca.get('kind')})."
         )
-        ca.setdefault("responses", {})[player_id] = response
-        ca["pending"] = [pid for pid in pending if pid != player_id]
-        ca.setdefault("completed", []).append(player_id)
-
-        if not ca["pending"]:
+        if not (ca.get("pending") or []):
             self.game._log_game_event(f"All players finished: {ca.get('kind')}.")
             handler.finalize(self.game)
-            self.game.concurrent_action = None
+            # If finalize reopened a new concurrent action, don't clobber it.
+            if self.game.concurrent_action is prior_ca and not (prior_ca.get("pending") or []):
+                self.game.concurrent_action = None
             # Drive the engine forward after the concurrent action resolves.
             if self.game.phase == "setup":
                 # Setup stall: advance until the first actionable state.
                 while self.game.lifecycle.advance_tick():
                     if self.game.phase == "action":
                         break
+            elif self.game.phase == "harvest":
+                # Harvest stall: concurrent gate just cleared; resume
+                # harvest automation and any queued may-slay prompts.
+                self.game.harvest._maybe_resume_harvest_prompt()
+                # If harvest is fully resolved (e.g. the end-of-harvest bonus
+                # gate just cleared), advance through to the action phase so
+                # the next player can start their turn. Mirrors harvest_card
+                # and finalize_roll which call advance_tick in the same spot.
+                if (
+                    self.game.phase == "harvest"
+                    and getattr(self.game, "harvest_processed", False)
+                    and not self.game.harvest._harvest_action_blocked()
+                ):
+                    while self.game.lifecycle.advance_tick():
+                        if self.game.phase == "action":
+                            break
             else:
                 # Mid-game concurrent action (e.g. Cursed Cavern flip during action phase):
                 # if the active player spent their last action before the concurrent prompt,

@@ -192,6 +192,12 @@ class Game:
     # Public Game API. These thin delegations make the external surface obvious
     # while engines keep ownership of their private implementation helpers.
 
+    def current_player_id(self):
+        return self.lifecycle.current_player_id()
+
+    def harvest_slots_for_api(self):
+        return self.harvest.harvest_slots_for_api()
+
     def advance_tick(self):
         return self.lifecycle.advance_tick()
 
