@@ -314,7 +314,7 @@ function marketStackAtGlobalIndex(state, globalIdx) {
  * only on a non-empty pile when viewing its face-up top. Uses live `latestGameState`.
  */
 function openBoardMarketStackModal(initialTopCard) {
-  if (document.getElementById('game-prompt-overlay')) return;
+  if (getVisiblePromptOverlay()) return;
   if (document.getElementById('card-modal-overlay')) return;
 
   const state0 = latestGameState;
@@ -706,6 +706,21 @@ function mkPayField(label, cls, minV, maxV, value, disabled, title, resourceIcon
 }
 
 function appendMarketActionUI(infoEl, card, ctx) {
+  // Suppress the entire pay-fields/action panel while the player has a
+  // prompt pending (visible or minimized via "Peek board"). Without this,
+  // a minimized may-slay/finalize-roll/etc. prompt would let the player
+  // open a center-board card and see usable-looking Hire/Build/Slay UI;
+  // the engine would reject those actions anyway, but hiding the inputs
+  // is clearer than rendering disabled fields. Inspect info above this
+  // panel still renders normally so the player can read the card.
+  if (isPromptOverlayActive()) {
+    const note = mk('market-action-prompt-block');
+    note.textContent =
+      'You have a pending prompt — resolve it before hiring, building, or slaying.';
+    infoEl.appendChild(note);
+    return;
+  }
+
   const panel = mk('market-action-panel');
 
   const fx = [];
@@ -1031,7 +1046,7 @@ function appendMarketFaceUpInspectBody(infoEl, card, ctx) {
 }
 
 function openMarketCardModal(card) {
-  if (document.getElementById('game-prompt-overlay')) return;
+  if (getVisiblePromptOverlay()) return;
   if (document.getElementById('card-modal-overlay')) return;
 
   const overlay = document.createElement('div');

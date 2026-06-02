@@ -726,7 +726,7 @@ function appendDukeVpProjectionBlock(infoEl, dukeCard) {
 }
 
 function openCardStackInspectModal(cards, startIndex) {
-  if (document.getElementById('game-prompt-overlay')) return;
+  if (getVisiblePromptOverlay()) return;
   if (document.getElementById('card-modal-overlay')) return;
   const arr = Array.isArray(cards) ? cards.filter(Boolean) : [];
   if (arr.length < 2) {
@@ -856,7 +856,7 @@ document.addEventListener('click', e => {
 });
 
 function openCardModal(card) {
-  if (document.getElementById('game-prompt-overlay')) return;
+  if (getVisiblePromptOverlay()) return;
   if (document.getElementById('card-modal-overlay')) return;
 
   const overlay = document.createElement('div');
@@ -1086,6 +1086,103 @@ function removePromptOverlay() {
     el._prevBodyOverflow = undefined;
   }
   el?.remove();
+  clearPromptMinimizationOnPromptGone();
+}
+
+// ── Prompt minimize ("Peek board") ────────────────────────────────────────
+//
+// Non-dismissible prompts (free-slay, finalize_roll, choose_owned_card, etc.)
+// can be temporarily hidden so the player can inspect the board. While the
+// prompt is minimized:
+//   • a floating "Open prompt" button (FAB) is rendered bottom-right
+//   • body scroll is unlocked so the player can pan/scroll the board
+//   • the market action panel (Hire / Build / Slay payment fields + buttons)
+//     is suppressed inside any card-inspect modal the player opens — see
+//     `appendMarketActionUI` in 04-market.js. The player can still read card
+//     details, just not trigger market actions until they resume the prompt.
+//   • the prompt overlay stays in the DOM (display:none) so updates from new
+//     game state apply in-place; if the prompt's fingerprint changes
+//     (different action / stage / kind) we auto-restore so the player can
+//     see what the engine is asking for now
+let promptMinimized = false;
+let promptResumeFabEl = null;
+
+function isPromptMinimized() {
+  return promptMinimized;
+}
+
+/** Returns the prompt overlay only if it's actually visible (not minimized). */
+function getVisiblePromptOverlay() {
+  const el = document.getElementById('game-prompt-overlay');
+  if (!el) return null;
+  if (el.style.display === 'none') return null;
+  return el;
+}
+
+function minimizePromptOverlay() {
+  const overlay = document.getElementById('game-prompt-overlay');
+  if (!overlay) return;
+  if (!overlay._promptMinimizable) return;
+  if (promptMinimized) return;
+  promptMinimized = true;
+  if (overlay._prevBodyOverflow !== undefined) {
+    document.body.style.overflow = overlay._prevBodyOverflow;
+  } else {
+    document.body.style.overflow = '';
+  }
+  overlay.style.display = 'none';
+  ensurePromptResumeFab();
+}
+
+function restorePromptOverlay() {
+  if (!promptMinimized) return;
+  promptMinimized = false;
+  removePromptResumeFab();
+  const overlay = document.getElementById('game-prompt-overlay');
+  if (!overlay) return;
+  document.body.style.overflow = 'hidden';
+  overlay.style.display = '';
+}
+
+function clearPromptMinimizationOnPromptGone() {
+  if (!promptMinimized) return;
+  promptMinimized = false;
+  removePromptResumeFab();
+}
+
+function ensurePromptResumeFab() {
+  if (promptResumeFabEl && document.body.contains(promptResumeFabEl)) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.id = 'prompt-resume-fab';
+  btn.className = 'prompt-resume-fab';
+  btn.setAttribute('aria-label', 'Open the active prompt');
+  const icon = document.createElement('span');
+  icon.className = 'prompt-resume-fab-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  icon.textContent = '\u25B2';
+  const label = document.createElement('span');
+  label.className = 'prompt-resume-fab-label';
+  label.textContent = 'Open prompt';
+  btn.appendChild(icon);
+  btn.appendChild(label);
+  btn.addEventListener('click', () => restorePromptOverlay());
+  document.body.appendChild(btn);
+  promptResumeFabEl = btn;
+}
+
+function removePromptResumeFab() {
+  if (promptResumeFabEl) {
+    promptResumeFabEl.remove();
+    promptResumeFabEl = null;
+  }
+  const stray = document.getElementById('prompt-resume-fab');
+  if (stray) stray.remove();
+}
+
+/** True if a prompt overlay is in the DOM (visible OR minimized). */
+function isPromptOverlayActive() {
+  return !!document.getElementById('game-prompt-overlay');
 }
 
 /** Dismisses the card image / market inspect overlay and clears its Escape listener. */
@@ -1134,7 +1231,7 @@ function refreshOpenCardInspectModal() {
 /** Shared close control for any panel using `.card-modal` (inspect, market, dismissible prompts). */
 function syncCardShellCloseButton(modal, visible, onClose) {
   if (!modal) return;
-  const existing = modal.querySelector('.card-modal-close');
+  const existing = modal.querySelector('.card-modal-close:not(.prompt-modal-minimize)');
   if (!visible) {
     existing?.remove();
     return;
@@ -1155,6 +1252,33 @@ function syncCardShellCloseButton(modal, visible, onClose) {
     modal.appendChild(btn);
   }
   btn._modalCloseFn = onClose;
+}
+
+/** "Peek board" control for non-dismissible prompts. Positioned like the close button. */
+function syncPromptMinimizeButton(modal, minimizable, onMinimize) {
+  if (!modal) return;
+  const existing = modal.querySelector('.prompt-modal-minimize');
+  if (!minimizable) {
+    existing?.remove();
+    return;
+  }
+  if (!onMinimize) return;
+  let btn = existing;
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'card-modal-close prompt-modal-minimize';
+    btn.setAttribute('aria-label', 'Peek the board (you can reopen this prompt later)');
+    btn.title = 'Peek the board (you must resolve this prompt to continue your turn)';
+    btn.textContent = 'Peek board';
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const fn = btn._modalMinimizeFn;
+      if (fn) fn();
+    });
+    modal.appendChild(btn);
+  }
+  btn._modalMinimizeFn = onMinimize;
 }
 
 function mountCardInspectOverlay(overlay, modal) {
@@ -1188,6 +1312,18 @@ function openPromptOverlayShell(opts) {
       modal,
       !!dismissible,
       dismissible ? () => removePromptOverlay() : null,
+    );
+
+    // Non-dismissible prompts (active-player choice prompts) get a "Peek board"
+    // minimize button instead, so the player can browse the board without
+    // losing their pending choice. Waiting/spectator prompts (dismissible:true)
+    // already let the player click out, so no minimize button there.
+    const minimizable = !dismissible;
+    overlay._promptMinimizable = minimizable;
+    syncPromptMinimizeButton(
+      modal,
+      minimizable,
+      minimizable ? () => minimizePromptOverlay() : null,
     );
 
     if (!dismissible) return;

@@ -2662,8 +2662,40 @@ function renderUnknownRequired(state, reqAction, reqId) {
   });
 }
 
+// Identity for the "current prompt". When this changes between state pushes
+// we auto-restore a minimized prompt so the player sees the new ask. Tracks
+// action+id+stage+kind but NOT concurrent.pending — the latter changes as
+// other players submit, and we don't want every submission to pop the prompt
+// back open while the viewer is browsing the board.
+function computePromptFingerprint(state) {
+  const req = state?.action_required || {};
+  const prc = state?.pending_required_choice || null;
+  const ca = state?.concurrent_action || null;
+  return [
+    String(req.action || ''),
+    String(req.id || ''),
+    String(prc?.kind || ''),
+    String(prc?.stage || ''),
+    String(ca?.kind || ''),
+  ].join('|');
+}
+
+let lastPromptFingerprint = '';
+
 function renderPromptModal(state) {
   if (!GAME_ID || !PLAYER_ID) return;
+
+  // If the prompt has materially changed since the last render and the user
+  // had it minimized, surface the new state so they don't miss it.
+  const fingerprint = computePromptFingerprint(state);
+  if (
+    typeof isPromptMinimized === 'function' &&
+    isPromptMinimized() &&
+    fingerprint !== lastPromptFingerprint
+  ) {
+    restorePromptOverlay();
+  }
+  lastPromptFingerprint = fingerprint;
 
   const concurrent = state?.concurrent_action || null;
   const concurrentPending = concurrent && Array.isArray(concurrent.pending) ? concurrent.pending : [];

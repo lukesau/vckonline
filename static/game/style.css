@@ -3914,3 +3914,92 @@ body.is-virtual-keyboard-open .card-modal {
     justify-content: flex-start;
   }
 }
+
+/* ── "Peek board" minimize + resume FAB ───────────────────────────────────
+ * The "Peek board" button on a non-dismissible prompt reuses the
+ * .card-modal-close anchor (top-right of the modal). When clicked, the
+ * prompt overlay hides itself and renders the .prompt-resume-fab in the
+ * bottom-right corner so the player can re-open the prompt after browsing.
+ */
+.prompt-modal-minimize {
+  /* Wider than the bare "Close" button to fit "Peek board". */
+  min-width: 112px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+.prompt-resume-fab {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right, 0px));
+  bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  z-index: 330;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(240, 192, 64, 0.55);
+  background: linear-gradient(180deg, #2a221b 0%, #1a1410 100%);
+  color: var(--gold);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.55),
+    0 0 0 4px rgba(240, 192, 64, 0.12);
+  animation: prompt-resume-fab-pulse 2.4s ease-in-out infinite;
+}
+
+.prompt-resume-fab:hover {
+  border-color: rgba(240, 192, 64, 0.85);
+  color: #ffd97a;
+}
+
+.prompt-resume-fab:focus-visible {
+  outline: 2px solid #ffd97a;
+  outline-offset: 3px;
+}
+
+.prompt-resume-fab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 50%;
+  background: rgba(240, 192, 64, 0.18);
+  border: 1px solid rgba(240, 192, 64, 0.55);
+}
+
+.prompt-resume-fab-label {
+  white-space: nowrap;
+}
+
+@keyframes prompt-resume-fab-pulse {
+  0%, 100% {
+    box-shadow:
+      0 10px 28px rgba(0, 0, 0, 0.55),
+      0 0 0 4px rgba(240, 192, 64, 0.10);
+  }
+  50% {
+    box-shadow:
+      0 10px 28px rgba(0, 0, 0, 0.55),
+      0 0 0 8px rgba(240, 192, 64, 0.22);
+  }
+}
+
+/* "You have a pending prompt — resolve it..." note that replaces the market
+ * action panel inside an inspect modal while a prompt is minimized. */
+.market-action-prompt-block {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(240, 192, 64, 0.35);
+  background: rgba(240, 192, 64, 0.08);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.4;
+}
