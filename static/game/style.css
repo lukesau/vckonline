@@ -2097,16 +2097,20 @@ html, body {
   flex-wrap: nowrap;
 }
 
+/* Stacked rows of secondary shortcuts get a tighter gap between them
+   than the gap above the first row. */
+.lobby-rulebook-row + .lobby-rulebook-row {
+  margin-top: 6px;
+}
+
 .lobby-rulebook-link {
   text-decoration: none;
   display: inline-block;
   flex: 1 1 0;
   min-width: 0;
-  /* Trim the inherited .lobby-btn horizontal padding so three labels
-     (Rulebook / Card Wiki / Discord) fit without ellipsizing on the
-     narrowest phones. */
-  padding-left: 10px;
-  padding-right: 10px;
+  /* Trim the inherited .lobby-btn padding so the labels fit without
+     ellipsizing on narrow phones and the row is shorter vertically. */
+  padding: 7px 10px;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
