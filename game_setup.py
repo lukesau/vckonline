@@ -175,8 +175,18 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
     # raw row pool below. Off for the curated presets so a one-off missing
     # image or stub effect doesn't silently shrink those pools.
     apply_implemented_image_filter = False
-    # exhausted_stack is built after DB queries (see below); placeholder here.
+    # exhausted_stack is built after the monster areas are chosen (see below) so
+    # the Undead Samurai Lord event can be blacklisted when the Undead Samurai
+    # monster stack is already dealt to the board. `event_pool` is the materialized
+    # Event objects (loaded while the DB cursor is open); `undead_samurai_reserve`
+    # holds the set-aside minions (monsters 57-61) that the Lord event scatters.
     exhausted_stack = []
+    event_pool = []
+    undead_samurai_reserve = []
+    # Undead Samurai Lord event state: the minions still waiting to be placed,
+    # and whether the one-time "each player places a minion" step has run.
+    undead_samurai_pool = []
+    undead_samurai_placed = False
     starter_query = "SELECT * FROM starters ORDER BY id_starters"
     starter_stack = []
     player_list = []
@@ -484,7 +494,6 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
         event_rows = _fetch_pool_rows(event_query, "events", event_expansion_filters)
         if apply_implemented_image_filter:
             event_rows = [r for r in event_rows if keep_for_random("event", r)]
-        event_pool = []
         for row in event_rows:
             ev = Event(
                 event_id=row["id_events"],
@@ -510,23 +519,29 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             )
             event_pool.append(ev)
 
-        n_players = len(player_list_from_lobby)
-        total_tokens = n_players * 2
-        n_events = n_players  # half the pool becomes Event cards
-
-        if len(event_pool) >= n_events:
-            chosen_events = random.sample(event_pool, n_events)
-        else:
-            print(
-                f"Warning: only {len(event_pool)} events available from {event_query} "
-                f"but need {n_events}. Filling remainder with plain Exhausted tokens."
+        # Set-aside Undead Samurai minions (monsters 57-61). These are NOT dealt
+        # as a normal monster area; the Undead Samurai Lord event scatters them
+        # onto the board when revealed. Loaded here while the cursor is open and
+        # only attached to the game if that event ends up in the deck (see the
+        # deck build after monster-area selection). `_filter_monster_areas_for_random`
+        # is intentionally not applied — these enter via the event, not as an area.
+        try:
+            my_cursor.execute(
+                "SELECT * FROM monsters WHERE area = %s AND monster_type = %s "
+                "ORDER BY monster_order",
+                ("Undead Samurai", "Minion"),
             )
-            chosen_events = list(event_pool)
-
-        n_exhausted = total_tokens - len(chosen_events)
-        plain_exhausted = [Exhausted(i) for i in range(n_exhausted)]
-        exhausted_stack = chosen_events + plain_exhausted
-        random.shuffle(exhausted_stack)
+            for row in my_cursor.fetchall():
+                undead_samurai_reserve.append(Monster(
+                    row["id_monsters"], row["name"], row["area"], row["monster_type"],
+                    row["monster_order"], row["strength_cost"], row["magic_cost"],
+                    row["vp_reward"], row["gold_reward"], row["strength_reward"],
+                    row["magic_reward"], row["has_special_reward"], row["special_reward"],
+                    row["has_special_cost"], row["special_cost"], row["is_extra"],
+                    row["expansion"],
+                ))
+        except Exception:
+            undead_samurai_reserve = []
 
         my_cursor.close()
         my_connect.close()
@@ -597,6 +612,43 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             for monster in stack:
                 monster.toggle_visibility(True)
             stack[-1].toggle_accessibility(True)
+
+        # Build the event/exhausted deck now that the monster areas are fixed.
+        # The Undead Samurai Lord event and the Undead Samurai monster stack are
+        # mutually exclusive (same cards, two different rule sets): if that area
+        # was dealt to the board, drop the Lord event so it can't also appear.
+        # Doing this after area selection keeps draft/random honest — a player can
+        # always pick the Undead Samurai area without the event having pre-claimed it.
+        UNDEAD_SAMURAI_AREA = "Undead Samurai"
+        UNDEAD_SAMURAI_LORD_EVENT = "Undead Samurai Lord"
+        if UNDEAD_SAMURAI_AREA in monster_stack_areas:
+            event_pool = [ev for ev in event_pool
+                          if getattr(ev, "name", "") != UNDEAD_SAMURAI_LORD_EVENT]
+
+        n_players = len(player_list_from_lobby)
+        total_tokens = n_players * 2
+        n_events = n_players  # half the pool becomes Event cards
+        if len(event_pool) >= n_events:
+            chosen_events = random.sample(event_pool, n_events)
+        else:
+            print(
+                f"Warning: only {len(event_pool)} events available from {event_query} "
+                f"but need {n_events}. Filling remainder with plain Exhausted tokens."
+            )
+            chosen_events = list(event_pool)
+        n_exhausted = total_tokens - len(chosen_events)
+        plain_exhausted = [Exhausted(i) for i in range(n_exhausted)]
+        exhausted_stack = chosen_events + plain_exhausted
+        random.shuffle(exhausted_stack)
+
+        # Arm the Undead Samurai reserve when its Lord event made it into the
+        # deck. Registering the area (a 6th entry, with no board column) lets the
+        # Lord's `count area "Undead Samurai" v 1` slay reward tally owned minions.
+        if any(getattr(ev, "name", "") == UNDEAD_SAMURAI_LORD_EVENT for ev in chosen_events):
+            undead_samurai_pool = list(undead_samurai_reserve)
+            if UNDEAD_SAMURAI_AREA not in monster_stack_areas:
+                monster_stack_areas = list(monster_stack_areas) + [UNDEAD_SAMURAI_AREA]
+
         # deal citizens onto the board
         citizens_by_roll = {roll: [] for roll in [1, 2, 3, 4, 5, 6, 7, 8, 9, 11]}
         for citizen in citizen_stack:
@@ -659,6 +711,8 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             "player_list": player_list,
             "monster_grid": monster_grid,
             "monster_stack_areas": monster_stack_areas,
+            "undead_samurai_pool": undead_samurai_pool,
+            "undead_samurai_placed": undead_samurai_placed,
             "citizen_grid": citizen_grid,
             "domain_grid": domain_grid,
             "die_one": die_one,

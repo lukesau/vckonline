@@ -2181,6 +2181,18 @@
                         const nm = (top?.name || `Stack ${idx}`).toString();
                         buttons += `<button type="button" onclick="sendRequiredSimple('${idx}')">Banish ${escapeHtml(nm)}</button>`;
                     });
+                } else if (verb === 'place_reserve_monster') {
+                    const cardName = (prc?.next_card_name || 'Undead Samurai').toString();
+                    const remaining = Number(prc?.reserve_remaining || 0);
+                    sub = `Place an ${cardName} on a stack (blocks the card beneath until slain). ${remaining} left.`;
+                    const gridLabels = { monster: 'Monster', citizen: 'Citizen', domain: 'Domain' };
+                    const opts = Array.isArray(prc?.placement_options) ? prc.placement_options : [];
+                    opts.forEach((opt) => {
+                        const g = (opt?.grid || '').toString();
+                        const idx = Number(opt?.idx || 0);
+                        const onTop = (opt?.label || '?').toString();
+                        buttons += `<button type="button" onclick="sendRequiredSimple('place ${g} ${idx}')">${escapeHtml(gridLabels[g] || g)} #${idx} (on ${escapeHtml(onTop)})</button>`;
+                    });
                 } else if (verb === 'banish_owned_citizen') {
                     const gainKind = (data?.gain_kind || 'v').toString();
                     const gainAmt = Number(data?.gain_amount || 0);

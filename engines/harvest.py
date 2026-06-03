@@ -1123,14 +1123,24 @@ class HarvestEngine:
                     f"harvest magic bonus; scores {before} -> {after}"
                 )
 
-    def _apply_all_players_on_any_slay_passives(self):
-        """Fire `action.on_any_slay <r> <n>` passives for ALL players.
+    _REACTIVE_SLAY_VERBS = ("action.on_any_slay", "action.on_opponent_slay")
 
-        Called from slay_monster after a successful slay. Fires only during
-        the action phase (not harvest-phase slays). Every player who owns a
-        domain with this passive receives the stated resource gain.
+    def _apply_reactive_slay_passives(self, slayer_id=None):
+        """Fire reactive slay passives for every owner after a successful slay.
 
-        Example (Raven's Outpost): `action.on_any_slay s 1`
+        Called from slay_monster. Fires only during the action phase, so a
+        harvest-phase slay (e.g. the Dragoon's bonus Slay action) never
+        activates these triggers.
+
+        Two verbs are recognized:
+          - `action.on_any_slay <r> <n>`: every owner gains, including the
+            player who did the slaying.
+          - `action.on_opponent_slay <r> <n>`: every owner EXCEPT the slayer
+            gains. Per the rulebook, Raven's Outpost "is only activated when
+            one of your opponents slays a Monster, not when you slay a
+            Monster", so it uses this verb.
+
+        Example (Raven's Outpost): `action.on_opponent_slay s 1`
         """
         if getattr(self.game, "phase", None) != "action":
             return
@@ -1142,7 +1152,13 @@ class HarvestEngine:
                 if not raw:
                     continue
                 parts = raw.split()
-                if len(parts) != 3 or parts[0].lower() != "action.on_any_slay":
+                if len(parts) != 3 or parts[0].lower() not in self._REACTIVE_SLAY_VERBS:
+                    continue
+                verb = parts[0].lower()
+                # Opponent-only trigger: the slayer's own copy stays silent.
+                if (verb == "action.on_opponent_slay"
+                        and slayer_id is not None
+                        and player.player_id == slayer_id):
                     continue
                 gain_r = parts[1].lower()
                 try:

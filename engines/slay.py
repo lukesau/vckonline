@@ -29,14 +29,20 @@ class SlayEngine:
         self.game = game
 
     def _immediate_slay_monster_options(self):
-        """Return option dicts for every accessible monster top across the grid.
+        """Return option dicts for every accessible monster top across all grids.
 
-        Includes Event cards with is_monster=True that are occupying monster_grid
-        slots — they use event_id instead of monster_id in the option dict.
+        Includes Event cards with is_monster=True (they can occupy any grid slot)
+        and regular monsters that the Undead Samurai Lord event scatters onto
+        citizen/domain stacks. Event cards use event_id; monsters use monster_id.
         """
         surcharge = self.game.events.dark_lord_surcharge()
         options = []
-        for stack in self.game.monster_grid:
+        all_stacks = (
+            list(self.game.monster_grid)
+            + list(self.game.citizen_grid)
+            + list(self.game.domain_grid)
+        )
+        for stack in all_stacks:
             if not stack:
                 continue
             top = stack[-1]

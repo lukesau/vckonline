@@ -250,11 +250,13 @@ function hasActionEffectFlag(player, flag, turnNumber) {
 function findMarketStack(card, state) {
   let grid = null;
   let idKey = null;
-  if (card.monster_id != null) { grid = state?.monster_grid; idKey = 'monster_id'; }
-  else if (card.citizen_id != null) { grid = state?.citizen_grid; idKey = 'citizen_id'; }
-  else if (card.domain_id != null) { grid = state?.domain_grid; idKey = 'domain_id'; }
-  else if (card.event_id != null) {
-    // Events can land on any grid — search all three and track which one for global-index math.
+  // Events normally land on any grid (which stack emptied first). The Undead
+  // Samurai Lord event also scatters Undead Samurai minions (regular monsters)
+  // onto any grid, so monsters are searched grid-agnostically too. Card ids are
+  // unique, so the extra grids never yield a false match.
+  if (card.monster_id != null || card.event_id != null) {
+    const matchKey = card.monster_id != null ? 'monster_id' : 'event_id';
+    const matchVal = card.monster_id != null ? card.monster_id : card.event_id;
     const candidates = [
       { g: state?.monster_grid, offset: 0  },
       { g: state?.citizen_grid, offset: 5  },
@@ -264,12 +266,14 @@ function findMarketStack(card, state) {
       const stacks = Array.isArray(g) ? g : [];
       for (let i = 0; i < stacks.length; i++) {
         const top = topOfStack(stacks[i]);
-        if (!top || top['event_id'] !== card.event_id) continue;
+        if (!top || top[matchKey] !== matchVal) continue;
         return { stack: stacks[i], stackIndex: i, top, globalOffset: offset };
       }
     }
     return null;
   }
+  else if (card.citizen_id != null) { grid = state?.citizen_grid; idKey = 'citizen_id'; }
+  else if (card.domain_id != null) { grid = state?.domain_grid; idKey = 'domain_id'; }
   else return null;
   const stacks = Array.isArray(grid) ? grid : [];
   const cid = card[idKey];
@@ -294,7 +298,7 @@ function marketPileFromGlobalIndex(globalIdx) {
 function globalMarketPileIndexFromCard(card, state) {
   const loc = findMarketStack(card, state);
   if (!loc) return null;
-  if (card.monster_id != null) return loc.stackIndex;
+  if (card.monster_id != null) return (loc.globalOffset ?? 0) + loc.stackIndex;
   if (card.event_id   != null) return (loc.globalOffset ?? 0) + loc.stackIndex;
   if (card.citizen_id != null) return 5 + loc.stackIndex;
   if (card.domain_id != null) return 15 + loc.stackIndex;

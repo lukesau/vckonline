@@ -22,14 +22,22 @@ def make_domain(domain_id, name, gold_cost):
     )
 
 
-def make_monster(monster_id, name, *, strength_cost=0, magic_cost=2):
+def make_monster(monster_id, name, *, area="Forest", monster_type="Minion",
+                 strength_cost=0, magic_cost=2, vp_reward=0, magic_reward=0):
     return Monster(
-        monster_id, name, "Forest", "Minion", 1,
+        monster_id, name, area, monster_type, 1,
         strength_cost, magic_cost,
-        0, 0, 0, 0,              # rewards
+        vp_reward, 0, 0, magic_reward,   # vp/gold/strength/magic rewards
         False, None, False, None,
         False, "test",
     )
+
+
+def make_board_monster(monster_id, name, **kw):
+    m = make_monster(monster_id, name, **kw)
+    m.toggle_visibility(True)
+    m.toggle_accessibility(True)
+    return m
 
 
 def make_board_citizen(citizen_id, **kw):
@@ -1060,6 +1068,165 @@ class TwinBanditsOfPythTests(unittest.TestCase):
             self.assertEqual(p.gold_score, 0)
             self.assertEqual(p.strength_score, 0)
             self.assertEqual(p.magic_score, 0)
+
+
+# --- Undead Samurai Lord (monster event: scatter + slay cleanup) -----------
+
+def make_samurai_minion(monster_id):
+    return make_monster(monster_id, "Undead Samurai", area="Undead Samurai",
+                        monster_type="Minion", strength_cost=3, magic_cost=0,
+                        vp_reward=1, magic_reward=3)
+
+
+def make_samurai_lord_event():
+    ev = make_event(16, "Undead Samurai Lord", is_monster=1, has_activation=True,
+                    activation_effect="seq all_must place_reserve_monster pool=undead_samurai")
+    ev.strength_cost = 5
+    ev.magic_cost = 5
+    ev.has_special_reward = True
+    ev.special_reward = 'count area "Undead Samurai" v 1'
+    ev.toggle_visibility(True)
+    ev.toggle_accessibility(True)
+    return ev
+
+
+def _arm_pool(game, n=5):
+    game.undead_samurai_pool = [make_samurai_minion(57 + i) for i in range(n)]
+    game.undead_samurai_placed = False
+
+
+class UndeadSamuraiPlacementTests(unittest.TestCase):
+    def _board_game(self, n_players=3):
+        game, players = make_game(n_players, phase="action", turn_index=0)
+        # Give every grid a real, accessible top card so placement has targets.
+        game.monster_grid[0].append(make_board_monster(90, "Goblin"))
+        game.citizen_grid[0].append(make_board_citizen(91, soldier=1))
+        game.domain_grid[0].append(make_domain(92, "Keep", 3))
+        game.domain_grid[0][-1].toggle_visibility(True)
+        game.domain_grid[0][-1].toggle_accessibility(True)
+        return game, players
+
+    def test_reveal_starts_sequence_for_active_player(self):
+        game, players = self._board_game(3)
+        _arm_pool(game)
+        game.events.on_event_revealed(make_samurai_lord_event(), revealing_player_id=players[0].player_id)
+        self.assertIsNotNone(game.pending_event_sequence)
+        self.assertEqual(game.pending_event_sequence["verb"], "place_reserve_monster")
+        self.assertEqual(game.action_required.get("action"), "event_sequence")
+        self.assertEqual(game.action_required.get("id"), players[0].player_id)
+        self.assertTrue(game.undead_samurai_placed)
+
+    def test_each_player_places_one_in_turn_order(self):
+        game, players = self._board_game(3)
+        _arm_pool(game)
+        game.events.on_event_revealed(make_samurai_lord_event(), revealing_player_id=players[0].player_id)
+        # p0 -> monster stack 0, p1 -> citizen stack 0, p2 -> domain stack 0.
+        game.act_on_required_action(players[0].player_id, "place monster 0")
+        self.assertEqual(game.action_required.get("id"), players[1].player_id)
+        game.act_on_required_action(players[1].player_id, "place citizen 0")
+        self.assertEqual(game.action_required.get("id"), players[2].player_id)
+        game.act_on_required_action(players[2].player_id, "place domain 0")
+        # Sequence done; 3 of 5 minions placed, 2 left in reserve.
+        self.assertIsNone(game.pending_event_sequence)
+        self.assertEqual(len(game.undead_samurai_pool), 2)
+        self.assertEqual(game.monster_grid[0][-1].name, "Undead Samurai")
+        self.assertEqual(game.citizen_grid[0][-1].name, "Undead Samurai")
+        self.assertEqual(game.domain_grid[0][-1].name, "Undead Samurai")
+
+    def test_placed_minion_blocks_card_beneath(self):
+        game, players = self._board_game(2)
+        _arm_pool(game)
+        citizen_below = game.citizen_grid[0][0]
+        game.events.on_event_revealed(make_samurai_lord_event(), revealing_player_id=players[0].player_id)
+        game.act_on_required_action(players[0].player_id, "place citizen 0")
+        # The citizen under the freshly-placed samurai is no longer accessible.
+        self.assertFalse(citizen_below.is_accessible)
+        self.assertTrue(game.citizen_grid[0][-1].is_accessible)
+
+    def test_invalid_placement_rejected(self):
+        game, players = self._board_game(2)
+        _arm_pool(game)
+        game.events.on_event_revealed(make_samurai_lord_event(), revealing_player_id=players[0].player_id)
+        with self.assertRaises(ValueError):
+            game.act_on_required_action(players[0].player_id, "place monster 4")  # empty stack
+
+    def test_resting_seat_included_at_five_players(self):
+        # 5-player game: the resting seat is normally skipped for harvest, but the
+        # scatter must include them so all 5 minions can be placed.
+        game, players = make_game(5, phase="action", turn_index=0)
+        for i in range(5):
+            game.monster_grid[i].append(make_board_monster(90 + i, f"Goblin {i}"))
+        _arm_pool(game)
+        active = game.lifecycle.current_player_id()
+        game.events.on_event_revealed(make_samurai_lord_event(), revealing_player_id=active)
+        seq = game.pending_event_sequence
+        self.assertEqual(len(seq["queue"]), 5, "all five players (incl. resting) participate")
+        placed = 0
+        guard = 0
+        while game.pending_event_sequence and guard < 10:
+            guard += 1
+            pid = game.action_required.get("id")
+            game.act_on_required_action(pid, f"place monster {placed % 5}")
+            placed += 1
+        self.assertIsNone(game.pending_event_sequence)
+        self.assertEqual(placed, 5, "each of the five players placed one minion")
+        self.assertEqual(len(game.undead_samurai_pool), 0)
+
+    def test_rereveal_does_not_replace(self):
+        game, players = self._board_game(2)
+        _arm_pool(game)
+        game.undead_samurai_placed = True  # already scattered earlier
+        game.events.on_event_revealed(make_samurai_lord_event(), revealing_player_id=players[0].player_id)
+        self.assertIsNone(game.pending_event_sequence)
+        self.assertEqual(game.action_required.get("action"), "")
+
+
+class UndeadSamuraiSlayTests(unittest.TestCase):
+    def test_slay_lord_awards_vp_and_banishes_remaining(self):
+        game, players = make_game(2, phase="action", strength=20, magic=20)
+        game.monster_stack_areas = ["Undead Samurai", "A", "B", "C", "D"]
+        slayer = players[0]
+        # Slayer already owns two minions (from earlier slays).
+        slayer.owned_monsters.append(make_samurai_minion(57))
+        slayer.owned_monsters.append(make_samurai_minion(58))
+        # Lord sits on a monster stack; a leftover minion sits on a citizen stack.
+        lord = make_samurai_lord_event()
+        game.monster_grid[0].append(lord)
+        citizen_below = make_board_citizen(91, soldier=1)
+        game.citizen_grid[0].append(citizen_below)
+        leftover = make_samurai_minion(59)
+        leftover.toggle_visibility(True)
+        leftover.toggle_accessibility(True)
+        citizen_below.toggle_accessibility(False)
+        game.citizen_grid[0].append(leftover)
+        game.undead_samurai_pool = [make_samurai_minion(60)]
+
+        before_vp = slayer.victory_score
+        game.player_actions.slay_monster(slayer.player_id, monster_id=None, event_id=16, sp=5, mp=5)
+
+        # 1 VP per owned Undead Samurai (the two pre-owned minions; the Lord event
+        # has no area attribute and is not counted).
+        self.assertEqual(slayer.victory_score - before_vp, 2)
+        # Leftover minion banished off the citizen stack; the citizen is freed.
+        self.assertNotIn(leftover, game.citizen_grid[0])
+        self.assertIn(leftover, game.banish_pile)
+        self.assertTrue(game.citizen_grid[0][-1].is_accessible)
+        self.assertEqual(game.undead_samurai_pool, [])
+
+
+class UndeadSamuraiSaveLoadTests(unittest.TestCase):
+    def test_pool_and_flag_round_trip(self):
+        from game_serialization import serialize_game_to_save_dict, deserialize_save_dict_to_game
+
+        game, players = make_game(2)
+        _arm_pool(game, n=3)
+        game.undead_samurai_placed = True
+        blob = serialize_game_to_save_dict(game)
+        restored = deserialize_save_dict_to_game(blob)
+        self.assertTrue(restored.undead_samurai_placed)
+        self.assertEqual(len(restored.undead_samurai_pool), 3)
+        self.assertTrue(all(getattr(m, "area", "") == "Undead Samurai"
+                            for m in restored.undead_samurai_pool))
 
 
 if __name__ == "__main__":

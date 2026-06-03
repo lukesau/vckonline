@@ -46,6 +46,8 @@ This document covers how effect strings work across the three card tables (citiz
 | King Tower | `action.end manipulate_resources mode=pay_to_player gain=v:1 pay=m:1 optional=true` | End of action: optionally pay 1m to a player for 1vp |
 | The Orb of Urdr | `action.end manipulate_resources mode=take_from_player take=m:1 optional=true` | End of action: optionally take 1m from a player |
 | Castle of the Seven Suns | `immunity.take` | Opponents cannot take resources or cards from the holder. Covers `steal`, `take_from_player`, and `take_owned`; does NOT cover `banish` / `flip` / event `all_lose`. The legacy string `immunity.steal` is also accepted for back-compat. |
+| The Violet Thorn | `action.slay manipulate_resources mode=gain gain=m:1` | Action phase: when **you** slay a Monster, gain 1 Magic (slayer-only; routes through `action.<verb>` gain passives) |
+| Raven's Outpost | `action.on_opponent_slay s 1` | Action phase: when an **opponent** slays a Monster, gain 1 Strength (every owner except the slayer). The sibling verb `action.on_any_slay <r> <n>` fires for every owner including the slayer. |
 
 ### Events — `activation_effect` / `passive_effect`
 
@@ -100,6 +102,7 @@ queues). Positive gains still reach everyone. Immediate losses floor at 0.
 | Queen's Day Festival | activation | `active_gain g 2 + others_gain g 1` | Active player gains 2g; every other player gains 1g |
 | Tax Collection | activation | `all_may self_convert pay=g:3 gain=v:2` | Each player may pay 3g for 2 VP |
 | Tribute to the King | activation | `all_may self_convert pay=g:1,s:1,m:1 gain=v:2` | Each player may pay 1g + 1s + 1m (all three) for 2 VP |
+| Undead Samurai Lord | activation + special_reward | `seq all_must place_reserve_monster pool=undead_samurai` / `count area "Undead Samurai" v 1` | Monster event. On reveal, in turn order each player places one set-aside Undead Samurai minion on a non-exhausted stack (any grid; it blocks the card beneath). Slaying the Lord gives 1 VP per owned Undead Samurai, then banishes any minions still on the board |
 
 Notes on reuse:
 
@@ -115,9 +118,23 @@ Notes on reuse:
 - `active_choose <opt> | <opt>` options are `self_gain:<r>:N` (active player only)
   or `all_gain:<r>:N` (everyone). The active player must pick exactly one.
 - `seq ...` resolves **in turn order** starting with the active player and
-  proceeding around the table; the 5-player resting seat is skipped. Players with
-  no legal move are auto-skipped. Verbs: `pay_to_chosen pay=<r|wild>:N`,
-  `banish_center_citizen`, `banish_owned_citizen gain=<r>:N [role=...]`.
+  proceeding around the table; the 5-player resting seat is skipped for the
+  harvest-style verbs. Players with no legal move are auto-skipped. Verbs:
+  `pay_to_chosen pay=<r|wild>:N`, `banish_center_citizen`,
+  `banish_owned_citizen gain=<r>:N [role=...]`, `place_reserve_monster pool=<name>`.
+  Exception: `place_reserve_monster` uses the **full** table order (the resting
+  seat still places), so all five minions can be scattered at 5 players.
+- `place_reserve_monster` (monster events only) pulls from a set-aside reserve of
+  monster cards (`game.undead_samurai_pool`, armed at setup) and lets each player
+  drop one on a non-exhausted center stack of any grid. The placed monster sits on
+  top and blocks the card beneath until slain. This is the only activation that
+  fires on a **monster** event reveal; it is guarded by `game.undead_samurai_placed`
+  so a re-revealed Lord event never scatters a second wave. The Undead Samurai Lord
+  event and the Undead Samurai monster *area* are mutually exclusive at setup (same
+  cards, two rule sets): if the area is dealt to the board the event is dropped from
+  the deck. When the Lord is slain, `EventsEngine.on_undead_samurai_lord_slain`
+  banishes any minions still on the board (owned minions are kept and were already
+  tallied for the Lord's `count area "Undead Samurai" v 1` VP reward).
 - `grant_all <flag>` is a "rest of the game" passive: on reveal it grants the
   named flag (e.g. `action.blessedlands`, `action.darklordrising`) to every
   player's `granted_effects` (idempotent). The grant is tied to the card being

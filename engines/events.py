@@ -35,6 +35,7 @@ Effect-string grammar (stored in ``events.activation_effect`` /
   seq all_must pay_to_chosen pay=wild:2                (in turn order: pay 2 of one resource to a chosen player)
   seq all_must banish_center_citizen                   (in turn order: banish a citizen from the center stacks)
   seq all_may banish_owned_citizen gain=v:3            (in turn order: optionally banish an owned citizen for 3 VP)
+  seq all_must place_reserve_monster pool=undead_samurai (monster event: in turn order, each player places a set-aside minion on any stack)
   roll.on_event doubles all_lose m 3                   (passive: on a doubles roll, all players lose 3m)
   roll.on_event doubles all_gain g 1 + all_gain s 1 + all_gain m 1   (passive: doubles -> all gain 1g/1s/1m)
   grant_all action.blessedlands                        (passive: grant a rest-of-game flag to every player)
@@ -46,6 +47,12 @@ from game_concurrent import _new_concurrent_action
 
 _SCORE_ATTR = {"g": "gold_score", "s": "strength_score", "m": "magic_score", "v": "victory_score"}
 _ROLE_ATTR = {"shadow": "shadow_count", "holy": "holy_count", "soldier": "soldier_count", "worker": "worker_count"}
+
+# Undead Samurai Lord event (a monster event). On first reveal it scatters the
+# set-aside Undead Samurai minions across the board, one per player in turn
+# order; when the Lord is slain, any minions still on the board are banished.
+UNDEAD_SAMURAI_AREA = "Undead Samurai"
+UNDEAD_SAMURAI_LORD_EVENT = "Undead Samurai Lord"
 
 
 def _parse_res_amount(spec):
@@ -121,10 +128,14 @@ class EventsEngine:
 
     def on_event_revealed(self, event, revealing_player_id=None):
         """React to an Event card becoming visible on a board stack."""
-        if bool(getattr(event, "is_monster", 0)):
-            return  # monster events: slayable + board roll effects, unchanged
         if revealing_player_id is None:
             revealing_player_id = self.game.lifecycle.current_player_id()
+        if bool(getattr(event, "is_monster", 0)):
+            # Monster events stay slayable board cards with their roll effects.
+            # A few also trigger a one-time activation on reveal (Undead Samurai
+            # Lord's minion placement); fire that here, otherwise no-op.
+            self._maybe_fire_monster_event_activation(event, revealing_player_id)
+            return
         passive = (getattr(event, "passive_effect", None) or "").strip()
         activation = (getattr(event, "activation_effect", None) or "").strip()
         # A revealed non-monster event is shown face-up but is not slayable.
@@ -170,6 +181,39 @@ class EventsEngine:
                     )
             else:
                 self._fire_activation(spec)
+
+    def _maybe_fire_monster_event_activation(self, event, revealing_player_id):
+        """Fire a monster event's one-time activation on reveal, if it has one.
+
+        Today only the Undead Samurai Lord uses this (a `seq ... place_reserve_monster`
+        scatter). The placement is guarded by ``undead_samurai_placed`` so a Lord
+        event that un-exhausts and is re-revealed does NOT scatter a second wave —
+        the minions already on the board simply stay until the Lord is slain.
+        """
+        if not bool(getattr(event, "has_activation_effect", 0)):
+            return
+        activation = (getattr(event, "activation_effect", None) or "").strip()
+        if not activation:
+            return
+        low = activation.lower()
+        if "place_reserve_monster" in low:
+            if getattr(self.game, "undead_samurai_placed", False):
+                return
+            if not list(getattr(self.game, "undead_samurai_pool", None) or []):
+                return
+        spec = {
+            "event_id": int(getattr(event, "event_id", -1)),
+            "name": getattr(event, "name", "Event"),
+            "activation_effect": activation,
+            "revealing_player_id": revealing_player_id,
+        }
+        if self._engine_busy() or not self._activation_ready(spec):
+            self.game.pending_event_activations.append(spec)
+            self.game._log_game_event(
+                f"Event \"{spec['name']}\" revealed; activation queued."
+            )
+        else:
+            self._fire_activation(spec)
 
     def _engine_busy(self):
         """True when something is already blocking the engine (a player choice,
@@ -632,6 +676,10 @@ class EventsEngine:
             data = {"pay_kind": pay_kind, "pay_amount": int(pay_amount)}
         elif verb == "banish_center_citizen":
             data = {}
+        elif verb == "place_reserve_monster":
+            # Each player places one set-aside monster (Undead Samurai minion)
+            # on a non-exhausted center stack of their choice.
+            data = {"pool": (kv.get("pool") or "undead_samurai").strip().lower()}
         elif verb == "banish_owned_citizen":
             gain_kind, gain_amount = _parse_res_amount(kv.get("gain", ""))
             role = (kv.get("role") or "").strip().lower()
@@ -648,7 +696,13 @@ class EventsEngine:
         if getattr(self.game, "pending_event_sequence", None):
             self.game._log_game_event(f"Event \"{name}\" could not start (sequence already running).")
             return
-        order = self.game._harvest_player_id_order_starting_active()
+        if verb == "place_reserve_monster":
+            # The Undead Samurai scatter is a placement, not a harvest/payout, so
+            # the 5-player resting seat still takes part (otherwise only 4 of the
+            # 5 minions could ever be placed). Use the full table order.
+            order = self._full_turn_order_starting_active()
+        else:
+            order = self.game._harvest_player_id_order_starting_active()
         if not order:
             self.game._log_game_event(f"Event \"{name}\": no eligible players; skipped.")
             return
@@ -659,8 +713,26 @@ class EventsEngine:
             "queue": list(order),
             "data": dict(data or {}),
         }
+        if verb == "place_reserve_monster":
+            # Mark the one-time scatter as done so a re-revealed Lord event won't
+            # trigger a second wave even if this sequence is interrupted/serialized.
+            self.game.undead_samurai_placed = True
         self.game._log_game_event(f"Event \"{name}\": resolving in turn order.")
         self._advance_sequence()
+
+    def _full_turn_order_starting_active(self):
+        """Every player in seating order starting with the active player.
+
+        Unlike ``_harvest_player_id_order_starting_active`` this does NOT drop the
+        5-player resting seat — used by placements (Undead Samurai scatter) where
+        every player acts, not just harvest participants.
+        """
+        players = list(getattr(self.game, "player_list", []) or [])
+        n = len(players)
+        if n == 0:
+            return []
+        t = int(getattr(self.game, "turn_index", 0)) % n
+        return [players[(t + i) % n].player_id for i in range(n)]
 
     def _seq_center_citizen_stacks(self):
         """Indices of center citizen stacks with an accessible top citizen."""
@@ -677,6 +749,38 @@ class EventsEngine:
                 continue
             out.append(idx)
         return out
+
+    def _seq_reserve_placement_targets(self):
+        """Non-exhausted center stacks (any grid) a reserve monster can sit on.
+
+        A stack qualifies if its top is a real card (citizen/domain/monster or a
+        slayable monster event) — not an Exhausted token or a spent non-monster
+        event placeholder. Returns dicts: {grid, idx, label}.
+        """
+        targets = []
+        grids = (
+            ("monster", getattr(self.game, "monster_grid", []) or []),
+            ("citizen", getattr(self.game, "citizen_grid", []) or []),
+            ("domain", getattr(self.game, "domain_grid", []) or []),
+        )
+        for gname, grid in grids:
+            for idx, stack in enumerate(list(grid)):
+                if not stack:
+                    continue
+                top = stack[-1]
+                if getattr(top, "name", "") == "Exhausted":
+                    continue
+                if isinstance(top, Event) and not bool(getattr(top, "is_monster", 0)):
+                    continue
+                targets.append({"grid": gname, "idx": idx, "label": getattr(top, "name", "?")})
+        return targets
+
+    def _grid_by_name(self, gname):
+        return {
+            "monster": getattr(self.game, "monster_grid", None),
+            "citizen": getattr(self.game, "citizen_grid", None),
+            "domain": getattr(self.game, "domain_grid", None),
+        }.get((gname or "").strip().lower())
 
     def _seq_owned_citizen_indices(self, player, role=""):
         out = []
@@ -697,6 +801,9 @@ class EventsEngine:
             return any(int(getattr(player, _SCORE_ATTR[r], 0) or 0) >= amt for r in ("g", "s", "m"))
         if verb == "banish_center_citizen":
             return bool(self._seq_center_citizen_stacks())
+        if verb == "place_reserve_monster":
+            return bool(list(getattr(self.game, "undead_samurai_pool", None) or [])) \
+                and bool(self._seq_reserve_placement_targets())
         if verb == "banish_owned_citizen":
             return bool(self._seq_owned_citizen_indices(player, role=(data.get("role") or "")))
         return False
@@ -734,6 +841,12 @@ class EventsEngine:
             }
             if verb == "banish_center_citizen":
                 self.game.pending_required_choice["stack_options"] = self._seq_center_citizen_stacks()
+            elif verb == "place_reserve_monster":
+                self.game.pending_required_choice["placement_options"] = self._seq_reserve_placement_targets()
+                pool = list(getattr(self.game, "undead_samurai_pool", None) or [])
+                self.game.pending_required_choice["reserve_remaining"] = len(pool)
+                if pool:
+                    self.game.pending_required_choice["next_card_name"] = getattr(pool[0], "name", "?")
             elif verb == "banish_owned_citizen":
                 self.game.pending_required_choice["owned_options"] = self._seq_owned_citizen_indices(
                     player, role=(seq.get("data") or {}).get("role") or ""
@@ -813,6 +926,39 @@ class EventsEngine:
                 f"\"{getattr(banished, 'name', '?')}\" for event \"{name}\"."
             )
 
+        elif verb == "place_reserve_monster":
+            # "place <grid> <idx>" or "<grid> <idx>" — drop the next reserve monster
+            # on top of the chosen non-exhausted stack, blocking the card beneath.
+            toks = act.split()
+            if toks and toks[0] == "place":
+                toks = toks[1:]
+            if len(toks) != 2:
+                raise ValueError("Send 'place <monster|citizen|domain> <stack_index>'.")
+            gname = toks[0]
+            try:
+                idx = int(toks[1])
+            except (TypeError, ValueError):
+                raise ValueError("Stack index must be a number.")
+            if not any(t["grid"] == gname and t["idx"] == idx
+                       for t in self._seq_reserve_placement_targets()):
+                raise ValueError("That stack cannot receive a monster.")
+            pool = list(getattr(self.game, "undead_samurai_pool", None) or [])
+            if not pool:
+                raise ValueError("No reserve monsters remain to place.")
+            grid = self._grid_by_name(gname)
+            stack = grid[idx]
+            minion = pool.pop(0)
+            self.game.undead_samurai_pool = pool
+            if stack:
+                stack[-1].toggle_accessibility(False)
+            minion.toggle_visibility(True)
+            minion.toggle_accessibility(True)
+            stack.append(minion)
+            self.game._log_game_event(
+                f"{self.game._player_label(player_id)} placed \"{getattr(minion, 'name', '?')}\" "
+                f"on the {gname} stack #{idx} for event \"{name}\"."
+            )
+
         elif verb == "banish_owned_citizen":
             if act in ("skip", "decline", "no", "pass"):
                 self.game._log_game_event(
@@ -843,6 +989,52 @@ class EventsEngine:
 
         queue.pop(0)
         self._advance_sequence()
+
+    # ---- Undead Samurai Lord cleanup -------------------------------------
+
+    @staticmethod
+    def _is_undead_samurai_minion(card):
+        """A placed Undead Samurai minion: a Monster (not the Lord event) in the
+        Undead Samurai area. The mutual-exclusion safeguard at setup guarantees
+        the only such cards on the board are the event's scattered minions."""
+        return (
+            card is not None
+            and not isinstance(card, Event)
+            and getattr(card, "monster_id", None) is not None
+            and getattr(card, "area", "") == UNDEAD_SAMURAI_AREA
+        )
+
+    def on_undead_samurai_lord_slain(self):
+        """Banish every Undead Samurai minion still on the center stacks.
+
+        Called when the Lord event card is slain. Minions already owned by players
+        are untouched (they were counted for the Lord's VP reward just before this).
+        The leftover reserve (minions never placed) is dropped — it never entered play.
+        """
+        removed = []
+        for grid in (getattr(self.game, "monster_grid", []) or [],
+                     getattr(self.game, "citizen_grid", []) or [],
+                     getattr(self.game, "domain_grid", []) or []):
+            for stack in grid:
+                if not stack:
+                    continue
+                banished = [c for c in stack if self._is_undead_samurai_minion(c)]
+                if not banished:
+                    continue
+                kept = [c for c in stack if not self._is_undead_samurai_minion(c)]
+                stack[:] = kept
+                if stack:
+                    stack[-1].toggle_accessibility(True)
+                removed.extend(banished)
+        for c in removed:
+            self.game.banish_pile.append(c)
+        self.game.undead_samurai_pool = []
+        self.game.undead_samurai_placed = True
+        if removed:
+            self.game._log_game_event(
+                f"Undead Samurai Lord slain; banished {len(removed)} Undead Samurai "
+                f"still on the center stacks."
+            )
 
     # ---- "rest of the game" granted flags + global cost mods -------------
 

@@ -1592,6 +1592,23 @@ function renderEventSequencePrompt(state) {
         { title: name, message: `Banish ${nm} from the center.` },
       )));
     });
+  } else if (verb === 'place_reserve_monster') {
+    const cardName = (prc?.next_card_name || 'Undead Samurai').toString();
+    const remaining = Number(prc?.reserve_remaining || 0);
+    const sub = mk('prompt-modal-note');
+    sub.textContent = `Place an ${cardName} on a stack of your choice (it blocks the card beneath until slain). ${remaining} left in reserve.`;
+    body.appendChild(sub);
+    const gridLabels = { monster: 'Monster', citizen: 'Citizen', domain: 'Domain' };
+    const opts = Array.isArray(prc?.placement_options) ? prc.placement_options : [];
+    opts.forEach((opt) => {
+      const g = (opt?.grid || '').toString();
+      const idx = Number(opt?.idx || 0);
+      const onTop = (opt?.label || '?').toString();
+      foot.appendChild(promptButton(`${gridLabels[g] || g} #${idx} (on ${onTop})`, () => confirmAndPostGameAction(
+        { player_id: PLAYER_ID, action_type: 'act_on_required_action', action: `place ${g} ${idx}` },
+        { title: name, message: `Place ${cardName} on the ${gridLabels[g] || g} stack #${idx}.` },
+      )));
+    });
   } else if (verb === 'banish_owned_citizen') {
     const gainKind = (data?.gain_kind || 'v').toString();
     const gainAmt = Number(data?.gain_amount || 0);

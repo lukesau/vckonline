@@ -49,3 +49,19 @@ WHERE id_events = 14;
 UPDATE events
 SET activation_effect = 'all_may self_convert pay=g:1,s:1,m:1 gain=v:2'
 WHERE id_events = 15;
+
+-- Undead Samurai Lord (a monster event). On reveal it scatters the set-aside
+-- Undead Samurai minions (monsters 57-61) across the board, one per player in
+-- turn order (each placed on a non-exhausted stack, blocking the card beneath).
+-- When the Lord is slain its `count area` reward gives the slayer 1 VP per owned
+-- Undead Samurai, then any minions still on the board are banished.
+--   * activation_effect drives the one-time placement sequence.
+--   * special_reward differs from the monster-stack Undead Samurai Lord (#63),
+--     which grants magic; the EVENT version grants VP.
+-- The event and the Undead Samurai monster area are mutually exclusive at setup.
+UPDATE events
+SET has_activation_effect = 1,
+    activation_effect = 'seq all_must place_reserve_monster pool=undead_samurai',
+    has_special_reward = 1,
+    special_reward = 'count area "Undead Samurai" v 1'
+WHERE id_events = 16;

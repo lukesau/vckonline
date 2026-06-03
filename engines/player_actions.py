@@ -1491,13 +1491,12 @@ class PlayerActionsEngine:
         gp, sp, mp = _n(gp), _n(sp), _n(mp)
         payout = [0, 0, 0, 0]
 
-        # Regular monsters only live in monster_grid.
         # Events can land on any grid depending on which stack emptied first.
-        candidate_grids = (
-            [self.game.monster_grid, self.game.citizen_grid, self.game.domain_grid]
-            if event_id is not None
-            else [self.game.monster_grid]
-        )
+        # Regular monsters normally only live in monster_grid, but the Undead
+        # Samurai Lord event scatters Undead Samurai minions (regular monsters)
+        # onto any grid, so search all three either way. Card ids are unique, so
+        # the extra grids never produce a false match for a normal monster.
+        candidate_grids = [self.game.monster_grid, self.game.citizen_grid, self.game.domain_grid]
 
         for grid in candidate_grids:
           for monster_stack in grid:
@@ -1607,8 +1606,13 @@ class PlayerActionsEngine:
             self.game._log_game_event(
                 f"{self.game._player_label(player_id)} slew \"{monster_to_add.name}\" ({pay}); scores {before} -> {after}"
             )
+            # Slaying the Undead Samurai Lord event banishes any of its minions
+            # still scattered on the board (the slayer's owned minions were already
+            # tallied for the VP reward via its `count area` special_reward above).
+            if is_event_card and getattr(top, "name", "") == "Undead Samurai Lord":
+                self.game.events.on_undead_samurai_lord_slain()
             self.game.domain_effects._apply_action_event_gain_passives(player, "slay")
-            self.game.harvest._apply_all_players_on_any_slay_passives()
+            self.game.harvest._apply_reactive_slay_passives(slayer_id=player_id)
             return
 
         raise ValueError("Monster not available to slay.")

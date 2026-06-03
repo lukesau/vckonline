@@ -156,6 +156,13 @@ class Game:
         # the per-event params while each player resolves one at a time; None
         # when no sequence is in progress. See EventsEngine._advance_sequence.
         self.pending_event_sequence = game_state.get('pending_event_sequence') or None
+        # Undead Samurai Lord event: minions (monsters 57-61) set aside at setup,
+        # scattered onto the board one-per-player when the Lord event is revealed.
+        # `undead_samurai_pool` holds the minions not yet placed; `..._placed`
+        # guards the one-time placement so a re-revealed Lord event won't re-scatter
+        # (the minions already on the board stay until the Lord is slain).
+        self.undead_samurai_pool = list(game_state.get('undead_samurai_pool') or [])
+        self.undead_samurai_placed = bool(game_state.get('undead_samurai_placed', False))
         # When a may-slay flow's slay opens a follow-up prompt via the slain
         # monster's `special_reward` (e.g. Warg's `choose m 3 <citizens where
         # name==Peasant>`), we stash the resume info here instead of clobbering
