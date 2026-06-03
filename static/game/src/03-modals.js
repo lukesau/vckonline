@@ -766,16 +766,12 @@ function appendOpponentDukeVpTable(infoEl, ownerPlayerId) {
         isYou: true,
         name: entry.name,
         total_vp: myProj ? Number(myProj.total_vp || 0) : Number(entry.total_vp || 0),
-        breakdown: myProj && Array.isArray(myProj.duke_vp_breakdown)
-          ? myProj.duke_vp_breakdown
-          : (entry.duke_vp_breakdown || []),
       };
     }
     return {
       isYou: false,
       name: entry.name,
       total_vp: Number(entry.total_vp || 0),
-      breakdown: Array.isArray(entry.duke_vp_breakdown) ? entry.duke_vp_breakdown : [],
     };
   });
   rows.sort((a, b) => (b.total_vp - a.total_vp) || String(a.name).localeCompare(String(b.name)));
@@ -784,16 +780,6 @@ function appendOpponentDukeVpTable(infoEl, ownerPlayerId) {
   rows.forEach(r => {
     const row = mk('duke-vp-table-row');
     if (r.isYou) row.classList.add('is-you');
-
-    const header = mk('duke-vp-table-row-header');
-    header.setAttribute('role', 'button');
-    header.tabIndex = 0;
-    header.setAttribute('aria-expanded', 'false');
-
-    const caret = mk('duke-vp-table-caret');
-    caret.setAttribute('aria-hidden', 'true');
-    caret.textContent = '\u203a';
-    header.appendChild(caret);
 
     const nameWrap = mk('duke-vp-table-name');
     const nm = document.createElement('span');
@@ -805,53 +791,11 @@ function appendOpponentDukeVpTable(infoEl, ownerPlayerId) {
       tag.textContent = 'You';
       nameWrap.appendChild(tag);
     }
-    header.appendChild(nameWrap);
+    row.appendChild(nameWrap);
 
     const vp = mk('duke-vp-table-vp');
     vp.textContent = `${r.total_vp} VP`;
-    header.appendChild(vp);
-    row.appendChild(header);
-
-    const detail = mk('duke-vp-table-detail');
-    const lines = Array.isArray(r.breakdown) ? r.breakdown : [];
-    if (lines.length) {
-      const list = mk('duke-vp-breakdown');
-      lines.forEach(line => {
-        const li = mk('duke-vp-line');
-        const top = mk('duke-vp-line-top');
-        const lbl = mk('duke-vp-line-label');
-        lbl.textContent = line.label || '';
-        const val = mk('duke-vp-line-vp');
-        val.textContent = `+${Number(line.vp || 0)} VP`;
-        top.appendChild(lbl);
-        top.appendChild(val);
-        li.appendChild(top);
-        if (line.detail) {
-          const det = mk('duke-vp-line-detail');
-          det.textContent = line.detail;
-          li.appendChild(det);
-        }
-        list.appendChild(li);
-      });
-      detail.appendChild(list);
-    } else {
-      const empty = mk('duke-vp-projection-empty');
-      empty.textContent = 'No duke VP for this tableau.';
-      detail.appendChild(empty);
-    }
-    row.appendChild(detail);
-
-    const toggle = () => {
-      const open = row.classList.toggle('is-expanded');
-      header.setAttribute('aria-expanded', open ? 'true' : 'false');
-    };
-    header.addEventListener('click', toggle);
-    header.addEventListener('keydown', e => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        toggle();
-      }
-    });
+    row.appendChild(vp);
 
     wrap.appendChild(row);
   });

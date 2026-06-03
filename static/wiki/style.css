@@ -301,6 +301,11 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   background: #000;
   display: block;
   object-fit: cover;
+  /* The card art has rounded top corners baked in but a square bottom edge.
+     Round the bottom corners so the green card background (matching the name
+     band below) shows through, giving the image rounded corners all around. */
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
 }
 .wiki-card-image.missing {
   display: flex;
