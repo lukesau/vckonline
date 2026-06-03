@@ -437,7 +437,7 @@ _GAME_SHUTDOWN_DELAY_S = 30
 #
 # Idle-game cleanup (the 180s sweep in `startup_event`'s cleanup loop) is
 # still useful for closed-browser games and is intentionally left alone.
-HURRY_UP_SECONDS = 90.0
+HURRY_UP_SECONDS = 180.0
 _hurry_up_tasks: Dict[str, asyncio.Task] = {}
 
 
