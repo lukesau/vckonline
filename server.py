@@ -1307,8 +1307,6 @@ async def submit_draft_vote(request: DraftVoteRequest):
     else:
         raise HTTPException(status_code=409, detail="Draft is not in an active voting phase")
 
-    await lobby_ws_manager.broadcast_lobby()
-
     n_players = len(state["player_ids"])
     if phase == "monsters" and len(state["votes_monsters"]) >= n_players:
         await _advance_draft(lb.lobby_id)
@@ -1316,6 +1314,8 @@ async def submit_draft_vote(request: DraftVoteRequest):
         await _advance_draft(lb.lobby_id)
     elif phase == "citizens" and len(state["votes_citizens"]) >= n_players:
         await _advance_draft(lb.lobby_id)
+    else:
+        await lobby_ws_manager.broadcast_lobby()
 
     return {"message": "Vote submitted"}
 

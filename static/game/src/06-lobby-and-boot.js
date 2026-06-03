@@ -438,6 +438,25 @@ function _getDraftPhaseKey(draft) {
   return '';
 }
 
+function _draftHasServerVote(draft) {
+  if (!draft) return false;
+  if (draft.phase === 'monsters') return !!(draft.my_monster_votes && draft.my_monster_votes.length > 0);
+  if (draft.phase === 'starters') return draft.my_starter_vote != null;
+  if (draft.phase === 'citizens') return draft.my_citizen_vote != null;
+  return false;
+}
+
+function _syncDraftVoteFromServer(draft) {
+  if (!_draftHasServerVote(draft)) return;
+  if (draft.phase === 'monsters') {
+    _draftMonsterVotes = [...draft.my_monster_votes];
+  } else if (draft.phase === 'starters') {
+    _draftStarterVote = draft.my_starter_vote;
+  } else if (draft.phase === 'citizens') {
+    _draftCitizenVote = draft.my_citizen_vote;
+  }
+}
+
 function lobbyPresetShortLabel(preset) {
   return LOBBY_PRESET_SHORT_LABELS[preset] || preset || 'Custom';
 }
@@ -462,25 +481,11 @@ function handleDraftState(draft, selfId) {
     _draftStarterVote = null;
     _draftCitizenVote = null;
     _draftVoteSubmitted = false;
-    // Pre-fill from server's confirmed vote so a reconnecting player sees their submission
-    if (draft.phase === 'monsters' && draft.my_monster_votes && draft.my_monster_votes.length > 0) {
-      _draftMonsterVotes = [...draft.my_monster_votes];
-      _draftVoteSubmitted = true;
-    } else if (draft.phase === 'starters' && draft.my_starter_vote != null) {
-      _draftStarterVote = draft.my_starter_vote;
-      _draftVoteSubmitted = true;
-    } else if (draft.phase === 'citizens' && draft.my_citizen_vote != null) {
-      _draftCitizenVote = draft.my_citizen_vote;
-      _draftVoteSubmitted = true;
-    }
+    _syncDraftVoteFromServer(draft);
+    _draftVoteSubmitted = _draftHasServerVote(draft);
   } else {
-    if (draft.phase === 'monsters' && draft.my_monster_votes && draft.my_monster_votes.length > 0) {
-      _draftVoteSubmitted = true;
-    } else if (draft.phase === 'starters' && draft.my_starter_vote != null) {
-      _draftVoteSubmitted = true;
-    } else if (draft.phase === 'citizens' && draft.my_citizen_vote != null) {
-      _draftVoteSubmitted = true;
-    }
+    _draftVoteSubmitted = _draftHasServerVote(draft);
+    _syncDraftVoteFromServer(draft);
   }
 
   _draftTimerEnd = draft.timer_end || 0;
@@ -1336,8 +1341,7 @@ function initLobbyModal() {
       if (myLobby) {
         lobbyPlayerId = saved;
         currentLobbyId = myLobby.lobby_id;
-        showStep('wait');
-        renderInLobby(myLobby, saved);
+        applyLobbyStatusPayload(data);
         sendLobbyIdentify();
         return;
       }
@@ -1671,6 +1675,7 @@ function initLobbyModal() {
         return;
       }
 
+      const submittedPhaseKey = _getDraftPhaseKey(draft);
       draftVoteBtn.disabled = true;
       showLobbyError('');
       try {
@@ -1683,13 +1688,21 @@ function initLobbyModal() {
         if (!res.ok) {
           throw new Error(data.detail != null ? String(data.detail) : 'Vote failed');
         }
-        _draftVoteSubmitted = true;
-        const statusEl = document.getElementById('draft-vote-status');
-        if (statusEl) statusEl.textContent = '✓ Vote submitted — waiting for others or timer';
-        draftVoteBtn.disabled = true;
+        if (_draftPhaseKey === submittedPhaseKey) {
+          _draftVoteSubmitted = true;
+          const statusEl = document.getElementById('draft-vote-status');
+          if (statusEl) statusEl.textContent = '✓ Vote submitted — waiting for others or timer';
+          draftVoteBtn.disabled = true;
+        } else {
+          _scheduleLobbyRefetch();
+        }
       } catch (e) {
         showLobbyError(e.message || 'Could not submit vote.');
-        draftVoteBtn.disabled = false;
+        if (_draftPhaseKey === submittedPhaseKey) {
+          draftVoteBtn.disabled = false;
+        } else {
+          _scheduleLobbyRefetch();
+        }
       }
     });
   }
