@@ -151,6 +151,11 @@ class Game:
         # at the next idle point. Each entry is a JSON-friendly dict:
         # {"event_id", "name", "activation_effect", "revealing_player_id"}.
         self.pending_event_activations = list(game_state.get('pending_event_activations') or [])
+        # Sequential "in turn order" event resolution (e.g. Alms for the Poor,
+        # Night Terror, Worthy Sacrifice). Holds the remaining player queue and
+        # the per-event params while each player resolves one at a time; None
+        # when no sequence is in progress. See EventsEngine._advance_sequence.
+        self.pending_event_sequence = game_state.get('pending_event_sequence') or None
         # When a may-slay flow's slay opens a follow-up prompt via the slain
         # monster's `special_reward` (e.g. Warg's `choose m 3 <citizens where
         # name==Peasant>`), we stash the resume info here instead of clobbering
@@ -506,6 +511,11 @@ class Game:
         target = (flag_name or "").strip().lower()
         if not target:
             return False
+        # Event-granted "rest of the game" flags (Blessed Lands, Dark Lord
+        # Rising, ...) live on the player and have no build-turn cooldown.
+        for g in list(getattr(player, "granted_effects", None) or []):
+            if str(g or "").strip().lower() == target:
+                return True
         for d in list(getattr(player, "owned_domains", []) or []):
             if self._domain_recurring_passive_on_build_turn_cooldown(d):
                 continue

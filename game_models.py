@@ -37,6 +37,11 @@ class Player:
             "harvest_phase": [],
             "action_phase": [],
         }
+        # Named effect flags granted by "rest of the game" event passives
+        # (e.g. Blessed Lands, Dark Lord Rising). Distinct from `effects` and
+        # from domain-derived flags: these persist for the rest of the game
+        # regardless of the granting card's board position.
+        self.granted_effects = []
         self.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0}
 
     @classmethod
@@ -60,6 +65,7 @@ class Player:
         player.victory_score = data["victory_score"]
         player.is_first = data["is_first"]
         player.effects = data["effects"]
+        player.granted_effects = list(data.get("granted_effects") or [])
         player.harvest_delta = data.get("harvest_delta", {"gold": 0, "strength": 0, "magic": 0, "victory": 0})
         roles = player.calc_roles()
         player.shadow_count = roles["shadow_count"]

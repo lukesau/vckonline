@@ -1481,6 +1481,137 @@ function renderEventGainActionPrompt(state) {
   openPromptOverlayShell({ title: name, dismissible: false, bodyEl: body, footerEl: foot });
 }
 
+// Golden Idol: the active player must pick exactly one of two options.
+function renderEventActiveChoosePrompt(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const name = (prc?.event_name || 'Event').toString();
+  const options = Array.isArray(prc?.options) ? prc.options : [];
+  const labels = { g: 'Gold', s: 'Strength', m: 'Magic', v: 'Victory Points' };
+
+  const optionText = (o) => {
+    const res = labels[(o?.kind || '').toString()] || (o?.kind || '').toString().toUpperCase();
+    const amt = Number(o?.amount || 0);
+    if ((o?.audience || '') === 'active') return `You gain ${amt} ${res}`;
+    return `All players gain ${amt} ${res}`;
+  };
+
+  const body = mk('prompt-modal-body');
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — ${name} choice.`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({ title: name, dismissible: true, bodyEl: body, footerEl: null });
+    return;
+  }
+
+  const sub = mk('prompt-modal-note');
+  sub.textContent = 'Choose one:';
+  body.appendChild(sub);
+  appendPromptResourcesPanel(body, state);
+
+  const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
+  options.forEach((o, idx) => {
+    const txt = optionText(o);
+    foot.appendChild(promptButton(txt, () => confirmAndPostGameAction(
+      { player_id: PLAYER_ID, action_type: 'act_on_required_action', action: `choose ${idx + 1}` },
+      { title: name, message: txt },
+    )));
+  });
+
+  openPromptOverlayShell({ title: name, dismissible: false, bodyEl: body, footerEl: foot });
+}
+
+// "In turn order" events (Alms for the Poor, Night Terror, Worthy Sacrifice).
+// The acting player is always action_required.id; pending_required_choice.verb
+// selects which sub-prompt to render.
+function renderEventSequencePrompt(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const name = (prc?.event_name || 'Event').toString();
+  const verb = (prc?.verb || '').toString();
+  const data = prc?.data || {};
+
+  const body = mk('prompt-modal-body');
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — ${name}.`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({ title: name, dismissible: true, bodyEl: body, footerEl: null });
+    return;
+  }
+
+  const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
+  const labels = { g: 'Gold', s: 'Strength', m: 'Magic', v: 'Victory Points' };
+
+  if (verb === 'pay_to_chosen') {
+    const amt = Number(data?.pay_amount || 0);
+    const me = (state?.player_list || []).find((p) => idsMatch(p?.player_id, PLAYER_ID)) || {};
+    const bal = { g: Number(me.gold_score || 0), s: Number(me.strength_score || 0), m: Number(me.magic_score || 0) };
+    const sub = mk('prompt-modal-note');
+    sub.textContent = `Pay ${amt} of one resource to another player.`;
+    body.appendChild(sub);
+    appendPromptResourcesPanel(body, state);
+    (state?.player_list || []).forEach((p) => {
+      if (idsMatch(p?.player_id, PLAYER_ID)) return;
+      const nm = (p?.name || p?.player_id || '?').toString();
+      ['g', 's', 'm'].forEach((res) => {
+        if (bal[res] < amt) return;
+        foot.appendChild(promptButton(`${nm}: ${amt} ${labels[res]}`, () => confirmAndPostGameAction(
+          { player_id: PLAYER_ID, action_type: 'act_on_required_action', action: `pay ${res} ${p.player_id}` },
+          { title: name, message: `Pay ${amt} ${labels[res]} to ${nm}.` },
+        )));
+      });
+    });
+  } else if (verb === 'banish_center_citizen') {
+    const sub = mk('prompt-modal-note');
+    sub.textContent = 'Banish a citizen from the center stacks.';
+    body.appendChild(sub);
+    const grid = state?.citizen_grid || [];
+    const stackOpts = Array.isArray(prc?.stack_options) ? prc.stack_options : [];
+    stackOpts.forEach((idx) => {
+      const stack = grid[idx] || [];
+      const top = stack[stack.length - 1] || {};
+      const nm = (top?.name || `Stack ${idx}`).toString();
+      foot.appendChild(promptButton(`Banish ${nm}`, () => confirmAndPostGameAction(
+        { player_id: PLAYER_ID, action_type: 'act_on_required_action', action: `${idx}` },
+        { title: name, message: `Banish ${nm} from the center.` },
+      )));
+    });
+  } else if (verb === 'banish_owned_citizen') {
+    const gainKind = (data?.gain_kind || 'v').toString();
+    const gainAmt = Number(data?.gain_amount || 0);
+    const sub = mk('prompt-modal-note');
+    sub.textContent = `Banish one of your citizens to gain ${gainAmt} ${labels[gainKind] || gainKind}?`;
+    body.appendChild(sub);
+    const me = (state?.player_list || []).find((p) => idsMatch(p?.player_id, PLAYER_ID)) || {};
+    const oc = Array.isArray(me?.owned_citizens) ? me.owned_citizens : [];
+    const ownedOpts = Array.isArray(prc?.owned_options) ? prc.owned_options : [];
+    ownedOpts.forEach((idx) => {
+      const c = oc[idx] || {};
+      const nm = (c?.name || `Citizen ${idx}`).toString();
+      foot.appendChild(promptButton(`Banish ${nm}`, () => confirmAndPostGameAction(
+        { player_id: PLAYER_ID, action_type: 'act_on_required_action', action: `${idx}` },
+        { title: name, message: `Banish ${nm} for ${gainAmt} ${labels[gainKind] || gainKind}.` },
+      )));
+    });
+    if (!prc?.mandatory) {
+      foot.appendChild(promptButton('Skip (optional)', () => confirmAndPostGameAction(
+        { player_id: PLAYER_ID, action_type: 'act_on_required_action', action: 'skip' },
+        { title: name, message: 'Decline to banish a citizen.', confirmLabel: 'Skip' },
+      ), true));
+    }
+  }
+
+  openPromptOverlayShell({ title: name, dismissible: false, bodyEl: body, footerEl: foot });
+}
+
 function renderDomainChooseResourcePrompt(state) {
   const req = state?.action_required || {};
   const reqId = (req?.id || '').toString();
@@ -2906,6 +3037,16 @@ function renderPromptModal(state) {
 
   if (reqAction === 'event_gain_action') {
     renderEventGainActionPrompt(state);
+    return;
+  }
+
+  if (reqAction === 'event_active_choose') {
+    renderEventActiveChoosePrompt(state);
+    return;
+  }
+
+  if (reqAction === 'event_sequence') {
+    renderEventSequencePrompt(state);
     return;
   }
 

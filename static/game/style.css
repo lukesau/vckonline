@@ -939,52 +939,36 @@ html, body {
 .card-exhausted{ background: var(--card-x); border-color: var(--card-x-border); }
 .card-exhausted .card-name { color: #444; }
 
-/* Cross-fade flip stage. Two states share the same DOM:
-   - `.card.flipped`: tableau citizens the engine actually flipped face-down;
-     the viewer still knows the identity. Steady state is the back; the front
-     peeks through periodically.
-   - `.card.flipping`: cards that are technically face-down in the rules but
-     we always render them anyway so the player can read them (e.g. dukes).
-     Same visual treatment so the "this is secret" hint reads consistently.
-   The front never reaches full opacity (peaks at 75%) so the back always
-   shows through, and the back rests on its own between cycles. The flip
-   stage has `pointer-events: none` so clicks still hit the wrapping `.card`
-   element and open the full card modal. */
-.card.flipped .card-flip-stage,
-.card.flipping .card-flip-stage {
+/* Cross-fade flip stage for `.card.flipped`: tableau citizens the engine
+   actually flipped face-down; the viewer still knows the identity. Steady
+   state is the back; the front peeks through periodically. The front never
+   reaches full opacity (peaks at 75%) so the back always shows through, and
+   the back rests on its own between cycles. The flip stage has
+   `pointer-events: none` so clicks still hit the wrapping `.card` element and
+   open the full card modal. */
+.card.flipped .card-flip-stage {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
-.card.flipped .card-flip-inner,
-.card.flipping .card-flip-inner {
+.card.flipped .card-flip-inner {
   position: relative;
   width: 100%;
   height: 100%;
 }
-.card.flipped .card-flip-face,
-.card.flipping .card-flip-face {
+.card.flipped .card-flip-face {
   position: absolute;
   inset: 0;
   border-radius: 4px;
   overflow: hidden;
 }
-.card.flipped .card-flip-back,
-.card.flipping .card-flip-back  { opacity: 1; }
+.card.flipped .card-flip-back  { opacity: 1; }
 .card.flipped .card-flip-front {
   opacity: 0;
   animation: card-flip-cycle 5s ease-in-out infinite;
   will-change: opacity;
 }
-/* Dukes sit in the tableau the whole game, so use a slower cycle with a
-   longer rest period to keep the effect from feeling busy. */
-.card.flipping .card-flip-front {
-  opacity: 0;
-  animation: card-flip-cycle 8s ease-in-out infinite;
-  will-change: opacity;
-}
-.card.flipped .card-flip-face > .card-img,
-.card.flipping .card-flip-face > .card-img {
+.card.flipped .card-flip-face > .card-img {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -995,15 +979,14 @@ html, body {
 }
 /* 0%–60% is the back→front→back pulse, peaking at 0.75 opacity so the back
    always shows through by at least 25%. 60%–100% is the rest period where
-   only the back is visible. The duration is set per-class above. */
+   only the back is visible. */
 @keyframes card-flip-cycle {
   0%        { opacity: 0; }
   30%       { opacity: 0.75; }
   60%, 100% { opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .card.flipped .card-flip-front,
-  .card.flipping .card-flip-front { animation: none; opacity: 0; }
+  .card.flipped .card-flip-front { animation: none; opacity: 0; }
 }
 
 /* ── Center board ───────────────────────────────────────────────────── */

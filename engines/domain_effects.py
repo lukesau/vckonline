@@ -894,6 +894,10 @@ class DomainEffectsEngine:
         is_nonmonster_event = isinstance(top, Event) and not bool(getattr(top, "is_monster", 0))
         if not (is_plain_exhausted or is_nonmonster_event):
             return False
+        if is_nonmonster_event:
+            # A "rest of the game" grant (Blessed Lands / Dark Lord Rising) is
+            # tied to its card being in play: reverse it as the event leaves.
+            self.game.events.on_event_unexhausted(top)
         stack.pop(-1)
         self.game.exhausted_stack.append(top)
         self.game.exhausted_count = max(0, int(self.game.exhausted_count) - 1)

@@ -66,6 +66,7 @@ class GameObjectEncoder(JSONEncoder):
                 "boss_count": roles["boss_count"],
                 "beast_count": roles["beast_count"],
                 "effects": obj.effects,
+                "granted_effects": list(getattr(obj, "granted_effects", None) or []),
                 "harvest_delta": getattr(obj, "harvest_delta", {"gold": 0, "strength": 0, "magic": 0, "victory": 0}),
             }
         if isinstance(obj, Duke):
@@ -131,6 +132,7 @@ class GameObjectEncoder(JSONEncoder):
                 "shutdown": shutdown,
                 "pending_event_slay_cost": getattr(obj, "pending_event_slay_cost", None),
                 "pending_event_activations": list(getattr(obj, "pending_event_activations", None) or []),
+                "pending_event_sequence": getattr(obj, "pending_event_sequence", None),
                 "pending_reroll_twilight_used": bool(getattr(obj, "_pending_reroll_twilight_used", False)),
                 "pending_reroll_blood_moon_used": bool(getattr(obj, "_pending_reroll_blood_moon_used", False)),
             }

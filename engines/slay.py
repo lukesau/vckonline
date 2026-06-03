@@ -34,6 +34,7 @@ class SlayEngine:
         Includes Event cards with is_monster=True that are occupying monster_grid
         slots — they use event_id instead of monster_id in the option dict.
         """
+        surcharge = self.game.events.dark_lord_surcharge()
         options = []
         for stack in self.game.monster_grid:
             if not stack:
@@ -58,6 +59,7 @@ class SlayEngine:
                     "magic_cost": (
                         int(getattr(top, "magic_cost", 0) or 0)
                         + int(getattr(top, "extra_magic_cost", 0) or 0)
+                        + surcharge
                     ),
                 })
                 continue
@@ -76,6 +78,7 @@ class SlayEngine:
                 "magic_cost": (
                     int(getattr(top, "magic_cost", 0) or 0)
                     + int(getattr(top, "extra_magic_cost", 0) or 0)
+                    + surcharge
                 ),
             })
         return options

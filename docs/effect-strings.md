@@ -65,10 +65,16 @@ Audience prefixes decide who resolves an activation:
 | `active_may` | active player | optional sequential prompt |
 | `all_may` | every eligible player | optional, concurrent (unordered) |
 | `all_must` | every eligible player | mandatory, concurrent (unordered) |
+| `active_choose` | active player | mandatory, pick exactly one option |
 | `active_lose` / `others_lose` / `all_lose` | active / non-active / everyone | immediate, no prompt |
+| `active_gain` / `others_gain` / `all_gain` | active / non-active / everyone | immediate, no prompt |
+| `all_gain_per_owned` | everyone | immediate, no prompt; gain scales per owned card |
+| `seq all_must` / `seq all_may` | every eligible player | sequential, **in turn order** (active player first) |
+| `grant_all` (passive) | everyone | grants a named flag for the rest of the game |
 
-The resting seat (5-player) is "not in play" and is excluded from every event
-audience. Immediate losses floor at 0.
+The resting seat (5-player) is "not in play" and is excluded from every
+**negative** event audience (losses, mandatory pay/banish, sequential `seq`
+queues). Positive gains still reach everyone. Immediate losses floor at 0.
 
 | Card | Column | String | Meaning |
 |---|---|---|---|
@@ -78,15 +84,39 @@ audience. Immediate losses floor at 0.
 | The Key and Blade | activation | `active_lose g 3 + others_lose g 1` | Active player loses 3g; every other player loses 1g |
 | A Betrayal of Bonds | activation | `all_must flip_citizen` | Each player with a citizen must flip one face-down (reuses Cursed Cavern's concurrent flip) |
 | Curse of The North | passive | `roll.on_event doubles all_lose m 3` | While in play: on a doubles roll, all players lose 3m |
+| Alms for the Poor | activation | `seq all_must pay_to_chosen pay=wild:2` | In turn order, each player pays 2 of one resource to a chosen other player (if able) |
+| Blessed Lands | passive | `grant_all action.blessedlands` | Rest of game: all Domains cost 2 gold less to build |
+| Dark Lord Rising | passive | `grant_all action.darklordrising` | Rest of game: all Monsters cost 1 magic more to slay |
+| Golden Idol | activation | `active_choose self_gain:g:2 \| all_gain:m:4` | Active player picks: gain 2g, OR all players gain 4m |
+| Good Omen | passive | `roll.on_event doubles all_gain g 1 + all_gain s 1 + all_gain m 1` | While in play: on doubles, all players gain 1g/1s/1m |
+| Night Terror | activation | `seq all_must banish_center_citizen` | In turn order, each player banishes the top citizen of a chosen center stack |
+| Untapped Potential | activation | `all_gain_per_owned gain=m:1 per=citizen` | Each player immediately gains 1m per owned citizen |
+| Worthy Sacrifice | activation | `seq all_may banish_owned_citizen gain=v:3` | In turn order, each player may banish one owned citizen for 3 VP |
 
 Notes on reuse:
 
 - `self_convert pay=<r>:N gain=<r>:M` mirrors the domain bank-trade verb;
   `pay=wild:N` lets each player choose which resource (g/s/m) to spend.
 - `flip_citizen` reuses the `flip_one_citizen` concurrent handler (Cursed Cavern).
-- `roll.on_event <event> all_lose <res> <amt>` is the event sibling of the
-  domain `roll.on_event <event> <res> <amt>` per-owner gain passive; it applies
-  globally instead of to the owner.
+- `roll.on_event <trigger> <legs>` fires while the event is in play. Legs are
+  ` + `-joined `all_lose|all_gain <res> <amt>` clauses; losses skip the resting
+  seat, gains reach everyone.
+- `active_choose <opt> | <opt>` options are `self_gain:<r>:N` (active player only)
+  or `all_gain:<r>:N` (everyone). The active player must pick exactly one.
+- `seq ...` resolves **in turn order** starting with the active player and
+  proceeding around the table; the 5-player resting seat is skipped. Players with
+  no legal move are auto-skipped. Verbs: `pay_to_chosen pay=<r|wild>:N`,
+  `banish_center_citizen`, `banish_owned_citizen gain=<r>:N [role=...]`.
+- `grant_all <flag>` is a "rest of the game" passive: on reveal it grants the
+  named flag (e.g. `action.blessedlands`, `action.darklordrising`) to every
+  player's `granted_effects` (idempotent). The grant is tied to the card being
+  in play — if the event un-exhausts back into the deck (a card returned to its
+  center stack), the flag is revoked from all players until it is re-revealed.
+  These reuse the existing
+  `_player_has_action_effect_flag` cost machinery — Blessed Lands subtracts from
+  domain build cost, Dark Lord Rising adds to monster slay magic. The modifiers
+  are uniform across players, so the server bakes them into the serialized board
+  for display while validation applies them via the per-player flag.
 
 ### Monsters — `special_reward`
 

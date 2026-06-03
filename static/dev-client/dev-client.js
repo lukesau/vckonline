@@ -814,6 +814,8 @@
                     trimmed === 'choose_owned_card' ||
                     trimmed === 'domain_self_convert' ||
                     trimmed === 'event_gain_action' ||
+                    trimmed === 'event_active_choose' ||
+                    trimmed === 'event_sequence' ||
                     trimmed === 'harvest_optional_exchange' ||
                     trimmed === 'harvest_wild_gain_exchange' ||
                     trimmed === 'harvest_wild_cost_exchange'
@@ -1553,6 +1555,14 @@
                     return renderEventGainActionPrompt(gameState);
                 }
 
+                if (reqAction === 'event_active_choose') {
+                    return renderEventActiveChoosePrompt(gameState);
+                }
+
+                if (reqAction === 'event_sequence') {
+                    return renderEventSequencePrompt(gameState);
+                }
+
                 if (reqAction === 'harvest_optional_exchange') {
                     return renderHarvestOptionalExchangePrompt(gameState);
                 }
@@ -2094,6 +2104,104 @@
                             <button type="button" onclick="sendRequiredSimple('accept')">Pay ${payAmount} ${escapeHtml(long)}</button>
                             <button type="button" onclick="sendRequiredSimple('skip')">Decline</button>
                         </div>
+                    </div>`;
+            }
+
+            function renderEventActiveChoosePrompt(gameState) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+                const req = gameState?.action_required || {};
+                const reqId = (req?.id || '').toString();
+                const isYou = (playerId && reqId === playerId);
+                const prc = gameState?.pending_required_choice || null;
+                const name = (prc?.event_name || 'Event').toString();
+                const options = Array.isArray(prc?.options) ? prc.options : [];
+                const labels = { g: 'Gold', s: 'Strength', m: 'Magic', v: 'Victory Points' };
+                if (!isYou) {
+                    panel.innerHTML = `<div style="padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        Waiting on <code>${escapeHtml(reqId)}</code> for <strong>${escapeHtml(name)}</strong> choice.
+                    </div>`;
+                    return;
+                }
+                const optTxt = (o) => {
+                    const res = labels[(o?.kind || '')] || (o?.kind || '');
+                    const amt = Number(o?.amount || 0);
+                    return (o?.audience === 'active') ? `You gain ${amt} ${res}` : `All gain ${amt} ${res}`;
+                };
+                const buttons = options.map((o, idx) =>
+                    `<button type="button" onclick="sendRequiredSimple('choose ${idx + 1}')">${escapeHtml(optTxt(o))}</button>`
+                ).join('');
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(name)}</div>
+                        <div class="mini" style="margin-bottom:8px;color:#333;">Choose one:</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">${buttons}</div>
+                    </div>`;
+            }
+
+            function renderEventSequencePrompt(gameState) {
+                const panel = document.getElementById('choicePanel');
+                if (!panel) return;
+                const req = gameState?.action_required || {};
+                const reqId = (req?.id || '').toString();
+                const isYou = (playerId && reqId === playerId);
+                const prc = gameState?.pending_required_choice || null;
+                const name = (prc?.event_name || 'Event').toString();
+                const verb = (prc?.verb || '').toString();
+                const data = prc?.data || {};
+                const labels = { g: 'Gold', s: 'Strength', m: 'Magic', v: 'Victory Points' };
+                if (!isYou) {
+                    panel.innerHTML = `<div style="padding:8px;border:1px solid #ddd;border-radius:8px;background:#fff6d8;">
+                        Waiting on <code>${escapeHtml(reqId)}</code> for <strong>${escapeHtml(name)}</strong>.
+                    </div>`;
+                    return;
+                }
+                let sub = '';
+                let buttons = '';
+                if (verb === 'pay_to_chosen') {
+                    const amt = Number(data?.pay_amount || 0);
+                    const me = (gameState?.player_list || []).find((p) => p?.player_id === playerId) || {};
+                    const bal = { g: Number(me.gold_score || 0), s: Number(me.strength_score || 0), m: Number(me.magic_score || 0) };
+                    sub = `Pay ${amt} of one resource to another player.`;
+                    (gameState?.player_list || []).forEach((p) => {
+                        if (!p || p.player_id === playerId) return;
+                        const nm = (p?.name || p?.player_id || '?').toString();
+                        ['g', 's', 'm'].forEach((res) => {
+                            if (bal[res] < amt) return;
+                            buttons += `<button type="button" onclick="sendRequiredSimple('pay ${res} ${p.player_id}')">${escapeHtml(nm)}: ${amt} ${labels[res]}</button>`;
+                        });
+                    });
+                } else if (verb === 'banish_center_citizen') {
+                    sub = 'Banish a citizen from the center stacks.';
+                    const grid = gameState?.citizen_grid || [];
+                    const stackOpts = Array.isArray(prc?.stack_options) ? prc.stack_options : [];
+                    stackOpts.forEach((idx) => {
+                        const stack = grid[idx] || [];
+                        const top = stack[stack.length - 1] || {};
+                        const nm = (top?.name || `Stack ${idx}`).toString();
+                        buttons += `<button type="button" onclick="sendRequiredSimple('${idx}')">Banish ${escapeHtml(nm)}</button>`;
+                    });
+                } else if (verb === 'banish_owned_citizen') {
+                    const gainKind = (data?.gain_kind || 'v').toString();
+                    const gainAmt = Number(data?.gain_amount || 0);
+                    sub = `Banish one of your citizens to gain ${gainAmt} ${labels[gainKind] || gainKind}?`;
+                    const me = (gameState?.player_list || []).find((p) => p?.player_id === playerId) || {};
+                    const oc = Array.isArray(me?.owned_citizens) ? me.owned_citizens : [];
+                    const ownedOpts = Array.isArray(prc?.owned_options) ? prc.owned_options : [];
+                    ownedOpts.forEach((idx) => {
+                        const c = oc[idx] || {};
+                        const nm = (c?.name || `Citizen ${idx}`).toString();
+                        buttons += `<button type="button" onclick="sendRequiredSimple('${idx}')">Banish ${escapeHtml(nm)}</button>`;
+                    });
+                    if (!prc?.mandatory) {
+                        buttons += `<button type="button" onclick="sendRequiredSimple('skip')">Skip (optional)</button>`;
+                    }
+                }
+                panel.innerHTML = `
+                    <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
+                        <div style="font-weight:700;margin-bottom:8px;">${escapeHtml(name)}</div>
+                        <div class="mini" style="margin-bottom:8px;color:#333;">${escapeHtml(sub)}</div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">${buttons}</div>
                     </div>`;
             }
 

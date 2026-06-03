@@ -123,6 +123,8 @@ class PayoutsEngine:
             gold_cost = int(getattr(top, "gold_cost", 0) or 0)
             if has_pratchett:
                 gold_cost = max(0, gold_cost - 1)
+            if self.game._player_has_action_effect_flag(player, "action.blessedlands"):
+                gold_cost = max(0, gold_cost - self.game.events.blessed_lands_discount())
             if int(getattr(player, "gold_score", 0) or 0) < gold_cost:
                 continue
             options.append({

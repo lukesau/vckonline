@@ -82,6 +82,8 @@ class LifecycleEngine:
                 or aa == "domain_choose_resource"
                 or aa == "event_slay_cost_choice"
                 or aa == "event_gain_action"
+                or aa == "event_active_choose"
+                or aa == "event_sequence"
                 or aa == "choose_domain_to_build"
             ):
                 return False
@@ -324,6 +326,8 @@ class LifecycleEngine:
                 "slay_monster_payment",
                 "choose_domain_to_build",
                 "event_gain_action",
+                "event_active_choose",
+                "event_sequence",
             ) or aa.startswith("choose ") or aa.startswith("choose_player") or aa.startswith(
                 "choose_monster"
             ) or aa.startswith("choose_owned")

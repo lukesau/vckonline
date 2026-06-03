@@ -1296,6 +1296,36 @@ def _serialize_game_for_player(game, viewer_player_id: Optional[str]):
         state["hurry_up_seconds_remaining"] = None
         state["hurry_up_total_seconds"] = HURRY_UP_SECONDS
 
+    # Bake "rest of the game" global cost modifiers (Blessed Lands, Dark Lord
+    # Rising) into the serialized board so the client's existing card-derived
+    # cost math stays consistent. These apply uniformly to all players, so it
+    # is safe to fold them into the shared wire copy. Server-side validation
+    # applies the same modifiers independently via per-player granted flags.
+    try:
+        domain_discount = game.events.blessed_lands_discount()
+        monster_surcharge = game.events.dark_lord_surcharge()
+    except Exception:
+        domain_discount = 0
+        monster_surcharge = 0
+    if domain_discount:
+        for stack in (state.get("domain_grid") or []):
+            if not isinstance(stack, list) or not stack:
+                continue
+            top = stack[-1]
+            if isinstance(top, dict) and top.get("is_accessible"):
+                base = int(top.get("gold_cost", 0) or 0)
+                top["gold_cost"] = max(0, base - domain_discount)
+    if monster_surcharge:
+        for stack in (state.get("monster_grid") or []):
+            if not isinstance(stack, list) or not stack:
+                continue
+            top = stack[-1]
+            if not isinstance(top, dict) or not top.get("is_accessible"):
+                continue
+            if top.get("monster_id") is None and top.get("event_id") is None:
+                continue
+            top["extra_magic_cost"] = int(top.get("extra_magic_cost", 0) or 0) + monster_surcharge
+
     players = state.get("player_list") or []
     if not isinstance(players, list):
         return state

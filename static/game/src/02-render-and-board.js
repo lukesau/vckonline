@@ -1306,7 +1306,14 @@ function makeCard(card, mode) {
   el.dataset.card = JSON.stringify(card);
   if (card.is_flipped) el.classList.add('flipped');
 
-  const imgUrl = mode !== 'compact' ? cardImageUrl(card) : null;
+  // The viewer's OWN duke is technically face-down: show the duke back on the
+  // tableau and only reveal the face in the inspect modal (which uses
+  // `cardImageUrl` directly). Opponent dukes are obscured and already resolve
+  // to the back via `cardImageUrl`.
+  const isOwnDuke = card.duke_id !== undefined && !cardObscuredFromViewer(card);
+  const imgUrl = mode !== 'compact'
+    ? (isOwnDuke ? obscuredTypeBackUrl(card) : cardImageUrl(card))
+    : null;
 
   if (imgUrl) {
     el.classList.add('card-has-image');
@@ -1314,6 +1321,8 @@ function makeCard(card, mode) {
     let aria;
     if (cardObscuredFromViewer(card)) {
       aria = isDomainStackFaceDown(card) ? 'Face-down domain' : 'Hidden card';
+    } else if (isOwnDuke) {
+      aria = card.name ? `${card.name} (your duke, face-down)` : 'Your duke (face-down)';
     } else if (card.is_flipped) {
       aria = card.name ? `${card.name} (flipped face-down)` : 'Flipped citizen';
     } else {
@@ -1329,29 +1338,15 @@ function makeCard(card, mode) {
       _appendCardText(el, card, mode);
     };
 
-    // Cards that are "physically face-down but the viewer is allowed to see
-    // them" use a shared cross-fade flip stage: the back rests as the steady
-    // state and the front periodically peeks through. Covers two distinct
-    // gameplay states:
-    //   - Flipped tableau citizens (`is_flipped`) — engine actually flipped
-    //     them; viewer still knows the identity.
-    //   - The viewer's OWN duke — technically face-down in the rules, but we
-    //     show it because it's their secret. The flicker is a "this is
-    //     secret" hint.
-    // Opponent dukes are obscured (the server emits a stub with
-    // `is_visible: false`) and intentionally fall through to the plain `<img>`
-    // path below, which uses the duke back image via `cardImageUrl`. Showing
-    // a flip stage with a back on both faces would just be wasted DOM.
-    // The wrapping `.card[data-card]` element still receives clicks (the
-    // flip-stage uses `pointer-events: none`), so the delegated handler in
-    // 03-modals.js continues to open the full card modal as usual.
-    const useFlipStage = card.is_flipped
-      || (card.duke_id !== undefined && !cardObscuredFromViewer(card));
+    // Flipped tableau citizens (`is_flipped`) are physically face-down but the
+    // viewer still knows the identity, so they use a shared cross-fade flip
+    // stage: the back rests as the steady state and the front periodically
+    // peeks through. The wrapping `.card[data-card]` element still receives
+    // clicks (the flip-stage uses `pointer-events: none`), so the delegated
+    // handler in 03-modals.js continues to open the full card modal as usual.
+    const useFlipStage = card.is_flipped;
 
     if (useFlipStage) {
-      if (card.duke_id !== undefined && !card.is_flipped) {
-        el.classList.add('flipping');
-      }
       const stage = mk('card-flip-stage');
       const inner = mk('card-flip-inner');
 

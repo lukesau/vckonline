@@ -126,6 +126,30 @@ class PlayerActionsEngine:
                     self.game.events.resolve_gain_action(player_id, False)
                 return
 
+            # Event "choose one of two options" (e.g. Golden Idol). Numeric
+            # selections are 1-based ("choose 1", "1"); letters map a->1, b->2.
+            if current_required == "event_active_choose":
+                act_c = (action or "").strip().lower()
+                if act_c in ("option_a", "a"):
+                    idx_c = 0
+                elif act_c in ("option_b", "b"):
+                    idx_c = 1
+                else:
+                    if act_c.startswith("choose "):
+                        act_c = act_c.split(None, 1)[1].strip()
+                    try:
+                        idx_c = int(act_c) - 1
+                    except (TypeError, ValueError):
+                        return
+                self.game.events.resolve_active_choose(player_id, idx_c)
+                return
+
+            # Event "in turn order" sequential resolution (Alms / Night Terror /
+            # Worthy Sacrifice). The acting player is always queue[0].
+            if current_required == "event_sequence":
+                self.game.events.resolve_sequence_response(player_id, action)
+                return
+
             if current_required == "harvest_optional_exchange":
                 prc_h = getattr(self.game, "pending_required_choice", None) or {}
                 if prc_h.get("kind") != "harvest_optional_exchange" or prc_h.get("player_id") != player_id:
@@ -1517,6 +1541,8 @@ class PlayerActionsEngine:
             effective_gold_cost = int(getattr(top, "extra_gold_cost", 0) or 0)
             if self.game._player_has_action_effect_flag(player, "action.fortskyler"):
                 effective_strength_cost = max(0, effective_strength_cost - 1)
+            if self.game._player_has_action_effect_flag(player, "action.darklordrising"):
+                effective_magic_cost += self.game.events.dark_lord_surcharge()
 
             _validate_monster_slay_payment(
                 player, effective_strength_cost, effective_magic_cost, effective_gold_cost, gp, sp, mp
@@ -1636,6 +1662,8 @@ class PlayerActionsEngine:
             has_pratchett = self.game._player_has_action_effect_flag(player, "action.pratchettsplateau")
             if has_pratchett:
                 gold_cost = max(0, gold_cost - 1)
+            if self.game._player_has_action_effect_flag(player, "action.blessedlands"):
+                gold_cost = max(0, gold_cost - self.game.events.blessed_lands_discount())
             _validate_hire_or_domain_gold_payment(player, gold_cost, gp, sp, mp)
 
             before = self.game._player_scores_line(player)
