@@ -115,13 +115,15 @@ class _EventSelfConvertConcurrentHandler:
       name        -- event name (for logs)
       pay_kind    -- 'g'/'s'/'m'/'v' for a fixed cost, or 'wild' (player picks g/s/m)
       pay_amount  -- int
+      pay_legs    -- optional [[kind, amount], ...] compound cost (pay every leg);
+                     when present it takes precedence over pay_kind/pay_amount
       gain_kind   -- 'g'/'s'/'m'/'v'
       gain_amount -- int
 
     Per-player response:
       'skip'                 -- decline
       'g' / 's' / 'm'        -- (wild only) which resource to pay
-      'accept'               -- (fixed cost) pay the fixed resource
+      'accept'               -- (fixed/compound cost) pay it
     """
 
     _SCORE = {"g": "gold_score", "s": "strength_score", "m": "magic_score", "v": "victory_score"}
@@ -136,11 +138,32 @@ class _EventSelfConvertConcurrentHandler:
         name = data.get("name", "Event")
         pay_kind = (data.get("pay_kind") or "").lower()
         pay_amount = int(data.get("pay_amount") or 0)
+        pay_legs = data.get("pay_legs") or None
         gain_kind = (data.get("gain_kind") or "v").lower()
         gain_amount = int(data.get("gain_amount") or 0)
         if resp == "skip":
             game._log_game_event(
                 f"{game._player_label(player_id)} declined event \"{name}\"."
+            )
+            _mark_concurrent_player_done(game, player_id, response)
+            return
+        if pay_legs:
+            if resp not in ("accept", "pay", "confirm", "yes"):
+                raise ValueError("Send 'accept' to pay or 'skip' to decline.")
+            legs = [(str(k).lower(), int(a)) for k, a in pay_legs]
+            for k, a in legs:
+                if k not in self._SCORE or int(getattr(player, self._SCORE[k], 0) or 0) < a:
+                    raise ValueError("You cannot afford this.")
+            before = game._player_scores_line(player)
+            for k, a in legs:
+                setattr(player, self._SCORE[k], int(getattr(player, self._SCORE[k], 0)) - a)
+            setattr(player, self._SCORE[gain_kind],
+                    int(getattr(player, self._SCORE[gain_kind], 0)) + gain_amount)
+            after = game._player_scores_line(player)
+            paid = "+".join(f"{a}{k}" for k, a in legs)
+            game._log_game_event(
+                f"{game._player_label(player_id)} resolved event \"{name}\" "
+                f"(paid {paid}); scores {before} -> {after}"
             )
             _mark_concurrent_player_done(game, player_id, response)
             return

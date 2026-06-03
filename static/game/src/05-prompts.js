@@ -770,9 +770,11 @@ function renderConcurrentEventSelfConvert(state, concurrent) {
   const name = (data.name || 'Event').toString();
   const payKind = (data.pay_kind || 'g').toString();
   const payAmount = Number(data.pay_amount || 0);
+  const payLegs = Array.isArray(data.pay_legs) ? data.pay_legs : null;
   const gainKind = (data.gain_kind || 'v').toString();
   const gainAmount = Number(data.gain_amount || 0);
   const labels = { g: 'gold', s: 'strength', m: 'magic', v: 'victory points' };
+  const legsLabel = payLegs ? payLegs.map(([k, a]) => `${a} ${labels[k] || k}`).join(' + ') : '';
   const waitingLabels = pendingPlayerLabels(state, pending);
 
   const body = mk('prompt-modal-body');
@@ -794,7 +796,10 @@ function renderConcurrentEventSelfConvert(state, concurrent) {
   }
 
   const desc = mk('prompt-modal-note');
-  desc.textContent = `Pay ${payAmount} ${payKind === 'wild' ? '(your choice of gold/strength/magic)' : (labels[payKind] || payKind)} for ${gainAmount} ${labels[gainKind] || gainKind}?`;
+  const costText = payLegs
+    ? legsLabel
+    : `${payAmount} ${payKind === 'wild' ? '(your choice of gold/strength/magic)' : (labels[payKind] || payKind)}`;
+  desc.textContent = `Pay ${costText} for ${gainAmount} ${labels[gainKind] || gainKind}?`;
   body.appendChild(desc);
 
   const post = (response, message) => confirmAndPostGameAction(
@@ -803,7 +808,10 @@ function renderConcurrentEventSelfConvert(state, concurrent) {
   );
 
   const row = mk('prompt-choice-card-actions');
-  if (payKind === 'wild') {
+  if (payLegs) {
+    row.appendChild(promptButton(`Pay ${legsLabel}`, () =>
+      post('accept', `Pay ${legsLabel} for ${gainAmount} ${labels[gainKind] || gainKind}.`)));
+  } else if (payKind === 'wild') {
     ['g', 's', 'm'].forEach(r => {
       row.appendChild(promptButton(`Pay ${payAmount} ${labels[r]}`, () =>
         post(r, `Pay ${payAmount} ${labels[r]} for ${gainAmount} ${labels[gainKind] || gainKind}.`)));

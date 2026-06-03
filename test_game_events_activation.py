@@ -872,5 +872,195 @@ class ShadowvaleSaveLoadTests(unittest.TestCase):
                           has_activation=True)
 
 
+# --- Kingsguard / Undeadsamurai events -------------------------------------
+
+class BogWitchProposalTests(unittest.TestCase):
+    """7 Bog Witch's Proposal: all may pay 3 Magic for 2 VP."""
+
+    def _event(self):
+        return make_event(7, "Bog Witch's Proposal",
+                          activation_effect="all_may self_convert pay=m:3 gain=v:2",
+                          has_activation=True)
+
+    def test_only_affordable_players_participate(self):
+        game, players = make_game(3, magic=3)
+        players[2].magic_score = 2
+        fire(game, self._event(), players[0].player_id)
+        ca = game.concurrent_action
+        self.assertEqual(ca["kind"], "event_self_convert")
+        self.assertCountEqual(ca["pending"], [players[0].player_id, players[1].player_id])
+
+    def test_pay_magic_for_vp(self):
+        game, players = make_game(2, magic=5)
+        fire(game, self._event(), players[0].player_id)
+        game.submit_concurrent_action(players[0].player_id, "accept", kind="event_self_convert")
+        game.submit_concurrent_action(players[1].player_id, "skip", kind="event_self_convert")
+        self.assertEqual(players[0].magic_score, 2)
+        self.assertEqual(players[0].victory_score, 2)
+        self.assertEqual(players[1].victory_score, 0)
+        self.assertIsNone(game.concurrent_action)
+
+
+class QuellRebellionTests(unittest.TestCase):
+    """9 Quell Rebellion: all may pay 3 Strength for 2 VP."""
+
+    def test_pay_strength_for_vp(self):
+        game, players = make_game(2, strength=4)
+        ev = make_event(9, "Quell Rebellion",
+                        activation_effect="all_may self_convert pay=s:3 gain=v:2",
+                        has_activation=True)
+        fire(game, ev, players[0].player_id)
+        game.submit_concurrent_action(players[0].player_id, "accept", kind="event_self_convert")
+        game.submit_concurrent_action(players[1].player_id, "skip", kind="event_self_convert")
+        self.assertEqual(players[0].strength_score, 1)
+        self.assertEqual(players[0].victory_score, 2)
+
+
+class TaxCollectionTests(unittest.TestCase):
+    """14 Tax Collection: all may pay 3 Gold for 2 VP."""
+
+    def test_pay_gold_for_vp(self):
+        game, players = make_game(2, gold=5)
+        ev = make_event(14, "Tax Collection",
+                        activation_effect="all_may self_convert pay=g:3 gain=v:2",
+                        has_activation=True)
+        fire(game, ev, players[0].player_id)
+        game.submit_concurrent_action(players[0].player_id, "accept", kind="event_self_convert")
+        game.submit_concurrent_action(players[1].player_id, "skip", kind="event_self_convert")
+        self.assertEqual(players[0].gold_score, 2)
+        self.assertEqual(players[0].victory_score, 2)
+
+
+class TributeToTheKingTests(unittest.TestCase):
+    """15 Tribute to the King: all may pay 1 Gold + 1 Strength + 1 Magic for 2 VP."""
+
+    def _event(self):
+        return make_event(15, "Tribute to the King",
+                          activation_effect="all_may self_convert pay=g:1,s:1,m:1 gain=v:2",
+                          has_activation=True)
+
+    def test_only_players_who_can_pay_all_legs_participate(self):
+        game, players = make_game(3, gold=5, strength=5, magic=5)
+        players[2].magic_score = 0  # missing one leg -> excluded
+        fire(game, self._event(), players[0].player_id)
+        ca = game.concurrent_action
+        self.assertEqual(ca["kind"], "event_self_convert")
+        self.assertEqual(ca["data"]["pay_legs"], [["g", 1], ["s", 1], ["m", 1]])
+        self.assertCountEqual(ca["pending"], [players[0].player_id, players[1].player_id])
+
+    def test_accept_pays_every_leg_and_grants_vp(self):
+        game, players = make_game(2, gold=4, strength=4, magic=4)
+        fire(game, self._event(), players[0].player_id)
+        game.submit_concurrent_action(players[0].player_id, "accept", kind="event_self_convert")
+        game.submit_concurrent_action(players[1].player_id, "skip", kind="event_self_convert")
+        self.assertEqual(players[0].gold_score, 3)
+        self.assertEqual(players[0].strength_score, 3)
+        self.assertEqual(players[0].magic_score, 3)
+        self.assertEqual(players[0].victory_score, 2)
+        self.assertEqual(players[1].victory_score, 0)
+        self.assertIsNone(game.concurrent_action)
+
+    def test_resource_choice_not_accepted_for_compound(self):
+        game, players = make_game(2, gold=4, strength=4, magic=4)
+        fire(game, self._event(), players[0].player_id)
+        with self.assertRaises(ValueError):
+            game.submit_concurrent_action(players[0].player_id, "g", kind="event_self_convert")
+
+    def test_skipped_when_nobody_can_afford(self):
+        game, players = make_game(2, gold=0, strength=4, magic=4)
+        fire(game, self._event(), players[0].player_id)
+        self.assertIsNone(game.concurrent_action)
+
+
+class GiftFromTheFaeTests(unittest.TestCase):
+    """8 Gift from the Fae: active gains 2 Magic, others gain 1 Magic."""
+
+    def test_active_gains_two_others_gain_one(self):
+        game, players = make_game(3, magic=0)
+        ev = make_event(8, "Gift from the Fae",
+                        activation_effect="active_gain m 2 + others_gain m 1",
+                        has_activation=True)
+        fire(game, ev, players[0].player_id)
+        self.assertEqual(players[0].magic_score, 2)
+        self.assertEqual(players[1].magic_score, 1)
+        self.assertEqual(players[2].magic_score, 1)
+        self.assertIsNone(game.concurrent_action)
+
+
+class QueensDayFestivalTests(unittest.TestCase):
+    """13 Queen's Day Festival: active gains 2 Gold, others gain 1 Gold."""
+
+    def test_active_gains_two_others_gain_one(self):
+        game, players = make_game(3, gold=0)
+        ev = make_event(13, "Queen's Day Festival",
+                        activation_effect="active_gain g 2 + others_gain g 1",
+                        has_activation=True)
+        fire(game, ev, players[1].player_id)
+        self.assertEqual(players[1].gold_score, 2)
+        self.assertEqual(players[0].gold_score, 1)
+        self.assertEqual(players[2].gold_score, 1)
+
+
+class BloodPlagueTests(unittest.TestCase):
+    """12 Blood Plague: all players immediately lose 2 Strength."""
+
+    def test_all_lose_two_strength(self):
+        game, players = make_game(3, strength=5)
+        ev = make_event(12, "Blood Plague",
+                        activation_effect="all_lose s 2",
+                        has_activation=True)
+        fire(game, ev, players[0].player_id)
+        for p in players:
+            self.assertEqual(p.strength_score, 3)
+
+    def test_strength_floored_at_zero(self):
+        game, players = make_game(2, strength=1)
+        ev = make_event(12, "Blood Plague",
+                        activation_effect="all_lose s 2",
+                        has_activation=True)
+        fire(game, ev, players[0].player_id)
+        for p in players:
+            self.assertEqual(p.strength_score, 0)
+
+
+class TwinBanditsOfPythTests(unittest.TestCase):
+    """11 Twin Bandits of Pyth (passive): doubles -> all lose 1 g/s/m."""
+
+    def _event(self):
+        return make_event(11, "Twin Bandits of Pyth",
+                          passive_effect="roll.on_event doubles all_lose g 1 + all_lose s 1 + all_lose m 1",
+                          has_passive=True)
+
+    def test_doubles_drain_one_of_each(self):
+        game, players = make_game(3, gold=5, strength=5, magic=5)
+        game.citizen_grid[0].append(self._event())
+        game.roll_events = ["doubles"]
+        game.events.apply_board_event_passive_roll_effects()
+        for p in players:
+            self.assertEqual(p.gold_score, 4)
+            self.assertEqual(p.strength_score, 4)
+            self.assertEqual(p.magic_score, 4)
+
+    def test_no_doubles_no_loss(self):
+        game, players = make_game(2, gold=5, strength=5, magic=5)
+        game.citizen_grid[0].append(self._event())
+        game.roll_events = []
+        game.events.apply_board_event_passive_roll_effects()
+        for p in players:
+            self.assertEqual(p.gold_score, 5)
+            self.assertEqual(p.strength_score, 5)
+            self.assertEqual(p.magic_score, 5)
+
+    def test_resources_floored_at_zero(self):
+        game, players = make_game(2, gold=0, strength=1, magic=0)
+        game.citizen_grid[0].append(self._event())
+        game.roll_events = ["doubles"]
+        game.events.apply_board_event_passive_roll_effects()
+        for p in players:
+            self.assertEqual(p.gold_score, 0)
+            self.assertEqual(p.strength_score, 0)
+            self.assertEqual(p.magic_score, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

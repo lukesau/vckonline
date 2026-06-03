@@ -2788,8 +2788,10 @@
                 const name = (data.name || 'Event').toString();
                 const payKind = (data.pay_kind || 'g').toString();
                 const payAmount = Number(data.pay_amount || 0);
+                const payLegs = Array.isArray(data.pay_legs) ? data.pay_legs : null;
                 const gainKind = (data.gain_kind || 'v').toString();
                 const gainAmount = Number(data.gain_amount || 0);
+                const legsLabel = payLegs ? payLegs.map(([k, a]) => `${a}${k}`).join('+') : '';
                 const waitingLabels = pendingPlayerLabels(gameState, pending);
 
                 const statusLine = `<div class="mini" style="margin-bottom:8px;">
@@ -2806,7 +2808,9 @@
                 }
 
                 let payButtons;
-                if (payKind === 'wild') {
+                if (payLegs) {
+                    payButtons = `<button type="button" onclick="submitConcurrentAction('event_self_convert', 'accept')">Pay ${escapeHtml(legsLabel)}</button>`;
+                } else if (payKind === 'wild') {
                     payButtons = ['g', 's', 'm'].map(r => {
                         const long = { g: 'gold', s: 'strength', m: 'magic' }[r];
                         return `<button type="button" onclick="submitConcurrentAction('event_self_convert', '${r}')">Pay ${payAmount} ${long}</button>`;
@@ -2815,10 +2819,11 @@
                     payButtons = `<button type="button" onclick="submitConcurrentAction('event_self_convert', 'accept')">Pay ${payAmount}${escapeHtml(payKind)}</button>`;
                 }
 
+                const costLabel = payLegs ? legsLabel : `${payAmount}${payKind === 'wild' ? ' (your choice of g/s/m)' : escapeHtml(payKind)}`;
                 panel.innerHTML = `
                     <div style="padding:10px;border:1px solid #ddd;border-radius:8px;background:#eef7ff;">
                         ${statusLine}
-                        <div style="font-weight:800;margin-bottom:8px;">${escapeHtml(name)}: pay ${payAmount}${payKind === 'wild' ? ' (your choice of g/s/m)' : escapeHtml(payKind)} for ${gainAmount}${escapeHtml(gainKind)}?</div>
+                        <div style="font-weight:800;margin-bottom:8px;">${escapeHtml(name)}: pay ${costLabel} for ${gainAmount}${escapeHtml(gainKind)}?</div>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
                             ${payButtons}
                             <button type="button" onclick="submitConcurrentAction('event_self_convert', 'skip')">Decline</button>

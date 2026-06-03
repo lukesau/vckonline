@@ -65,6 +65,36 @@ def _parse_res_amount(spec):
     return kind, n
 
 
+def _parse_pay_spec(raw):
+    """Parse a self_convert ``pay=`` value into a normalized payment mode.
+
+    Returns one of:
+      ("single", kind, amount)        e.g. "m:3"
+      ("wild", None, amount)          e.g. "wild:5"  (player picks g/s/m)
+      ("compound", [(k, a), ...], 0)  e.g. "g:1,s:1,m:1" (pay every leg)
+    or None if malformed.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    if "," in raw:
+        legs = []
+        for part in raw.split(","):
+            k, a = _parse_res_amount(part.strip())
+            if not k or k in ("wild", "v") or a <= 0:
+                return None
+            legs.append((k, a))
+        return ("compound", legs, 0) if legs else None
+    kind, amount = _parse_res_amount(raw)
+    if not kind or amount <= 0:
+        return None
+    if kind == "wild":
+        return ("wild", None, amount)
+    if kind == "v":
+        return None
+    return ("single", kind, amount)
+
+
 class EventsEngine:
     def __init__(self, game):
         self.game = game
@@ -351,16 +381,36 @@ class EventsEngine:
 
     def _begin_all_self_convert(self, name, body):
         kv = _parse_domain_effect_kv(body)
-        pay_kind, pay_amount = _parse_res_amount(kv.get("pay", ""))
+        spec = _parse_pay_spec(kv.get("pay", ""))
         gain_kind, gain_amount = _parse_res_amount(kv.get("gain", ""))
-        if not pay_kind or pay_amount <= 0 or gain_kind not in ("g", "s", "m", "v") or gain_amount <= 0:
+        if not spec or gain_kind not in ("g", "s", "m", "v") or gain_amount <= 0:
             self.game._log_game_event(f"Event \"{name}\" self_convert is malformed; skipped.")
             return
+        mode, payload, pay_amount = spec
 
-        def can_afford(p):
-            if pay_kind == "wild":
+        data = {"name": name, "gain_kind": gain_kind, "gain_amount": int(gain_amount)}
+        if mode == "compound":
+            legs = payload
+            data["pay_legs"] = [[k, int(a)] for k, a in legs]
+            cost_label = "+".join(f"{a}{k}" for k, a in legs)
+
+            def can_afford(p):
+                return all(int(getattr(p, _SCORE_ATTR[k], 0) or 0) >= a for k, a in legs)
+        elif mode == "wild":
+            data["pay_kind"] = "wild"
+            data["pay_amount"] = int(pay_amount)
+            cost_label = f"{pay_amount}(g/s/m)"
+
+            def can_afford(p):
                 return any(int(getattr(p, _SCORE_ATTR[r], 0) or 0) >= pay_amount for r in ("g", "s", "m"))
-            return int(getattr(p, _SCORE_ATTR[pay_kind], 0) or 0) >= pay_amount
+        else:  # single
+            pay_kind = payload
+            data["pay_kind"] = pay_kind
+            data["pay_amount"] = int(pay_amount)
+            cost_label = f"{pay_amount}{pay_kind}"
+
+            def can_afford(p):
+                return int(getattr(p, _SCORE_ATTR[pay_kind], 0) or 0) >= pay_amount
 
         targets = self._event_participants(can_afford)
         if not targets:
@@ -370,20 +420,9 @@ class EventsEngine:
             # Should not happen (we only fire when idle) but guard anyway.
             self.game._log_game_event(f"Event \"{name}\" could not start (another prompt active).")
             return
-        self.game.concurrent_action = _new_concurrent_action(
-            "event_self_convert",
-            targets,
-            data={
-                "name": name,
-                "pay_kind": pay_kind,
-                "pay_amount": int(pay_amount),
-                "gain_kind": gain_kind,
-                "gain_amount": int(gain_amount),
-            },
-        )
+        self.game.concurrent_action = _new_concurrent_action("event_self_convert", targets, data=data)
         self.game._log_game_event(
-            f"Event \"{name}\": each player may pay {pay_amount}"
-            f"{'(g/s/m)' if pay_kind == 'wild' else pay_kind} for {gain_amount}{gain_kind}."
+            f"Event \"{name}\": each player may pay {cost_label} for {gain_amount}{gain_kind}."
         )
 
     def _begin_all_banish_for_reward(self, name, body):

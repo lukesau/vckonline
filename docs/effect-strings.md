@@ -92,11 +92,22 @@ queues). Positive gains still reach everyone. Immediate losses floor at 0.
 | Night Terror | activation | `seq all_must banish_center_citizen` | In turn order, each player banishes the top citizen of a chosen center stack |
 | Untapped Potential | activation | `all_gain_per_owned gain=m:1 per=citizen` | Each player immediately gains 1m per owned citizen |
 | Worthy Sacrifice | activation | `seq all_may banish_owned_citizen gain=v:3` | In turn order, each player may banish one owned citizen for 3 VP |
+| Bog Witch's Proposal | activation | `all_may self_convert pay=m:3 gain=v:2` | Each player may pay 3m for 2 VP |
+| Gift from the Fae | activation | `active_gain m 2 + others_gain m 1` | Active player gains 2m; every other player gains 1m |
+| Quell Rebellion | activation | `all_may self_convert pay=s:3 gain=v:2` | Each player may pay 3s for 2 VP |
+| Twin Bandits of Pyth | passive | `roll.on_event doubles all_lose g 1 + all_lose s 1 + all_lose m 1` | While in play: on doubles, all players lose 1g/1s/1m |
+| Blood Plague | activation | `all_lose s 2` | All players immediately lose 2s |
+| Queen's Day Festival | activation | `active_gain g 2 + others_gain g 1` | Active player gains 2g; every other player gains 1g |
+| Tax Collection | activation | `all_may self_convert pay=g:3 gain=v:2` | Each player may pay 3g for 2 VP |
+| Tribute to the King | activation | `all_may self_convert pay=g:1,s:1,m:1 gain=v:2` | Each player may pay 1g + 1s + 1m (all three) for 2 VP |
 
 Notes on reuse:
 
 - `self_convert pay=<r>:N gain=<r>:M` mirrors the domain bank-trade verb;
-  `pay=wild:N` lets each player choose which resource (g/s/m) to spend.
+  `pay=wild:N` lets each player choose which resource (g/s/m) to spend. A
+  **compound** cost `pay=<r>:N,<r>:M,...` (comma-separated, no wild/v legs)
+  requires the player to pay *every* leg together; the prompt is a single
+  accept/decline (no resource substitution).
 - `flip_citizen` reuses the `flip_one_citizen` concurrent handler (Cursed Cavern).
 - `roll.on_event <trigger> <legs>` fires while the event is in play. Legs are
   ` + `-joined `all_lose|all_gain <res> <amt>` clauses; losses skip the resting
