@@ -1421,6 +1421,14 @@ def _serialize_game_for_player(game, viewer_player_id: Optional[str]):
         if not isinstance(p, dict):
             continue
         pid = p.get("player_id")
+        # Per-player projection of every catalog duke's VP against this player's
+        # tableau. Safe for all viewers: it's computed identically for every
+        # duke, so it never reveals which one the player actually owns. Drives
+        # the "list all dukes" view when inspecting an opponent's hidden duke.
+        try:
+            p["duke_vp_table"] = game.endgame.compute_duke_vp_table_for_player(pid)
+        except Exception:
+            p["duke_vp_table"] = []
         if viewer_player_id is None or str(pid) != str(viewer_player_id):
             opponent_dukes = p.get("owned_dukes") or []
             p["owned_dukes"] = [

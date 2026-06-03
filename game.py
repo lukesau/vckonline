@@ -71,6 +71,11 @@ class Game:
         # See `docs/game.md` "Debug mode" section.
         self.debug_mode = bool(game_state.get('debug_mode', False))
         self.player_list = game_state['player_list']
+        # Full duke catalog for this game's config (every duke that could be in
+        # play), snapshot at setup before dealing. Used to surface a per-duke VP
+        # projection list when inspecting an opponent's hidden duke. Public
+        # information: it never records who owns which duke.
+        self.all_dukes = list(game_state.get('all_dukes') or [])
         self.monster_grid = game_state['monster_grid']
         self.monster_stack_areas = list(game_state.get('monster_stack_areas') or [])
         self.citizen_grid = game_state['citizen_grid']

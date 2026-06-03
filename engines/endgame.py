@@ -213,6 +213,45 @@ class EndgameEngine:
             "duke_vp_breakdown": breakdown,
         }
 
+    def compute_duke_vp_table_for_player(self, player_id):
+        """Project, for EVERY duke in the public catalog, the end-game VP this
+        player would score with that duke given their current tableau.
+
+        Returns a list (sorted by total VP, descending) of
+        {duke_id, name, base_vp, duke_vp, total_vp, duke_vp_breakdown}. Used by
+        the duke inspect modal: when looking at an opponent's hidden duke we can
+        list each catalog duke's projected VP without revealing which one they
+        actually own (every duke is projected identically). Returns [] when no
+        catalog is available (e.g. legacy saves)."""
+        player = None
+        for p in self.game.player_list:
+            if getattr(p, "player_id", None) == player_id:
+                player = p
+                break
+        catalog = list(getattr(self.game, "all_dukes", None) or [])
+        if player is None or not catalog:
+            return []
+        # Roles / monster attributes only depend on the player, so compute them
+        # once and reuse across every duke projection.
+        roles = player.calc_roles()
+        monster_attrs = self.game.owned_monster_attributes(player.player_id)
+        base_vp = int(player.victory_score)
+        table = []
+        for duke in catalog:
+            duke_vp, breakdown = self._compute_duke_breakdown(
+                player, duke, roles=roles, monster_attrs=monster_attrs
+            )
+            table.append({
+                "duke_id": duke.duke_id,
+                "name": duke.name or "Duke",
+                "base_vp": base_vp,
+                "duke_vp": int(duke_vp),
+                "total_vp": base_vp + int(duke_vp),
+                "duke_vp_breakdown": breakdown,
+            })
+        table.sort(key=lambda e: (-e["total_vp"], str(e["name"])))
+        return table
+
     def _calculate_final_scores(self):
         """Compute final VP for each player including Duke multipliers. Returns ranked list."""
         self.game.unflip_all_citizens_for_final_scoring()

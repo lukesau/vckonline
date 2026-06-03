@@ -3029,6 +3029,75 @@ select.lobby-input:disabled {
   margin-top: 2px;
 }
 
+/* Hidden-opponent-duke modal: collapsible list of every catalog duke and the
+   VP it would score for that player's tableau. Each row expands to the same
+   .duke-vp-breakdown lines used by the own-duke projection. */
+.duke-vp-table {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.duke-vp-table-row {
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+.duke-vp-table-row.is-you {
+  background: rgba(240, 192, 64, 0.08);
+  border-color: rgba(240, 192, 64, 0.22);
+}
+.duke-vp-table-row-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.duke-vp-table-row-header:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: -2px;
+}
+.duke-vp-table-caret {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform 0.12s ease;
+}
+.duke-vp-table-row.is-expanded .duke-vp-table-caret {
+  transform: rotate(90deg);
+}
+.duke-vp-table-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.duke-vp-table-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.duke-vp-table-vp {
+  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--vp);
+}
+.duke-vp-table-detail {
+  display: none;
+  padding: 0 10px 10px 28px;
+}
+.duke-vp-table-row.is-expanded .duke-vp-table-detail {
+  display: block;
+}
+
 .card-modal--market .card-modal-info {
   flex: 0 1 auto;
   min-width: 0;

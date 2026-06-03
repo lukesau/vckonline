@@ -93,6 +93,10 @@ class GameObjectEncoder(JSONEncoder):
                 "game_id": obj.game_id,
                 "debug_mode": bool(getattr(obj, "debug_mode", False)),
                 "player_list": obj.player_list,
+                # Public duke catalog (multipliers only, no ownership). Safe to
+                # send to every client; the duke inspect modal lists each duke's
+                # projected VP against a player's tableau from this.
+                "all_dukes": [d.to_dict() for d in (getattr(obj, "all_dukes", None) or [])],
                 "monster_grid": obj.monster_grid,
                 "citizen_grid": obj.citizen_grid,
                 "domain_grid": obj.domain_grid,
@@ -248,6 +252,9 @@ def deserialize_save_dict_to_game(data):
     ]
     state["undead_samurai_pool"] = [
         _rehydrate_card_from_dict(c) for c in (state.get("undead_samurai_pool") or [])
+    ]
+    state["all_dukes"] = [
+        _rehydrate_card_from_dict(c) for c in (state.get("all_dukes") or [])
     ]
 
     return Game(state)

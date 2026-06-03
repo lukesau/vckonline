@@ -624,6 +624,12 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
                 })
             ]
         chosen_slot = _choose_slot_starter(slot_candidates, preset, draft_selections)
+        # Snapshot the full duke pool for this game's config (post-ban,
+        # post-expansion-filter) BEFORE dealing pops cards off the stack. This
+        # is the public catalog the client uses to list "every duke and the VP
+        # it would score" against a player's tableau. It carries no ownership
+        # info, so surfacing it to all players leaks nothing.
+        all_dukes = list(duke_stack)
         for player in player_list:
             for starter in fixed_starters:
                 player.owned_starters.append(starter)
@@ -768,6 +774,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             "debug_mode": bool(debug_mode),
             "pending_required_choice": None,
             "player_list": player_list,
+            "all_dukes": all_dukes,
             "monster_grid": monster_grid,
             "monster_stack_areas": monster_stack_areas,
             "undead_samurai_pool": undead_samurai_pool,

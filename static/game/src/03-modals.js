@@ -623,7 +623,7 @@ function makeInspectModalImageEl(card) {
   return img;
 }
 
-function fillCardModalInspectInfo(infoEl, card) {
+function fillCardModalInspectInfo(infoEl, card, ownerPlayerId) {
   infoEl.innerHTML = '';
   const heading = document.createElement('h2');
   heading.className = 'modal-card-name';
@@ -641,16 +641,23 @@ function fillCardModalInspectInfo(infoEl, card) {
   infoEl.appendChild(heading);
 
   if (cardObscuredFromViewer(card)) {
+    const isHiddenDuke = card?.duke_id != null;
+    const dukeTableData = isHiddenDuke && ownerDukeVpTable(ownerPlayerId).length;
     const note = document.createElement('p');
     note.className = 'modal-card-text';
     if (isDomainStackFaceDown(card)) {
       note.textContent = 'The next domain in this pile stays face-down until the end of the turn of the player who built from here.';
-    } else if (card?.duke_id != null) {
-      note.textContent = "This duke is hidden from opponents. You'll see its identity at end-of-game scoring.";
+    } else if (isHiddenDuke) {
+      note.textContent = dukeTableData
+        ? "This duke is hidden, but here's how every duke would score for this tableau right now."
+        : "This duke is hidden from opponents. You'll see its identity at end-of-game scoring.";
     } else {
       note.textContent = 'This card is not visible to you right now.';
     }
     infoEl.appendChild(note);
+    if (isHiddenDuke) {
+      appendOpponentDukeVpTable(infoEl, ownerPlayerId);
+    }
   } else {
     appendCardModalStatRows(infoEl, card);
     if (card.text) {
@@ -721,6 +728,133 @@ function appendDukeVpProjectionBlock(infoEl, dukeCard) {
   summary.textContent =
     `${Number(proj.base_vp || 0)} base + ${Number(proj.duke_vp || 0)} Duke = ${Number(proj.total_vp || 0)} VP`;
   wrap.appendChild(summary);
+
+  infoEl.appendChild(wrap);
+}
+
+function playerFromState(playerId) {
+  const state = latestGameState;
+  if (!state || playerId == null) return null;
+  const players = state.player_list || [];
+  return players.find(p => idsMatch(p.player_id, playerId)) || null;
+}
+
+function ownerDukeVpTable(ownerPlayerId) {
+  const owner = playerFromState(ownerPlayerId);
+  return owner && Array.isArray(owner.duke_vp_table) ? owner.duke_vp_table : [];
+}
+
+// ── Hidden opponent duke: "every duke vs this tableau" VP list ────────────
+// When inspecting an opponent's face-down duke we can't reveal which duke they
+// hold, so instead we list every catalog duke and the VP it would score for
+// their current tableau (server-computed via `duke_vp_table`, identical math
+// for every duke so nothing leaks). The one row that maps to the *viewer's*
+// own duke is swapped to a "You" row showing the viewer's own projection
+// (their tableau), matching what they'd see inspecting their own duke.
+function appendOpponentDukeVpTable(infoEl, ownerPlayerId) {
+  const table = ownerDukeVpTable(ownerPlayerId);
+  if (!table.length) return;
+
+  const me = playerFromState(PLAYER_ID);
+  const myDuke = me && Array.isArray(me.owned_dukes) && me.owned_dukes.length ? me.owned_dukes[0] : null;
+  const myDukeId = myDuke && myDuke.duke_id != null ? myDuke.duke_id : null;
+  const myProj = me && me.duke_vp_projection ? me.duke_vp_projection : null;
+
+  const rows = table.map(entry => {
+    if (myDukeId != null && entry.duke_id === myDukeId) {
+      return {
+        isYou: true,
+        name: entry.name,
+        total_vp: myProj ? Number(myProj.total_vp || 0) : Number(entry.total_vp || 0),
+        breakdown: myProj && Array.isArray(myProj.duke_vp_breakdown)
+          ? myProj.duke_vp_breakdown
+          : (entry.duke_vp_breakdown || []),
+      };
+    }
+    return {
+      isYou: false,
+      name: entry.name,
+      total_vp: Number(entry.total_vp || 0),
+      breakdown: Array.isArray(entry.duke_vp_breakdown) ? entry.duke_vp_breakdown : [],
+    };
+  });
+  rows.sort((a, b) => (b.total_vp - a.total_vp) || String(a.name).localeCompare(String(b.name)));
+
+  const wrap = mk('duke-vp-table');
+  rows.forEach(r => {
+    const row = mk('duke-vp-table-row');
+    if (r.isYou) row.classList.add('is-you');
+
+    const header = mk('duke-vp-table-row-header');
+    header.setAttribute('role', 'button');
+    header.tabIndex = 0;
+    header.setAttribute('aria-expanded', 'false');
+
+    const caret = mk('duke-vp-table-caret');
+    caret.setAttribute('aria-hidden', 'true');
+    caret.textContent = '\u203a';
+    header.appendChild(caret);
+
+    const nameWrap = mk('duke-vp-table-name');
+    const nm = document.createElement('span');
+    nm.className = 'duke-vp-table-name-text';
+    nm.textContent = r.name || 'Duke';
+    nameWrap.appendChild(nm);
+    if (r.isYou) {
+      const tag = mk('prompt-modal-resources-you-tag');
+      tag.textContent = 'You';
+      nameWrap.appendChild(tag);
+    }
+    header.appendChild(nameWrap);
+
+    const vp = mk('duke-vp-table-vp');
+    vp.textContent = `${r.total_vp} VP`;
+    header.appendChild(vp);
+    row.appendChild(header);
+
+    const detail = mk('duke-vp-table-detail');
+    const lines = Array.isArray(r.breakdown) ? r.breakdown : [];
+    if (lines.length) {
+      const list = mk('duke-vp-breakdown');
+      lines.forEach(line => {
+        const li = mk('duke-vp-line');
+        const top = mk('duke-vp-line-top');
+        const lbl = mk('duke-vp-line-label');
+        lbl.textContent = line.label || '';
+        const val = mk('duke-vp-line-vp');
+        val.textContent = `+${Number(line.vp || 0)} VP`;
+        top.appendChild(lbl);
+        top.appendChild(val);
+        li.appendChild(top);
+        if (line.detail) {
+          const det = mk('duke-vp-line-detail');
+          det.textContent = line.detail;
+          li.appendChild(det);
+        }
+        list.appendChild(li);
+      });
+      detail.appendChild(list);
+    } else {
+      const empty = mk('duke-vp-projection-empty');
+      empty.textContent = 'No duke VP for this tableau.';
+      detail.appendChild(empty);
+    }
+    row.appendChild(detail);
+
+    const toggle = () => {
+      const open = row.classList.toggle('is-expanded');
+      header.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    header.addEventListener('click', toggle);
+    header.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    wrap.appendChild(row);
+  });
 
   infoEl.appendChild(wrap);
 }
@@ -852,10 +986,15 @@ document.addEventListener('click', e => {
     openBoardMarketStackModal(card);
     return;
   }
-  openCardModal(card);
+  // A hidden opponent duke renders as an anonymous card back, so the card data
+  // carries no owner. Recover the owning seat so the inspect modal can list
+  // each catalog duke's projected VP against that player's tableau.
+  const seatEl = cardEl.closest('.seat[data-player-id]');
+  const ownerPlayerId = seatEl ? seatEl.dataset.playerId : null;
+  openCardModal(card, ownerPlayerId);
 });
 
-function openCardModal(card) {
+function openCardModal(card, ownerPlayerId) {
   if (getVisiblePromptOverlay()) return;
   if (document.getElementById('card-modal-overlay')) return;
 
@@ -870,14 +1009,14 @@ function openCardModal(card) {
   if (img) modal.appendChild(img);
 
   const info = mk('card-modal-info');
-  fillCardModalInspectInfo(info, card);
+  fillCardModalInspectInfo(info, card, ownerPlayerId);
   modal.appendChild(info);
 
   // Re-render the info panel whenever the global game state updates so
   // anything live-derived (e.g. the duke VP projection) stays current.
   // The image element doesn't depend on game state, so we leave it alone.
   overlay._refreshFromLiveState = () => {
-    fillCardModalInspectInfo(info, card);
+    fillCardModalInspectInfo(info, card, ownerPlayerId);
   };
 
   overlay.appendChild(modal);
