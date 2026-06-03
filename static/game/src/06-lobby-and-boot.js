@@ -402,8 +402,9 @@ const LOBBY_PRESET_SHORT_LABELS = {
 };
 
 // ── Draft mode client state ──────────────────────────────────────────────────
-let _draftPhaseKey = '';      // 'monsters' or 'citizens_1' etc — reset votes on change
+let _draftPhaseKey = '';      // 'monsters', 'starters', or 'citizens_1' etc — reset votes on change
 let _draftMonsterVotes = [];  // area names the player has locally selected (up to 5)
+let _draftStarterVote = null; // starter_id the player has locally selected
 let _draftCitizenVote = null; // citizen_id the player has locally selected
 let _draftVoteSubmitted = false;
 let _draftTimerInterval = null;
@@ -432,6 +433,7 @@ function _startDraftTimer(timerEl) {
 function _getDraftPhaseKey(draft) {
   if (!draft) return '';
   if (draft.phase === 'monsters') return 'monsters';
+  if (draft.phase === 'starters') return 'starters';
   if (draft.phase === 'citizens') return `citizens_${draft.current_roll}`;
   return '';
 }
@@ -457,11 +459,15 @@ function handleDraftState(draft, selfId) {
   if (phaseKey !== _draftPhaseKey) {
     _draftPhaseKey = phaseKey;
     _draftMonsterVotes = [];
+    _draftStarterVote = null;
     _draftCitizenVote = null;
     _draftVoteSubmitted = false;
     // Pre-fill from server's confirmed vote so a reconnecting player sees their submission
     if (draft.phase === 'monsters' && draft.my_monster_votes && draft.my_monster_votes.length > 0) {
       _draftMonsterVotes = [...draft.my_monster_votes];
+      _draftVoteSubmitted = true;
+    } else if (draft.phase === 'starters' && draft.my_starter_vote != null) {
+      _draftStarterVote = draft.my_starter_vote;
       _draftVoteSubmitted = true;
     } else if (draft.phase === 'citizens' && draft.my_citizen_vote != null) {
       _draftCitizenVote = draft.my_citizen_vote;
@@ -469,6 +475,8 @@ function handleDraftState(draft, selfId) {
     }
   } else {
     if (draft.phase === 'monsters' && draft.my_monster_votes && draft.my_monster_votes.length > 0) {
+      _draftVoteSubmitted = true;
+    } else if (draft.phase === 'starters' && draft.my_starter_vote != null) {
       _draftVoteSubmitted = true;
     } else if (draft.phase === 'citizens' && draft.my_citizen_vote != null) {
       _draftVoteSubmitted = true;
@@ -495,6 +503,11 @@ function handleDraftState(draft, selfId) {
     const lr = draft.last_result;
     if (lr && lr.phase === 'monsters' && lr.selected && lr.selected.length) {
       lastResultEl.textContent = `Monsters selected: ${lr.selected.join(', ')}`;
+    } else if (lr && lr.phase === 'starters' && lr.winner_id != null) {
+      const allS = draft.available_starters || [];
+      const winner = allS.find(s => s.id === lr.winner_id);
+      const name = winner ? winner.name : `Starter #${lr.winner_id}`;
+      lastResultEl.textContent = `Third starter: ${name} selected`;
     } else if (lr && lr.phase === 'citizens' && lr.winner_id != null) {
       const roll = lr.roll;
       // Find the citizen name from available data
@@ -515,6 +528,14 @@ function handleDraftState(draft, selfId) {
       : 'Click up to 5 stacks to vote for them, then submit';
     _renderMonsterGrid(draft, gridEl, selfId);
     _updateDraftMonstersFooter(draft, statusEl, voteBtn, selfId);
+  } else if (draft.phase === 'starters') {
+    if (titleEl) titleEl.textContent = 'Starter Draft';
+    if (progressEl) progressEl.textContent = 'Choose the third starter for this game';
+    if (instrEl) instrEl.textContent = _draftVoteSubmitted
+      ? 'Vote submitted — waiting for others or timer'
+      : 'Pick Herald, Margrave, or another third-slot starter';
+    _renderStarterGrid(draft, gridEl, selfId);
+    _updateDraftStartersFooter(draft, statusEl, voteBtn, selfId);
   } else if (draft.phase === 'citizens') {
     const round = draft.citizen_draft_round || 1;
     const total = draft.citizen_draft_total || 10;
@@ -651,6 +672,93 @@ function _renderMonsterGrid(draft, gridEl, selfId) {
 
     gridEl.appendChild(wrap);
   });
+}
+
+function _starterDraftSubtitle(s) {
+  const parts = [];
+  const trig = (s.activation_trigger || '').toString();
+  if (trig) parts.push(trig.replace(/_/g, ' '));
+  if (s.has_special_payout_on_turn || s.has_special_payout_off_turn) {
+    const sp = (s.special_payout_on_turn || s.special_payout_off_turn || '').toString();
+    if (sp && sp !== '0') parts.push(sp);
+  }
+  const gOn = Number(s.gold_payout_on_turn || 0);
+  const gOff = Number(s.gold_payout_off_turn || 0);
+  const sOn = Number(s.strength_payout_on_turn || 0);
+  const sOff = Number(s.strength_payout_off_turn || 0);
+  const mOn = Number(s.magic_payout_on_turn || 0);
+  const mOff = Number(s.magic_payout_off_turn || 0);
+  if (gOn || gOff || sOn || sOff || mOn || mOff) {
+    parts.push(`on ${gOn}/${sOn}/${mOn} off ${gOff}/${sOff}/${mOff}`);
+  }
+  return parts.join(' · ') || 'Doubles / no-payout slot';
+}
+
+function _renderStarterGrid(draft, gridEl, selfId) {
+  const starters = draft.available_starters || [];
+  gridEl.innerHTML = '';
+
+  starters.forEach(s => {
+    const card = document.createElement('div');
+    card.className = 'draft-card';
+    const isSelected = _draftStarterVote === s.id;
+    if (isSelected) card.classList.add('draft-card--selected');
+    if (_draftVoteSubmitted) card.classList.add('draft-card--locked');
+
+    const img = document.createElement('img');
+    img.className = 'draft-card-img';
+    img.src = `/card-image/starter/${s.id}`;
+    img.alt = s.name;
+    img.loading = 'lazy';
+    card.appendChild(img);
+
+    const label = document.createElement('div');
+    label.className = 'draft-card-label';
+    label.textContent = s.name;
+    card.appendChild(label);
+
+    const sub = document.createElement('div');
+    sub.className = 'draft-card-label';
+    sub.style.fontSize = '10px';
+    sub.style.opacity = '0.85';
+    sub.textContent = _starterDraftSubtitle(s);
+    card.appendChild(sub);
+
+    if (s.vote_count > 0) {
+      const badge = document.createElement('div');
+      badge.className = 'draft-vote-badge';
+      badge.textContent = s.vote_count;
+      card.appendChild(badge);
+    }
+
+    if (!_draftVoteSubmitted) {
+      card.addEventListener('click', () => {
+        _draftStarterVote = s.id;
+        _renderStarterGrid(draft, gridEl, selfId);
+        const statusEl = document.getElementById('draft-vote-status');
+        const voteBtn = document.getElementById('draft-vote-btn');
+        _updateDraftStartersFooter(draft, statusEl, voteBtn, selfId);
+      });
+    }
+
+    gridEl.appendChild(card);
+  });
+}
+
+function _updateDraftStartersFooter(draft, statusEl, voteBtn, selfId) {
+  const submitted = draft.votes_submitted_count || 0;
+  const total = draft.total_players || 1;
+  if (statusEl) {
+    if (_draftVoteSubmitted) {
+      statusEl.textContent = `✓ Vote submitted (${submitted}/${total} players voted)`;
+    } else {
+      statusEl.textContent = `${submitted}/${total} players voted`;
+    }
+  }
+  if (voteBtn) {
+    voteBtn.textContent = 'Confirm Vote';
+    voteBtn.disabled = _draftVoteSubmitted || _draftStarterVote == null || !draft.am_participant;
+  }
 }
 
 function _renderCitizenGrid(draft, gridEl, selfId) {
@@ -1546,6 +1654,12 @@ function initLobbyModal() {
           return;
         }
         vote = [..._draftMonsterVotes];
+      } else if (draft.phase === 'starters') {
+        if (_draftStarterVote == null) {
+          showLobbyError('Pick a starter before voting.');
+          return;
+        }
+        vote = _draftStarterVote;
       } else if (draft.phase === 'citizens') {
         if (_draftCitizenVote == null) {
           showLobbyError('Pick a citizen before voting.');

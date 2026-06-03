@@ -132,6 +132,14 @@ def is_unimplemented_domain(row):
     return False
 
 
+def is_unimplemented_starter(row):
+    if row.get("has_special_payout_on_turn") and _is_empty_special(row.get("special_payout_on_turn")):
+        return True
+    if row.get("has_special_payout_off_turn") and _is_empty_special(row.get("special_payout_off_turn")):
+        return True
+    return False
+
+
 def is_unimplemented_event(row):
     if row.get("has_roll_effect") and _is_empty_special(row.get("roll_effect")):
         return True
@@ -174,4 +182,8 @@ def keep_for_random(card_type, row):
         # Dukes have no implementation predicate — they are pure stat
         # multipliers and ship implemented. Image-only filter.
         return has_card_image("duke", row.get("id_dukes"))
+    if card_type == "starter":
+        if is_unimplemented_starter(row):
+            return False
+        return has_card_image("starter", row.get("id_starters"))
     return True

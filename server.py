@@ -587,6 +587,7 @@ async def _hurry_up_apply(game_id: str, deadline: float) -> None:
 # server advances immediately if all players vote before time runs out.
 
 _DRAFT_MONSTER_VOTE_SECONDS = 120
+_DRAFT_STARTER_VOTE_SECONDS = 30
 _DRAFT_CITIZEN_VOTE_SECONDS = 30
 _draft_states: Dict[str, dict] = {}
 _draft_timer_tasks: Dict[str, asyncio.Task] = {}
@@ -618,6 +619,26 @@ def _serialize_monster_area_for_draft(area: str, rows: list, vote_count: int) ->
         "area": area,
         "front_card": _card_dict(front),
         "stack_cards": [_card_dict(r) for r in sorted_rows],
+        "vote_count": vote_count,
+    }
+
+
+def _serialize_starter_for_draft(row: dict, vote_count: int) -> dict:
+    return {
+        "id": int(row["id_starters"]),
+        "name": row["name"],
+        "activation_trigger": row.get("activation_trigger") or "",
+        "gold_payout_on_turn": int(row.get("gold_payout_on_turn", 0)),
+        "gold_payout_off_turn": int(row.get("gold_payout_off_turn", 0)),
+        "strength_payout_on_turn": int(row.get("strength_payout_on_turn", 0)),
+        "strength_payout_off_turn": int(row.get("strength_payout_off_turn", 0)),
+        "magic_payout_on_turn": int(row.get("magic_payout_on_turn", 0)),
+        "magic_payout_off_turn": int(row.get("magic_payout_off_turn", 0)),
+        "has_special_payout_on_turn": bool(row.get("has_special_payout_on_turn", 0)),
+        "has_special_payout_off_turn": bool(row.get("has_special_payout_off_turn", 0)),
+        "special_payout_on_turn": row.get("special_payout_on_turn"),
+        "special_payout_off_turn": row.get("special_payout_off_turn"),
+        "expansion": row.get("expansion"),
         "vote_count": vote_count,
     }
 
@@ -657,13 +678,24 @@ def _serialize_draft_state_for_player(state: dict, player_id: Optional[str]) -> 
     for cid in state["votes_citizens"].values():
         citizen_vote_counts[int(cid)] = citizen_vote_counts.get(int(cid), 0) + 1
 
+    starter_vote_counts: Dict[int, int] = {}
+    for sid in state.get("votes_starters", {}).values():
+        starter_vote_counts[int(sid)] = starter_vote_counts.get(int(sid), 0) + 1
+
     available_monsters = []
     available_citizens = []
+    available_starters = []
 
     if phase == "monsters":
         for area, rows in state["monster_areas"].items():
             available_monsters.append(
                 _serialize_monster_area_for_draft(area, rows, monster_vote_counts.get(area, 0))
+            )
+    elif phase == "starters":
+        for row in state.get("starter_candidates", []):
+            sid = int(row["id_starters"])
+            available_starters.append(
+                _serialize_starter_for_draft(row, starter_vote_counts.get(sid, 0))
             )
     elif phase == "citizens":
         current_roll = state.get("current_roll")
@@ -680,14 +712,18 @@ def _serialize_draft_state_for_player(state: dict, player_id: Optional[str]) -> 
         "timer_end": state.get("timer_end", 0),
         "available_monsters": available_monsters,
         "available_citizens": available_citizens,
+        "available_starters": available_starters,
         "my_monster_votes": list(state["votes_monsters"].get(pid, [])),
         "my_citizen_vote": state["votes_citizens"].get(pid),
+        "my_starter_vote": state.get("votes_starters", {}).get(pid),
         "selected_monster_areas": list(state.get("selected_monster_areas", [])),
         "selected_citizens": {str(k): v for k, v in state.get("selected_citizens", {}).items()},
         "citizen_draft_round": len(state.get("selected_citizens", {})) + (1 if phase == "citizens" else 0),
         "citizen_draft_total": len(state.get("citizen_rolls_all", [])),
         "votes_submitted_count": (
-            len(state["votes_monsters"]) if phase == "monsters" else len(state["votes_citizens"])
+            len(state["votes_monsters"]) if phase == "monsters"
+            else len(state.get("votes_starters", {})) if phase == "starters"
+            else len(state["votes_citizens"])
         ),
         "total_players": len(state["player_ids"]),
         "am_participant": pid in state["player_ids"],
@@ -705,6 +741,21 @@ def _tally_monster_votes(state: dict) -> list:
     _r.shuffle(areas_scored)
     areas_scored.sort(key=lambda x: x[1], reverse=True)
     return [a[0] for a in areas_scored[:5]]
+
+
+def _tally_starter_votes(state: dict) -> Optional[int]:
+    import random as _r
+    vote_counts: Dict[int, int] = {}
+    for sid in state.get("votes_starters", {}).values():
+        vote_counts[int(sid)] = vote_counts.get(int(sid), 0) + 1
+    available = state.get("starter_candidates") or []
+    if not available:
+        return None
+    if not vote_counts:
+        return int(_r.choice(available)["id_starters"])
+    max_votes = max(vote_counts.values())
+    winners = [sid for sid, cnt in vote_counts.items() if cnt == max_votes]
+    return _r.choice(winners)
 
 
 def _tally_citizen_votes(state: dict) -> Optional[int]:
@@ -738,7 +789,7 @@ async def _start_draft(lb: "Lobby"):
     debug_mode = any(bool(getattr(m, "debug_mode", False)) for m in lb.members)
 
     try:
-        monsters_by_area, citizens_by_roll = load_draft_card_pool(n_players)
+        monsters_by_area, citizens_by_roll, starter_candidates = load_draft_card_pool(n_players)
     except Exception as e:
         print(f"[draft] Failed to load card pool for lobby {lobby_id}: {e}")
         for m in lb.members:
@@ -763,6 +814,13 @@ async def _start_draft(lb: "Lobby"):
         await lobby_ws_manager.broadcast_lobby()
         return
 
+    if len(starter_candidates) < 1:
+        print(f"[draft] No third-slot starter candidates for lobby {lobby_id}")
+        for m in lb.members:
+            m.is_ready = False
+        await lobby_ws_manager.broadcast_lobby()
+        return
+
     timer_end = time.time() + _DRAFT_MONSTER_VOTE_SECONDS
     _draft_states[lobby_id] = {
         "lobby_id": lobby_id,
@@ -778,6 +836,9 @@ async def _start_draft(lb: "Lobby"):
         "citizens_by_roll": citizens_by_roll,
         "votes_citizens": {},
         "selected_citizens": {},
+        "starter_candidates": starter_candidates,
+        "votes_starters": {},
+        "selected_starter_id": None,
         "timer_end": timer_end,
         "player_ids": [m.player_id for m in lb.members],
         "last_result": None,
@@ -803,6 +864,13 @@ async def _advance_draft(lobby_id: str):
         selected = _tally_monster_votes(state)
         state["selected_monster_areas"] = selected
         state["last_result"] = {"phase": "monsters", "selected": selected}
+        state["phase"] = "starters"
+        state["votes_starters"] = {}
+
+    elif phase == "starters":
+        winner_id = _tally_starter_votes(state)
+        state["selected_starter_id"] = winner_id
+        state["last_result"] = {"phase": "starters", "winner_id": winner_id}
         rolls = state["citizen_rolls"]
         if not rolls:
             await _finish_draft(lobby_id)
@@ -828,7 +896,13 @@ async def _advance_draft(lobby_id: str):
     else:
         return
 
-    timer_end = time.time() + _DRAFT_CITIZEN_VOTE_SECONDS
+    if state["phase"] == "starters":
+        timer_secs = _DRAFT_STARTER_VOTE_SECONDS
+    elif state["phase"] == "citizens":
+        timer_secs = _DRAFT_CITIZEN_VOTE_SECONDS
+    else:
+        timer_secs = _DRAFT_CITIZEN_VOTE_SECONDS
+    timer_end = time.time() + timer_secs
     state["timer_end"] = timer_end
     await lobby_ws_manager.broadcast_lobby()
     task = asyncio.create_task(_run_draft_timer(lobby_id, timer_end))
@@ -847,6 +921,8 @@ async def _finish_draft(lobby_id: str):
         "monster_areas": state["selected_monster_areas"],
         "citizens": state["selected_citizens"],
     }
+    if state.get("selected_starter_id") is not None:
+        draft_selections["starter_id"] = state["selected_starter_id"]
     debug_mode = state["debug_mode"]
     new_game_id = str(uuid.uuid4())
 
@@ -1183,7 +1259,7 @@ class DraftVoteRequest(BaseModel):
 @app.post("/api/lobby/draft/vote")
 async def submit_draft_vote(request: DraftVoteRequest):
     """Submit a draft vote. `vote` is a list of area names for the monster phase,
-    or a citizen id (integer) for the citizen phase."""
+    a starter id (integer) for the starter phase, or a citizen id for the citizen phase."""
     pid = (request.player_id or "").strip()
     if not pid:
         raise HTTPException(status_code=400, detail="player_id required")
@@ -1207,6 +1283,15 @@ async def submit_draft_vote(request: DraftVoteRequest):
         valid_areas = set(state["monster_areas"].keys())
         validated = [a for a in vote if a in valid_areas][:5]
         state["votes_monsters"][pid] = validated
+    elif phase == "starters":
+        try:
+            sid = int(vote)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Starter vote must be a starter id (integer)")
+        available_ids = {int(r["id_starters"]) for r in state.get("starter_candidates", [])}
+        if sid not in available_ids:
+            raise HTTPException(status_code=400, detail="Invalid starter choice")
+        state.setdefault("votes_starters", {})[pid] = sid
     elif phase == "citizens":
         try:
             cid = int(vote)
@@ -1226,6 +1311,8 @@ async def submit_draft_vote(request: DraftVoteRequest):
 
     n_players = len(state["player_ids"])
     if phase == "monsters" and len(state["votes_monsters"]) >= n_players:
+        await _advance_draft(lb.lobby_id)
+    elif phase == "starters" and len(state.get("votes_starters", {})) >= n_players:
         await _advance_draft(lb.lobby_id)
     elif phase == "citizens" and len(state["votes_citizens"]) >= n_players:
         await _advance_draft(lb.lobby_id)

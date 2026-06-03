@@ -39,6 +39,43 @@ DEBUG_ROLL_MODIFIER_DOMAIN_IDS = (1, 2, 19)
 DEBUG_DIE_ONE_VALUES = (2, 3)
 DEBUG_DIE_TWO_VALUES = (4, 5)
 
+# Third starter slot: Herald by default; other candidates use roll_match -1/-1.
+DEFAULT_SLOT_STARTER_ID = 3
+
+
+def _is_slot_starter_row(row):
+    try:
+        return int(row.get("roll_match1", 0)) == -1 and int(row.get("roll_match2", 0)) == -1
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_slot_starter(card):
+    try:
+        return int(getattr(card, "roll_match1", 0)) == -1 and int(getattr(card, "roll_match2", 0)) == -1
+    except (TypeError, ValueError):
+        return False
+
+
+def _choose_slot_starter(slot_candidates, preset, draft_selections=None):
+    """Pick the one third-slot starter granted to every player this game."""
+    if not slot_candidates:
+        raise ValueError("No third-slot starter candidates (roll_match1=-1, roll_match2=-1).")
+
+    by_id = {int(s.starter_id): s for s in slot_candidates}
+
+    if preset == "draft" and draft_selections and draft_selections.get("starter_id") is not None:
+        slot_id = int(draft_selections["starter_id"])
+    elif preset == "random":
+        return random.choice(slot_candidates)
+    else:
+        slot_id = DEFAULT_SLOT_STARTER_ID
+
+    chosen = by_id.get(slot_id)
+    if chosen is None:
+        chosen = by_id.get(DEFAULT_SLOT_STARTER_ID) or slot_candidates[0]
+    return chosen
+
 
 def _choose_one_citizen_per_roll(rows):
     rows_by_roll = {}
@@ -121,11 +158,13 @@ def load_draft_card_pool(n_players: int):
         monsters_by_area: dict mapping area name -> list of raw DB rows, sorted
             by monster_order ascending (index 0 is the front/accessible card).
         citizens_by_roll: dict mapping roll_match1 -> list of raw DB rows.
+        starter_candidates: list of raw DB rows for the third starter slot.
     """
     import mariadb
 
     monsters_by_area = {}
     citizens_by_roll = {}
+    starter_candidates = []
 
     conn = mariadb.connect(
         user="vckonline", password="vckonline", host="127.0.0.1", database="vckonline", port=3306
@@ -148,9 +187,16 @@ def load_draft_card_pool(n_players: int):
             roll = int(row["roll_match1"])
             citizens_by_roll.setdefault(roll, []).append(dict(row))
 
+    cursor.execute(
+        "SELECT * FROM starters WHERE roll_match1 = -1 AND roll_match2 = -1 ORDER BY id_starters"
+    )
+    for row in cursor.fetchall():
+        if keep_for_random("starter", row):
+            starter_candidates.append(dict(row))
+
     cursor.close()
     conn.close()
-    return monsters_by_area, citizens_by_roll
+    return monsters_by_area, citizens_by_roll, starter_candidates
 
 
 def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, draft_selections=None):
@@ -563,12 +609,25 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             player_list.append(my_player)
         random.shuffle(player_list)
         player_list[0].is_first = True
-        # give players starters and dukes. Every player gets one of every
-        # starter; the stack is a shared template (instances aren't mutated
-        # per-player).
+        # Peasant/Knight (roll_match != -1) plus one third-slot starter (-1/-1).
+        fixed_starters = [s for s in starter_stack if not _is_slot_starter(s)]
+        slot_candidates = [s for s in starter_stack if _is_slot_starter(s)]
+        if preset == "random":
+            slot_candidates = [
+                s for s in slot_candidates
+                if keep_for_random("starter", {
+                    "id_starters": s.starter_id,
+                    "has_special_payout_on_turn": s.has_special_payout_on_turn,
+                    "special_payout_on_turn": s.special_payout_on_turn,
+                    "has_special_payout_off_turn": s.has_special_payout_off_turn,
+                    "special_payout_off_turn": s.special_payout_off_turn,
+                })
+            ]
+        chosen_slot = _choose_slot_starter(slot_candidates, preset, draft_selections)
         for player in player_list:
-            for starter in starter_stack:
+            for starter in fixed_starters:
                 player.owned_starters.append(starter)
+            player.owned_starters.append(chosen_slot)
             for _ in range(2):
                 player.owned_dukes.append(duke_stack.pop())
         # deal monsters onto the board.
