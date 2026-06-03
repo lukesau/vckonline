@@ -2090,7 +2090,7 @@ html, body {
   margin-top: 12px;
   display: flex;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   /* Always side-by-side: if the viewport is too narrow, the buttons
      shrink and their labels ellipsize rather than wrapping to a second
      row (which is the main vertical cost on mobile). */
@@ -2102,6 +2102,11 @@ html, body {
   display: inline-block;
   flex: 1 1 0;
   min-width: 0;
+  /* Trim the inherited .lobby-btn horizontal padding so three labels
+     (Rulebook / Card Wiki / Discord) fit without ellipsizing on the
+     narrowest phones. */
+  padding-left: 10px;
+  padding-right: 10px;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
@@ -2671,6 +2676,13 @@ select.lobby-input:disabled {
   .lobby-meta {
     text-align: left;
     width: 100%;
+  }
+
+  /* Reclaim horizontal room on the narrowest phones so the rulebook /
+     wiki / discord row fits side-by-side without ellipsizing labels. */
+  .lobby-sheet {
+    padding-left: 18px;
+    padding-right: 18px;
   }
 }
 
