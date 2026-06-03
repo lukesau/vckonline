@@ -1169,15 +1169,6 @@ function makeHeader(player, state) {
 
   const nameRow = mk('player-header-name-row');
 
-  const ord = playerIndexInList(state, player);
-  const listLen = (state.player_list || []).length;
-  if (ord >= 0 && listLen > 0) {
-    const seatLbl = mk('player-seat-order');
-    seatLbl.textContent = `Seat ${ord + 1}/${listLen}`;
-    seatLbl.title = 'Player order in this game (clockwise from Seat 1)';
-    nameRow.appendChild(seatLbl);
-  }
-
   const name = mk('player-name');
   if (player.is_first) {
     name.classList.add('is-first');
