@@ -28,12 +28,40 @@ def make_castle_of_the_seven_suns(domain_id=26, passive_effect="immunity.take"):
     )
 
 
-def make_simple_citizen(citizen_id):
+def make_red_hollow():
+    return Domain(
+        35, "Red Hollow",
+        7,
+        1, 0, 1, 1,
+        2,
+        False, True,
+        "action.end manipulate_resources mode=take_from_player take=s:1 optional=true",
+        None,
+        "At the end of your Action Phase, take 1 Strength from a player of your choice.",
+        "flamesandfrost",
+    )
+
+
+def make_hobbs_end():
+    return Domain(
+        51, "Hobb's End",
+        7,
+        2, 0, 1, 0,
+        1,
+        True, False,
+        "",
+        "steal_citizen gold_cost<=2",
+        "Immediately take a Citizen worth 2 gold or less from a Player of your choice.",
+        "shadowvale",
+    )
+
+
+def make_simple_citizen(citizen_id, gold_cost=2, shadow=0, holy=0, soldier=0, worker=0):
     return Citizen(
         citizen_id, f"Citizen {citizen_id}",
-        2,
+        gold_cost,
         1, 0,
-        0, 0, 0, 0,
+        shadow, holy, soldier, worker,
         1, 0,
         0, 0, 0, 0, 0, 0,
         False, False, "", "",
@@ -111,6 +139,64 @@ class StealAndTakeFromPlayerImmunityTests(unittest.TestCase):
         self.assertIsNotNone(parsed)
         self.assertEqual(parsed.get("options"), [],
                          "Castle of the Seven Suns must shield gold-take from action.end take_from_player.")
+
+    def test_red_hollow_opens_end_of_action_strength_take_prompt(self):
+        game, players = make_two_player_game()
+        game.phase = "action"
+        game.actions_remaining = 0
+        game.action_required["id"] = players[0].player_id
+        game.action_required["action"] = "standard_action"
+        players[0].owned_domains.append(make_red_hollow())
+        players[1].strength_score = 1
+
+        game.finish_turn_if_no_actions_remaining()
+
+        self.assertEqual(game.phase, "action_end_pending")
+        self.assertEqual(game.action_required.get("id"), players[0].player_id)
+        self.assertEqual(game.action_required.get("action"), "choose_player")
+        prc = game.pending_required_choice or {}
+        self.assertEqual(prc.get("kind"), "domain_manipulate_player")
+        self.assertEqual(prc.get("item", {}).get("domain_name"), "Red Hollow")
+        self.assertEqual(prc.get("item", {}).get("kv", {}).get("take"), "s:1")
+        self.assertEqual([o.get("player_id") for o in prc.get("options", [])], [players[1].player_id])
+
+    def test_hobbs_end_activation_opens_player_prompt(self):
+        game, players = make_two_player_game()
+        players[1].owned_citizens.append(make_simple_citizen(201, gold_cost=2))
+        active = game._player_by_id(players[0].player_id)
+
+        game.domain_effects._apply_domain_activation_effect(active, make_hobbs_end())
+
+        self.assertEqual(game.action_required.get("id"), players[0].player_id)
+        self.assertEqual(game.action_required.get("action"), "choose_player")
+        prc = game.pending_required_choice or {}
+        self.assertEqual(prc.get("kind"), "steal_citizen")
+        self.assertEqual(prc.get("item", {}).get("domain_name"), "Hobb's End")
+        self.assertEqual(prc.get("max_cost"), 2)
+        self.assertEqual([o.get("player_id") for o in prc.get("options", [])], [players[1].player_id])
+
+    def test_hobbs_end_build_opens_player_prompt(self):
+        game, players = make_two_player_game()
+        game.phase = "action"
+        active = game._player_by_id(players[0].player_id)
+        active.gold_score = 7
+        active.owned_citizens.extend([
+            make_simple_citizen(301, shadow=2),
+            make_simple_citizen(302, soldier=1),
+        ])
+        players[1].owned_citizens.append(make_simple_citizen(303, gold_cost=2))
+        hobbs_end = make_hobbs_end()
+        hobbs_end.toggle_visibility(True)
+        hobbs_end.toggle_accessibility(True)
+        game.domain_grid = [[hobbs_end]]
+
+        game.build_domain(players[0].player_id, hobbs_end.domain_id, gp=7, mp=0, sp=0)
+
+        self.assertEqual(game.action_required.get("id"), players[0].player_id)
+        self.assertEqual(game.action_required.get("action"), "choose_player")
+        prc = game.pending_required_choice or {}
+        self.assertEqual(prc.get("kind"), "steal_citizen")
+        self.assertEqual([o.get("player_id") for o in prc.get("options", [])], [players[1].player_id])
 
 
 class TakeOwnedImmunityTests(unittest.TestCase):

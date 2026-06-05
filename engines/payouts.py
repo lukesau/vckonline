@@ -804,6 +804,8 @@ class PayoutsEngine:
             return self.game.domain_effects._execute_manipulate_resources_payout(raw, player_id)
         if low == "slay":
             return self.game.slay._execute_slay_payout(player_id)
+        if low.startswith("steal_citizen"):
+            return self._execute_steal_citizen_payout(raw, player_id)
         if low.startswith("steal"):
             return self.game.harvest._execute_steal_payout(raw, player_id)
         if low.startswith("take_owned"):
@@ -854,8 +856,6 @@ class PayoutsEngine:
             return result
         if low == "banish_player_citizen":
             return self._execute_banish_player_citizen_payout(player_id)
-        if low.startswith("steal_citizen"):
-            return self._execute_steal_citizen_payout(raw, player_id)
         if low == "banish_random_player_monster":
             return self._execute_banish_random_player_monster_payout(player_id)
         if low.startswith("banish_center"):
