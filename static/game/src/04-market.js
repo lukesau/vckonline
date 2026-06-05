@@ -676,6 +676,87 @@ function readMarketPayRow(row) {
   return { gold: g, strength: s, magic: m };
 }
 
+// Identity for the pay row's underlying market card, so in-progress payment edits
+// are only restored onto the *same* card after a live re-render (never bled onto a
+// different pile after the player navigates « »).
+function marketPayRowKey(row) {
+  const d = row && row.dataset;
+  if (!d) return null;
+  if (d.citizenId !== undefined) return `citizen:${d.citizenId}`;
+  if (d.domainId !== undefined)  return `domain:${d.domainId}`;
+  if (d.monsterId !== undefined) return `monster:${d.monsterId}`;
+  if (d.eventId !== undefined)   return `event:${d.eventId}`;
+  return null;
+}
+
+// Raw (unclamped) field strings so a partially-typed value survives a refresh
+// without being coerced mid-keystroke; clamping still happens on submit.
+function readRawMarketPayRow(row) {
+  const get = cls => {
+    const el = row.querySelector('.' + cls);
+    return el && !el.disabled ? el.value : null;
+  };
+  return { g: get('pay-g'), s: get('pay-s'), m: get('pay-m') };
+}
+
+// The main render loop fans state changes out to every open modal via
+// `_refreshFromLiveState`, which rebuilds the market info panel (and thus the
+// payment <input>s) from scratch. Without remembering the player's edits, each
+// poll would snap the fields back to the auto-suggested amounts mid-edit. We
+// stash whatever the player has touched on the overlay and re-apply it after the
+// rebuild, restoring focus + caret so typing isn't interrupted.
+function trackMarketPayEdits(payWrap) {
+  const key = marketPayRowKey(payWrap);
+  if (!key) return;
+  const record = () => {
+    const overlay = document.getElementById('card-modal-overlay');
+    if (!overlay) return;
+    const active = document.activeElement;
+    let focusCls = null;
+    let selStart = null;
+    let selEnd = null;
+    if (active && payWrap.contains(active)) {
+      focusCls = ['pay-g', 'pay-s', 'pay-m'].find(c => active.classList.contains(c)) || null;
+      try { selStart = active.selectionStart; selEnd = active.selectionEnd; } catch (_) {}
+    }
+    overlay._marketPayEdits = {
+      key,
+      values: readRawMarketPayRow(payWrap),
+      focusCls,
+      selStart,
+      selEnd,
+    };
+  };
+  payWrap.querySelectorAll('.market-pay-input').forEach(inp => {
+    if (inp.disabled) return;
+    inp.addEventListener('input', record);
+    inp.addEventListener('focus', record);
+  });
+}
+
+function applyMarketPayEdits(payWrap) {
+  const overlay = document.getElementById('card-modal-overlay');
+  const edits = overlay && overlay._marketPayEdits;
+  if (!edits || marketPayRowKey(payWrap) !== edits.key) return;
+  const setVal = (cls, v) => {
+    if (v === null || v === undefined) return;
+    const el = payWrap.querySelector('.' + cls);
+    if (el && !el.disabled) el.value = v;
+  };
+  setVal('pay-g', edits.values.g);
+  setVal('pay-s', edits.values.s);
+  setVal('pay-m', edits.values.m);
+  if (edits.focusCls) {
+    const el = payWrap.querySelector('.' + edits.focusCls);
+    if (el && !el.disabled) {
+      try {
+        el.focus();
+        if (edits.selStart !== null) el.setSelectionRange(edits.selStart, edits.selEnd);
+      } catch (_) {}
+    }
+  }
+}
+
 function mkPayField(label, cls, minV, maxV, value, disabled, title, resourceIconKey, currentValue) {
   const lab = document.createElement('label');
   lab.className = 'market-pay-field';
@@ -801,6 +882,7 @@ function appendMarketActionUI(infoEl, card, ctx) {
   const fieldsRow = mk('market-pay-fields');
   fieldsRow.appendChild(payWrap);
   panel.appendChild(fieldsRow);
+  trackMarketPayEdits(payWrap);
 
   const btnRow = mk('market-primary-actions');
 
@@ -880,6 +962,10 @@ function appendMarketActionUI(infoEl, card, ctx) {
   if (help.textContent) panel.appendChild(help);
 
   infoEl.appendChild(panel);
+
+  // Restore any in-progress payment edits the player made before this live
+  // re-render (panel is now in the DOM, so focus/caret restoration sticks).
+  applyMarketPayEdits(payWrap);
 }
 
 /** Inline resource value with an explicit sign prefix (e.g. "-3 × icon" or "+1 × icon"). */

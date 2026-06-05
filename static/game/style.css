@@ -3524,12 +3524,21 @@ body.is-virtual-keyboard-open .card-modal {
 #lobby-step-draft {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   min-height: 0;
 }
 
+/* The card grid is the single scroll region inside the draft sheet. It grows to
+   fill the space between the fixed header and the action buttons and scrolls
+   when the cards overflow, so card art is never vertically squished or cropped
+   on short viewports (previously a fixed max-height let flex shrink the grid). */
 #lobby-step-draft .draft-grid {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  max-height: 54dvh;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  align-content: start;
 }
 
 .draft-header {
@@ -3802,12 +3811,69 @@ body.is-virtual-keyboard-open .card-modal {
   text-overflow: ellipsis;
 }
 
+/* ── Concurrent harvest: your payouts ──────────────────────────────────── */
+.prompt-harvest-mine {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.prompt-harvest-mine-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+/* Scrollable so an arbitrarily long list of payouts can't overflow the modal. */
+.prompt-harvest-mine-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-right: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.prompt-harvest-decision {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(240, 192, 64, 0.08);
+  border: 1px solid rgba(240, 192, 64, 0.4);
+}
+
+.prompt-harvest-decision-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.prompt-harvest-roster-title {
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 /* ── Concurrent harvest roster ─────────────────────────────────────────── */
 .prompt-harvest-roster {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-top: 6px;
+}
+
+/* Opponent status rows only carry a name + status, so collapse to two cols. */
+.prompt-harvest-row--status {
+  grid-template-columns: minmax(150px, 1fr) minmax(120px, auto);
 }
 
 .prompt-harvest-row {

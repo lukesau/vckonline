@@ -955,12 +955,15 @@ function harvestPromptButtons(prompt, state) {
   const prc = prompt.pending_required_choice || {};
   const action = (prompt.action || '').toString();
 
+  // Prefix the prompt id so the server knows WHICH of the player's payouts this
+  // resolves — they are all shown at once and may be tackled in any order.
+  const idPrefix = prompt.id ? `${prompt.id}|` : '';
   const post = (response, confirmCopy) => confirmAndPostGameAction(
     {
       player_id: PLAYER_ID,
       action_type: 'submit_concurrent_action',
       kind: 'harvest_choices',
-      response: String(response),
+      response: `${idPrefix}${response}`,
     },
     confirmCopy || {
       title: 'Confirm harvest choice?',
@@ -1109,65 +1112,96 @@ function renderConcurrentHarvestChoices(state, concurrent) {
 
   appendPromptResourcesPanel(body, state);
 
+  // ── Your payouts ────────────────────────────────────────────────────────
+  // Every decision the viewer owns is shown at once so they can resolve them
+  // in whatever order they like. The list scrolls when there are many.
+  const myRaw = prompts[myPid] || prompts[String(myPid)] || null;
+  const myPrompts = Array.isArray(myRaw) ? myRaw : (myRaw ? [myRaw] : []);
+  const iAmPending = pending.some(p => String(p) === myPid);
+
+  if (iAmPending && myPrompts.length) {
+    const mine = mk('prompt-harvest-mine');
+    const title = mk('prompt-harvest-mine-title');
+    title.textContent = myPrompts.length > 1
+      ? `Your harvest payouts (${myPrompts.length}) — resolve in any order`
+      : 'Your harvest payout';
+    mine.appendChild(title);
+
+    const list = mk('prompt-harvest-mine-list');
+    myPrompts.forEach(prompt => {
+      const card = mk('prompt-harvest-decision');
+
+      const head = mk('prompt-harvest-decision-head');
+      const badge = mk('prompt-harvest-sub-badge');
+      badge.textContent = harvestPromptSubKindBadge(prompt.sub_kind);
+      head.appendChild(badge);
+      const summaryEl = mk('prompt-harvest-summary');
+      summaryEl.textContent = harvestPromptSummary(prompt);
+      head.appendChild(summaryEl);
+      card.appendChild(head);
+
+      const buttons = harvestPromptButtons(prompt, state);
+      const actions = mk('prompt-harvest-buttons');
+      if (buttons.length) {
+        buttons.forEach(b => actions.appendChild(b));
+      } else {
+        actions.appendChild(makeHarvestStatusSpinner());
+      }
+      card.appendChild(actions);
+
+      list.appendChild(card);
+    });
+    mine.appendChild(list);
+    body.appendChild(mine);
+  } else if (iAmPending) {
+    const note = mk('prompt-modal-note');
+    note.classList.add('is-muted');
+    note.textContent = 'Resolving your harvest…';
+    body.appendChild(note);
+  }
+
+  // ── Other players ───────────────────────────────────────────────────────
+  // Opponents only get a status indicator (still deciding / finished); we no
+  // longer surface which specific payout they happen to be resolving.
   const roster = mk('prompt-harvest-roster');
   participantIds.forEach(pid => {
-    const isMe = String(pid) === myPid;
+    if (String(pid) === myPid) return;
     const isPending = pending.some(p => String(p) === String(pid));
-    const prompt = prompts[String(pid)] || prompts[pid] || null;
 
-    const row = mk('prompt-harvest-row');
-    if (isMe) row.classList.add('is-you');
-    if (isPending) row.classList.add('is-pending');
-    else row.classList.add('is-done');
+    const row = mk('prompt-harvest-row prompt-harvest-row--status');
+    row.classList.add(isPending ? 'is-pending' : 'is-done');
 
     const nameEl = mk('prompt-harvest-name');
     const nameText = document.createElement('span');
     nameText.className = 'prompt-harvest-name-text';
     nameText.textContent = playerDisplayName(state, pid);
     nameEl.appendChild(nameText);
-    if (isMe) {
-      const tag = mk('prompt-harvest-you-tag');
-      tag.textContent = 'You';
-      nameEl.appendChild(tag);
-    }
-    if (prompt) {
-      const badge = mk('prompt-harvest-sub-badge');
-      badge.textContent = harvestPromptSubKindBadge(prompt.sub_kind);
-      nameEl.appendChild(badge);
-    }
     row.appendChild(nameEl);
 
-    const summaryEl = mk('prompt-harvest-summary');
-    if (prompt) {
-      summaryEl.textContent = harvestPromptSummary(prompt);
-    } else {
-      summaryEl.textContent = isPending
-        ? 'Resolving harvest…'
-        : 'All decisions complete.';
-      summaryEl.classList.add('is-muted');
-    }
-    row.appendChild(summaryEl);
-
     const actionEl = mk('prompt-harvest-action');
-    if (!isPending) {
-      actionEl.appendChild(makeHarvestStatusCheck());
-    } else if (isMe && prompt) {
-      const buttons = harvestPromptButtons(prompt, state);
-      if (buttons.length) {
-        const actions = mk('prompt-harvest-buttons');
-        buttons.forEach(b => actions.appendChild(b));
-        actionEl.appendChild(actions);
-      } else {
-        actionEl.appendChild(makeHarvestStatusSpinner());
-      }
+    if (isPending) {
+      const wrap = mk('prompt-harvest-status prompt-harvest-status--waiting');
+      const spin = mk('prompt-harvest-spinner');
+      spin.setAttribute('role', 'progressbar');
+      spin.setAttribute('aria-label', 'Deciding');
+      const label = mk('prompt-harvest-status-label');
+      label.textContent = 'Deciding…';
+      wrap.appendChild(spin);
+      wrap.appendChild(label);
+      actionEl.appendChild(wrap);
     } else {
-      actionEl.appendChild(makeHarvestStatusSpinner());
+      actionEl.appendChild(makeHarvestStatusCheck());
     }
     row.appendChild(actionEl);
 
     roster.appendChild(row);
   });
-  body.appendChild(roster);
+  if (roster.children.length) {
+    const rosterTitle = mk('prompt-harvest-roster-title');
+    rosterTitle.textContent = 'Other players';
+    body.appendChild(rosterTitle);
+    body.appendChild(roster);
+  }
 
   openPromptOverlayShell({
     title: phase === 'finalize_bonus' ? 'Harvest bonus' : 'Harvest decisions',

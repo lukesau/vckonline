@@ -1456,6 +1456,8 @@ function openPromptOverlayShell(opts) {
     const preservedModalScroll = modal.scrollTop;
     const preservedList = modal.querySelector('.prompt-choice-list');
     const preservedChoiceListScroll = preservedList ? preservedList.scrollTop : 0;
+    const preservedHarvestList = modal.querySelector('.prompt-harvest-mine-list');
+    const preservedHarvestListScroll = preservedHarvestList ? preservedHarvestList.scrollTop : 0;
 
     // Remove existing body/footer (keep head).
     Array.from(modal.children).forEach(ch => {
@@ -1476,6 +1478,8 @@ function openPromptOverlayShell(opts) {
     modal.scrollTop = preservedModalScroll;
     const list = modal.querySelector('.prompt-choice-list');
     if (list) list.scrollTop = preservedChoiceListScroll;
+    const harvestList = modal.querySelector('.prompt-harvest-mine-list');
+    if (harvestList) harvestList.scrollTop = preservedHarvestListScroll;
     return;
   }
 

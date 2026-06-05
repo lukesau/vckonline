@@ -317,6 +317,30 @@ it does for `manual_harvest` / `harvest_optional_exchange`. After the steal
 resolves, the engine resumes the harvest pre-phase scan and only moves on
 to regular harvest payouts once every player's steals have resolved.
 
+### End-of-harvest `no_payout` bonus and the `doubles` interaction
+
+A -1/-1 starter (Herald, Margrave) carries `activation_trigger =
+'doubles_or_no_payout'`, i.e. two independent legs:
+
+- **`doubles`** — fires in-band during the harvest scan whenever the final
+  dice are a matching pair (`_build_harvest_slots`).
+- **`no_payout`** — fires at the very end of harvest, but only if *none* of
+  that player's cards activated this harvest (`_harvest_complete_finalize`
+  → `_activate_finalize_bonus_for`).
+
+The rulebook is explicit that on a doubles roll which does **not** activate
+any dice-value citizens, the starter activates **twice** — once for doubles,
+once for no_payout. So the `no_payout` suppression check must ignore the
+starter's *own* in-band doubles activation when deciding whether "a card
+fired". Every other activation (the Peasant on 5, the Knight on 6, any
+citizen, or any other starter) still suppresses `no_payout`.
+
+`_harvest_complete_finalize` builds `activated_pids` by walking each player's
+consumed slot keys and skipping the keys returned by
+`_no_payout_starter_own_doubles_slot_keys` (that player's doubles-leg slot for
+their own no_payout starter). A player whose only activation was that doubles
+leg therefore still appears in the end-of-harvest bonus gate.
+
 ### Deferred may-slay-a-Monster prompts
 
 Bare-verb `slay` payouts (see `docs/effect-strings.md`) opened by citizen
@@ -386,4 +410,28 @@ Engine semantics:
 Because the engine itself only knows "block while pending is non-empty",
 the concurrent gate is fully reusable — no engine changes are required to
 add new kinds (mulligan, simultaneous discard, voting, etc.).
+
+### Harvest decisions gate (`harvest_choices`)
+
+The harvest gate is a richer use of the concurrent subsystem. Rather than one
+opaque response per player, `concurrent_action.data.prompts[player_id]` is a
+**list** of decision snapshots — every interactive harvest payout that player
+owns this roll, drained up front by `_collect_harvest_prompts_for`. The client
+shows them all at once so the player can redeem them in whatever order they
+like (opponents only see a "deciding / finished" status, never the specific
+payout). Each snapshot carries a unique `id` (allocated via
+`_alloc_prompt_id`, counter stashed in `data.prompt_seq`), and the client
+submits `response = "<prompt_id>|<payload>"` so the handler knows which payout
+is being resolved.
+
+When a player resolves a decision the handler removes it, then tops up the list
+via `_collect_harvest_prompts_for(..., fire_magic_passive=False)` to pick up any
+follow-up prompt (a chained `choose`, the next leg of a compound payout) plus
+slots left undrained behind a stashed `pending_payout_continuation`. The
+end-of-harvest `on_any_magic_gain` passive is deferred until a player's list
+empties so a magic-granting exchange they haven't redeemed yet is still counted
+(pure-automatic harvesters fire it immediately during the initial drain). The
+wild-exchange resolvers re-check affordability before paying, so a payout
+redeemed after another spent the same resource can never push a balance
+negative.
 

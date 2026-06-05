@@ -62,6 +62,19 @@ class _ChooseDukeConcurrentHandler:
         return
 
 
+def _alloc_prompt_id(ca):
+    """Allocate a unique, stable prompt id within a concurrent_action gate.
+
+    Ids must survive across polls (the client keys its action buttons on them),
+    so we keep a monotonic counter in `ca.data.prompt_seq` rather than reusing
+    list indices (which shift as resolved prompts are removed).
+    """
+    data = ca.setdefault("data", {})
+    n = int(data.get("prompt_seq", 0) or 0) + 1
+    data["prompt_seq"] = n
+    return f"p{n}"
+
+
 def _mark_concurrent_player_done(game, player_id, response):
     """Shared bookkeeping: stash the response and move the player from pending to completed."""
     ca = getattr(game, "concurrent_action", None) or {}
@@ -302,12 +315,42 @@ class _HarvestChoicesConcurrentHandler:
         game.action_required["action"] = ""
         game.pending_required_choice = None
 
+    @staticmethod
+    def _split_response(response):
+        """Split a client response of the form "<prompt_id>|<payload>".
+
+        The prompt id selects WHICH of the player's pending payouts to resolve
+        (they all show at once now and may be tackled in any order). Older
+        clients / tooling that omit the id fall back to the first pending
+        payout in the list.
+        """
+        s = "" if response is None else str(response)
+        if "|" in s:
+            pid, payload = s.split("|", 1)
+            return pid.strip(), payload
+        return "", s
+
     def apply(self, game, player_id, response):
         ca = getattr(game, "concurrent_action", None) or {}
         prompts = ((ca.get("data") or {}).get("prompts") or {}) if isinstance(ca, dict) else {}
-        prompt = prompts.get(player_id)
-        if not prompt:
+        plist = prompts.get(player_id)
+        if not plist:
             raise ValueError("No pending harvest prompt for this player.")
+        # Tolerate a legacy single-dict payload by treating it as a one-item list.
+        if not isinstance(plist, list):
+            plist = [plist]
+
+        prompt_id, payload = self._split_response(response)
+        prompt = None
+        if prompt_id:
+            for entry in plist:
+                if str(entry.get("id")) == str(prompt_id):
+                    prompt = entry
+                    break
+            if prompt is None:
+                raise ValueError("That harvest decision is no longer available.")
+        else:
+            prompt = plist[0]
 
         sub_kind = prompt.get("sub_kind")
         action = prompt.get("action") or ""
@@ -320,35 +363,54 @@ class _HarvestChoicesConcurrentHandler:
 
         # Apply the player's response.
         if sub_kind in ("harvest_optional_exchange", "harvest_wild_gain_exchange", "harvest_wild_cost_exchange", "harvest_choose"):
-            game.player_actions.act_on_required_action(player_id, response)
+            game.player_actions.act_on_required_action(player_id, payload)
         elif sub_kind == "bonus_resource_choice":
-            self._apply_bonus_resource_choice(game, player_id, response)
+            self._apply_bonus_resource_choice(game, player_id, payload)
         else:
             raise ValueError(f"Unknown harvest sub_kind: {sub_kind!r}.")
 
-        # Re-drain just this player's harvest pipeline to the next prompt.
-        nxt = game.harvest._harvest_drain_player(player_id)
+        # Drop the resolved decision from this player's list.
+        plist = [e for e in plist if e is not prompt]
+
+        # Top up: pick up any follow-up prompt the decision opened (e.g. a
+        # chained `choose`, or the next leg of a compound payout) plus any
+        # harvest slots that were left undrained behind a continuation. The
+        # magic passive is NOT fired here — it is deferred to true completion
+        # below so a magic-granting decision still pending is counted.
+        more, unsupported = game.harvest._collect_harvest_prompts_for(
+            player_id, lambda: _alloc_prompt_id(ca), fire_magic_passive=False
+        )
+        if unsupported:
+            raise ValueError(
+                f"Concurrent harvest hit unsupported prompt: "
+                f"{(getattr(game, 'action_required', None) or {}).get('action')!r}."
+            )
+        plist.extend(more)
 
         ca.setdefault("responses", {})[player_id] = response
         ca.setdefault("completed", [])
+        ca.setdefault("data", {})
 
-        if nxt is None:
-            # Player is fully done with this concurrent gate.
-            prompts.pop(player_id, None)
-            pending = ca.get("pending") or []
-            if player_id in pending:
-                ca["pending"] = [pid for pid in pending if pid != player_id]
-            if player_id not in ca["completed"]:
-                ca["completed"].append(player_id)
+        if plist:
+            # Still has decisions outstanding; stay pending with the trimmed list.
+            prompts[player_id] = plist
+            ca["data"]["prompts"] = prompts
             return
 
-        if isinstance(nxt, dict) and nxt.get("__unsupported_prompt_action"):
-            raise ValueError(f"Concurrent harvest hit unsupported prompt: {nxt.get('__unsupported_prompt_action')!r}.")
-
-        # Stay pending with a new prompt payload.
-        prompts[player_id] = nxt
-        ca.setdefault("data", {})
+        # Player resolved every decision. Fire the end-of-harvest magic passive
+        # that was deferred while their prompts were outstanding (scan phase
+        # only — the finalize bonus gate runs after passives have all fired).
+        prompts.pop(player_id, None)
         ca["data"]["prompts"] = prompts
+        if (ca.get("data") or {}).get("phase") != "finalize_bonus":
+            player = game._player_by_id(player_id)
+            if player:
+                game.harvest._apply_harvest_on_any_magic_gain_passives(player)
+        pending = ca.get("pending") or []
+        if player_id in pending:
+            ca["pending"] = [pid for pid in pending if pid != player_id]
+        if player_id not in ca["completed"]:
+            ca["completed"].append(player_id)
 
     def finalize(self, game):
         # If the last submitted player unlocked additional prompts for others,

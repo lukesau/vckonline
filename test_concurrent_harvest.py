@@ -64,10 +64,14 @@ class ConcurrentHarvestTests(unittest.TestCase):
         prompts = ((ca.get("data") or {}).get("prompts") or {})
         self.assertIn(p1.player_id, prompts)
         self.assertIn(p2.player_id, prompts)
+        # Each player's payouts are now presented as a list (all at once).
+        self.assertIsInstance(prompts[p1.player_id], list)
+        self.assertEqual(len(prompts[p1.player_id]), 1)
 
         self.assertEqual(set(ca.get("pending") or []), {p1.player_id, p2.player_id})
 
-        cmd_other_before = prompts[p2.player_id]["pending_required_choice"]["command"]
+        cmd_other_before = prompts[p2.player_id][0]["pending_required_choice"]["command"]
+        # No prompt id supplied -> resolves the player's first pending payout.
         game.submit_concurrent_action(p1.player_id, "confirm_harvest_exchange", kind="harvest_choices")
 
         ca2 = game.concurrent_action
@@ -76,10 +80,10 @@ class ConcurrentHarvestTests(unittest.TestCase):
         self.assertEqual(set(ca2.get("pending") or []), {p2.player_id})
         self.assertIn(p2.player_id, (ca2.get("data") or {}).get("prompts") or {})
 
-        cmd_other_after = (ca2.get("data") or {}).get("prompts")[p2.player_id]["pending_required_choice"]["command"]
+        cmd_other_after = (ca2.get("data") or {}).get("prompts")[p2.player_id][0]["pending_required_choice"]["command"]
         self.assertEqual(cmd_other_before, cmd_other_after, "Other players' prompt must not be disturbed.")
 
-    def test_optional_exchange_player_multi_prompt_redrains_into_pending(self):
+    def test_optional_exchange_player_multi_prompt_listed_all_at_once(self):
         p1 = Player("p1", "Player 1")
         p2 = Player("p2", "Player 2")
         p1.gold_score = 10
@@ -97,23 +101,31 @@ class ConcurrentHarvestTests(unittest.TestCase):
         self.assertEqual(ca.get("kind"), "harvest_choices")
 
         prompts = ((ca.get("data") or {}).get("prompts") or {})
-        p1_cmd_1 = prompts[p1.player_id]["pending_required_choice"]["command"]
-        p2_cmd = prompts[p2.player_id]["pending_required_choice"]["command"]
-        self.assertNotEqual(p1_cmd_1, "", "Expected a command in the first prompt snapshot.")
+        # Both of p1's payouts are presented up front so they can choose order.
+        self.assertEqual(len(prompts[p1.player_id]), 2)
+        self.assertEqual(len(prompts[p2.player_id]), 1)
+        p1_cmds = {e["pending_required_choice"]["command"] for e in prompts[p1.player_id]}
+        self.assertEqual(p1_cmds, {"exchange g 1 s 1", "exchange g 2 s 1"})
+        p2_cmd = prompts[p2.player_id][0]["pending_required_choice"]["command"]
 
-        game.submit_concurrent_action(p1.player_id, "confirm_harvest_exchange", kind="harvest_choices")
+        # Resolve p1's *second* listed payout first (order is the player's choice).
+        target = prompts[p1.player_id][1]
+        game.submit_concurrent_action(
+            p1.player_id, f"{target['id']}|confirm_harvest_exchange", kind="harvest_choices"
+        )
 
         ca2 = game.concurrent_action
         self.assertIsNotNone(ca2)
 
         pending = set(ca2.get("pending") or [])
-        self.assertIn(p1.player_id, pending, "Player with a second prompt must stay pending.")
+        self.assertIn(p1.player_id, pending, "Player with a remaining payout stays pending.")
         self.assertIn(p2.player_id, pending, "Other participant remains pending.")
 
         prompts2 = ((ca2.get("data") or {}).get("prompts") or {})
-        p1_cmd_2 = prompts2[p1.player_id]["pending_required_choice"]["command"]
-        self.assertNotEqual(p1_cmd_1, p1_cmd_2, "After re-drain the same player should receive the next prompt payload.")
-        self.assertEqual(prompts2[p2.player_id]["pending_required_choice"]["command"], p2_cmd)
+        self.assertEqual(len(prompts2[p1.player_id]), 1, "Resolved payout is removed from the list.")
+        remaining = prompts2[p1.player_id][0]["pending_required_choice"]["command"]
+        self.assertEqual(remaining, "exchange g 1 s 1", "Unresolved payout still pending.")
+        self.assertEqual(prompts2[p2.player_id][0]["pending_required_choice"]["command"], p2_cmd)
 
     def test_finalize_bonus_is_concurrent(self):
         p1 = Player("p1", "Player 1")
@@ -239,7 +251,7 @@ class ConcurrentHarvestTests(unittest.TestCase):
         self.assertEqual(ca.get("kind"), "harvest_choices")
         prompts = ((ca.get("data") or {}).get("prompts") or {})
         for pid in (p1.player_id, p2.player_id):
-            self.assertEqual(prompts[pid]["sub_kind"], "harvest_wild_gain_exchange")
+            self.assertEqual(prompts[pid][0]["sub_kind"], "harvest_wild_gain_exchange")
 
         for pid in (p1.player_id, p2.player_id):
             game.submit_concurrent_action(pid, "skip_harvest_exchange", kind="harvest_choices")
@@ -275,7 +287,7 @@ class ConcurrentHarvestTests(unittest.TestCase):
         self.assertEqual(ca.get("kind"), "harvest_choices")
         prompts = ((ca.get("data") or {}).get("prompts") or {})
         for pid in (p1.player_id, p2.player_id):
-            self.assertEqual(prompts[pid]["sub_kind"], "harvest_wild_cost_exchange")
+            self.assertEqual(prompts[pid][0]["sub_kind"], "harvest_wild_cost_exchange")
 
         for pid in (p1.player_id, p2.player_id):
             game.submit_concurrent_action(pid, "skip_harvest_exchange", kind="harvest_choices")

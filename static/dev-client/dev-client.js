@@ -2956,7 +2956,8 @@
                 if (!prompt) return '';
                 const sub = (prompt.sub_kind || '').toString();
                 const prc = prompt.pending_required_choice || {};
-                const act = (resp) => `submitConcurrentAction('harvest_choices', '${escapeHtml(String(resp).replace(/'/g, "\\'"))}')`;
+                const idPrefix = prompt.id ? `${prompt.id}|` : '';
+                const act = (resp) => `submitConcurrentAction('harvest_choices', '${escapeHtml((idPrefix + String(resp)).replace(/'/g, "\\'"))}')`;
                 if (sub === 'harvest_optional_exchange') {
                     return `
                         <button type="button" onclick="${act('confirm_harvest_exchange')}">Take</button>
@@ -3042,59 +3043,57 @@
                     const p = players.find(x => (x?.player_id || '') === pid);
                     return (p?.name ?? pid ?? 'Player').toString();
                 }
+                function promptListFor(pid) {
+                    const raw = prompts[pid] || prompts[String(pid)] || null;
+                    if (Array.isArray(raw)) return raw;
+                    return raw ? [raw] : [];
+                }
 
-                const rowsHtml = participantIds.map(pid => {
-                    const isMe = String(pid) === String(myPid);
-                    const isPending = pending.some(p => String(p) === String(pid));
-                    const prompt = prompts[pid] || prompts[String(pid)] || null;
-
-                    const youTag = isMe
-                        ? `<span style="font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:1px 6px;border-radius:999px;background:#fce29a;color:#7a560b;border:1px solid #c7972a;margin-left:6px;">You</span>`
-                        : '';
-                    const subBadge = prompt
-                        ? `<span style="font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 6px;border-radius:999px;background:#eee;color:#555;border:1px solid #ddd;margin-left:6px;">${escapeHtml(harvestPromptSubKindLabel(prompt.sub_kind))}</span>`
-                        : '';
-                    const nameCell = `<div style="font-weight:700;">${escapeHtml(nameFor(pid))}${youTag}${subBadge}</div>`;
-
-                    let summaryText;
-                    if (prompt) summaryText = harvestPromptSummaryText(prompt);
-                    else summaryText = isPending ? 'Resolving harvest…' : 'All decisions complete.';
-                    const summaryCell = `<div style="font-size:13px;color:#333;">${escapeHtml(summaryText)}</div>`;
-
-                    let actionHtml;
-                    if (!isPending) {
-                        actionHtml = `
-                            <div style="display:inline-flex;align-items:center;gap:6px;color:#1f6a3a;font-weight:700;">
-                                <span style="display:inline-flex;width:18px;height:18px;border-radius:50%;background:#e3f5e9;border:1px solid #8ad0a4;align-items:center;justify-content:center;color:#1f6a3a;font-weight:800;font-size:13px;">&#10003;</span>
-                                <span>Done</span>
-                            </div>`;
-                    } else if (isMe && prompt) {
+                // Viewer's own payouts: all decisions at once, resolvable in any order.
+                const myPrompts = promptListFor(myPid);
+                const iAmPending = pending.some(p => String(p) === String(myPid));
+                let mineHtml = '';
+                if (iAmPending && myPrompts.length) {
+                    const decisions = myPrompts.map(prompt => {
+                        const subBadge = `<span style="font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 6px;border-radius:999px;background:#eee;color:#555;border:1px solid #ddd;">${escapeHtml(harvestPromptSubKindLabel(prompt.sub_kind))}</span>`;
+                        const summary = `<span style="font-size:13px;color:#333;">${escapeHtml(harvestPromptSummaryText(prompt))}</span>`;
                         const btns = harvestPromptButtonsHtml(prompt);
-                        if (btns.trim().length) {
-                            actionHtml = `<div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;">${btns}</div>`;
-                        } else {
-                            actionHtml = `
-                                <div style="display:inline-flex;align-items:center;gap:6px;color:#666;font-weight:600;">
-                                    <span class="harvest-spinner" style="display:inline-block;width:16px;height:16px;border-radius:50%;border:2px solid #ddd;border-top-color:#7a7a7a;animation:harvest-spin .85s linear infinite;"></span>
-                                    <span>Waiting</span>
-                                </div>`;
-                        }
-                    } else {
-                        actionHtml = `
-                            <div style="display:inline-flex;align-items:center;gap:6px;color:#666;font-weight:600;">
-                                <span class="harvest-spinner" style="display:inline-block;width:16px;height:16px;border-radius:50%;border:2px solid #ddd;border-top-color:#7a7a7a;animation:harvest-spin .85s linear infinite;"></span>
-                                <span>Waiting</span>
+                        const btnRow = btns.trim().length
+                            ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">${btns}</div>`
+                            : `<div style="display:inline-flex;align-items:center;gap:6px;color:#666;"><span class="harvest-spinner" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid #ddd;border-top-color:#7a7a7a;animation:harvest-spin .85s linear infinite;"></span><span>Resolving…</span></div>`;
+                        return `
+                            <div style="display:flex;flex-direction:column;gap:6px;padding:8px 10px;border:1px solid #e0b941;border-radius:8px;background:#fff8e0;">
+                                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">${subBadge}${summary}</div>
+                                ${btnRow}
                             </div>`;
-                    }
-                    const rowBg = isMe ? '#fff8e0' : '#fff';
-                    const rowBorder = isMe ? '#e0b941' : '#e6e6e6';
+                    }).join('');
+                    const mineTitle = myPrompts.length > 1
+                        ? `Your harvest payouts (${myPrompts.length}) — resolve in any order`
+                        : 'Your harvest payout';
+                    mineHtml = `
+                        <div style="font-weight:700;margin-bottom:6px;">${escapeHtml(mineTitle)}</div>
+                        <div style="display:flex;flex-direction:column;gap:8px;max-height:46vh;overflow-y:auto;">${decisions}</div>`;
+                } else if (iAmPending) {
+                    mineHtml = `<div class="mini" style="color:#666;">Resolving your harvest…</div>`;
+                }
+
+                // Opponents: status only — no specific payout is revealed.
+                const others = participantIds.filter(pid => String(pid) !== String(myPid));
+                const othersHtml = others.map(pid => {
+                    const isPending = pending.some(p => String(p) === String(pid));
+                    const statusHtml = isPending
+                        ? `<div style="display:inline-flex;align-items:center;gap:6px;color:#666;font-weight:600;"><span class="harvest-spinner" style="display:inline-block;width:16px;height:16px;border-radius:50%;border:2px solid #ddd;border-top-color:#7a7a7a;animation:harvest-spin .85s linear infinite;"></span><span>Deciding…</span></div>`
+                        : `<div style="display:inline-flex;align-items:center;gap:6px;color:#1f6a3a;font-weight:700;"><span style="display:inline-flex;width:18px;height:18px;border-radius:50%;background:#e3f5e9;border:1px solid #8ad0a4;align-items:center;justify-content:center;color:#1f6a3a;font-weight:800;font-size:13px;">&#10003;</span><span>Done</span></div>`;
                     return `
-                        <div style="display:grid;grid-template-columns:minmax(140px,1.2fr) minmax(160px,2fr) minmax(160px,auto);gap:10px;align-items:center;padding:8px 10px;border:1px solid ${rowBorder};border-radius:8px;background:${rowBg};">
-                            ${nameCell}
-                            ${summaryCell}
-                            <div style="display:flex;justify-content:flex-end;align-items:center;">${actionHtml}</div>
+                        <div style="display:grid;grid-template-columns:minmax(140px,1fr) minmax(120px,auto);gap:10px;align-items:center;padding:8px 10px;border:1px solid #e6e6e6;border-radius:8px;background:#fff;">
+                            <div style="font-weight:700;">${escapeHtml(nameFor(pid))}</div>
+                            <div style="display:flex;justify-content:flex-end;align-items:center;">${statusHtml}</div>
                         </div>`;
                 }).join('');
+                const othersBlock = othersHtml
+                    ? `<div class="mini" style="margin:10px 0 6px;text-transform:uppercase;letter-spacing:.04em;color:#777;">Other players</div>
+                       <div style="display:flex;flex-direction:column;gap:6px;">${othersHtml}</div>`
+                    : '';
 
                 panel.innerHTML = `
                     <style>@keyframes harvest-spin { to { transform: rotate(360deg); } }</style>
@@ -3102,7 +3101,8 @@
                         <div style="font-weight:800;margin-bottom:4px;">${escapeHtml(phase === 'finalize_bonus' ? 'Harvest bonus' : 'Harvest decisions')}</div>
                         <div class="mini" style="margin-bottom:6px;">${escapeHtml(titleLine)}</div>
                         <div class="mini" style="margin-bottom:10px;color:#444;">${subtitle}</div>
-                        <div style="display:flex;flex-direction:column;gap:6px;">${rowsHtml}</div>
+                        ${mineHtml}
+                        ${othersBlock}
                     </div>`;
             }
 

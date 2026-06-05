@@ -285,7 +285,22 @@ class HarvestEngine:
         # diverge whenever a card activates but its payout nets nothing
         # (e.g. an `exchange` you can't afford, a `count` that finds zero
         # of the counted thing, a steal against an empty victim, etc.).
-        activated_pids = {pid for pid, keys in self.game.harvest_consumed.items() if keys}
+        #
+        # A -1/-1 starter (Herald/Margrave) carries BOTH a `doubles` leg and a
+        # `no_payout` leg. The rulebook is explicit that on a doubles roll that
+        # does not activate any dice-value citizens the starter fires TWICE —
+        # once for doubles, once for no_payout. So that starter's own in-band
+        # doubles activation must NOT suppress its own no_payout trigger. Every
+        # other activation (peasant on 5, knight on 6, any citizen, or another
+        # starter) still suppresses it.
+        activated_pids = set()
+        for pid, keys in self.game.harvest_consumed.items():
+            if not keys:
+                continue
+            player = self.game._player_by_id(pid)
+            ignore = self._no_payout_starter_own_doubles_slot_keys(player)
+            if any(k not in ignore for k in keys):
+                activated_pids.add(pid)
         self.game.harvest_consumed = {}
         self.game._harvest_steal_phase_done = False
         # Pending may-slay prompts contributed gains directly (via slay_monster), so
@@ -305,20 +320,30 @@ class HarvestEngine:
         if self.game.pending_harvest_choices:
             bonus_targets = list(self.game.pending_harvest_choices)
             prompts = {}
+            seq = 0
+
+            def alloc_id():
+                nonlocal seq
+                seq += 1
+                return f"p{seq}"
+
             # Build per-player prompt payloads without mutating the legacy
-            # pending_harvest_choices queue in-place.
+            # pending_harvest_choices queue in-place. Each player's prompt is a
+            # LIST (usually one entry) so the client renders it the same way as
+            # the scan-phase decisions.
             for pid in bonus_targets:
                 self._activate_finalize_bonus_for(pid)
                 snap = self._snapshot_pending_harvest_prompt_for(pid)
                 if snap is not None:
-                    prompts[pid] = snap
+                    snap["id"] = alloc_id()
+                    prompts[pid] = [snap]
             # Stop using the sequential bonus queue: concurrent gate owns resolution.
             self.game.pending_harvest_choices = []
             if prompts:
                 self.game.concurrent_action = _new_concurrent_action(
                     "harvest_choices",
                     list(prompts.keys()),
-                    data={"phase": "finalize_bonus", "prompts": prompts},
+                    data={"phase": "finalize_bonus", "prompts": prompts, "prompt_seq": seq},
                 )
             else:
                 self.game.action_required["id"] = self.game.game_id
@@ -326,6 +351,31 @@ class HarvestEngine:
         else:
             self.game.action_required["id"] = self.game.game_id
             self.game.action_required["action"] = ""
+
+    def _no_payout_starter_own_doubles_slot_keys(self, player):
+        """Slot keys produced by a player's no_payout starter's doubles leg.
+
+        A starter that triggers on both `doubles` and `no_payout` (the -1/-1
+        Herald/Margrave) fires its doubles leg in-band during the harvest scan,
+        which records a consumed slot key. That self-activation must not count
+        as "a card fired" when deciding whether the same starter's no_payout
+        leg should fire at end of harvest, so this returns exactly those keys
+        for the caller to ignore. Other starters/citizens are never excluded.
+
+        The doubles leg always produces a single activation (index 0); see
+        `_build_harvest_slots`, where a -1/-1 starter never roll-matches and the
+        doubles leg sets `n = 1`.
+        """
+        keys = set()
+        if not player:
+            return keys
+        for idx, st in enumerate(getattr(player, "owned_starters", []) or []):
+            trig = (getattr(st, "activation_trigger", "") or "").lower()
+            if "no_payout" not in trig or "doubles" not in trig:
+                continue
+            sid = int(getattr(st, "starter_id", -1))
+            keys.add(f"starter:{sid}:{idx}:0")
+        return keys
 
     def _find_owned_starter_with_trigger(self, player, trigger_substr):
         """Return the first non-flipped owned starter whose activation_trigger
@@ -446,6 +496,74 @@ class HarvestEngine:
             if self._harvest_action_blocked():
                 return
 
+    def _collect_harvest_prompts_for(self, player_id, alloc_id, fire_magic_passive=True):
+        """Drain a player's harvest decisions into a list of prompt payloads.
+
+        Unlike `_harvest_drain_player` (which stops at the first decision), this
+        consumes harvest slots up front, auto-applying the non-interactive
+        payouts and snapshotting each interactive decision into a list.
+        Presenting the whole list at once lets the player resolve their payouts
+        in any order they like.
+
+        It is used both to open the gate (drain everything) and, from the
+        concurrent handler, to top up after a single decision resolves (pick up
+        any follow-up prompt plus slots that were left undrained).
+
+        `alloc_id` is a zero-arg callable returning a unique prompt id string.
+
+        Returns `(prompts_list, unsupported)`:
+          - `prompts_list`: ordered list of decision snapshots (each tagged with
+            an `id`), empty when there was nothing interactive to collect.
+          - `unsupported`: True if a slot opened a prompt the concurrent gate
+            can't represent, in which case the caller falls back to the legacy
+            sequential path.
+
+        Draining stops as soon as a snapshotted decision still carries a stashed
+        mid-payout continuation (`pending_payout_continuation`): consuming the
+        next slot while that is live would misresolve the compound payout. The
+        handler tops up again once the player resolves it.
+
+        The end-of-harvest `on_any_magic_gain` passive is applied here only when
+        `fire_magic_passive` is set AND nothing interactive was collected
+        (mirroring the legacy single drain for purely automatic harvests). When
+        the player has decisions it is deferred until they finish every one of
+        them — the concurrent handler fires it once the player's list empties.
+        """
+        out = []
+        player = self.game._player_by_id(player_id)
+        if not player:
+            return out, False
+        consumed_list = self.game.harvest_consumed.setdefault(player_id, [])
+        on_turn = player_id == self.game.lifecycle.current_player_id()
+        while True:
+            pr = self._snapshot_pending_harvest_prompt_for(player_id)
+            if pr is not None:
+                pr["id"] = alloc_id()
+                out.append(pr)
+                # A decision mid-way through a compound payout leaves a stashed
+                # continuation; don't consume further slots until it resolves.
+                if getattr(self.game, "pending_payout_continuation", None):
+                    return out, False
+                continue
+
+            ar = getattr(self.game, "action_required", None) or {}
+            if ar.get("id") == player_id and (ar.get("action") or "").strip():
+                # Unsupported prompt left standing; caller falls back to sequential.
+                return out, True
+
+            if getattr(self.game, "harvest_processed", False):
+                return out, False
+
+            slots = self._build_harvest_slots(player, consumed_list, on_turn)
+            if not slots:
+                if fire_magic_passive and not out:
+                    self._apply_harvest_on_any_magic_gain_passives(player)
+                return out, False
+
+            slot = self._harvest_slots_sorted_for_simulation(slots)[0]
+            self._apply_harvest_activation(player, slot["_obj"], slot["kind"], on_turn)
+            consumed_list.append(slot["slot_key"])
+
     def _harvest_drain_player(self, player_id):
         """Process harvest slots for `player_id` until a snapshotable prompt opens.
 
@@ -552,33 +670,49 @@ class HarvestEngine:
                 return True
 
         existing_prompts = {}
+        completed = set()
+        seq = 0
         if ca and ca.get("kind") == "harvest_choices":
-            existing_prompts = ((ca.get("data") or {}).get("prompts") or {}) or {}
+            data = ca.get("data") or {}
+            existing_prompts = (data.get("prompts") or {}) or {}
+            completed = set(ca.get("completed") or [])
+            seq = int(data.get("prompt_seq", 0) or 0)
 
+        def alloc_id():
+            nonlocal seq
+            seq += 1
+            return f"p{seq}"
+
+        # Per-player prompt LIST: every interactive decision the player has this
+        # harvest, drained up front so the client can show them all at once and
+        # let the player choose the resolution order.
         prompts = {}
         for pid in self.game.harvest_player_order or []:
+            if pid in completed:
+                continue
             if pid in existing_prompts:
                 prompts[pid] = existing_prompts[pid]
                 continue
-            nxt = self._harvest_drain_player(pid)
+            plist, unsupported = self._collect_harvest_prompts_for(pid, alloc_id)
             # Unsupported prompt: caller should fall back to legacy sequential.
-            if isinstance(nxt, dict) and nxt.get("__unsupported_prompt_action"):
+            if unsupported:
                 return False
-            if nxt is not None:
-                prompts[pid] = nxt
+            if plist:
+                prompts[pid] = plist
 
         if prompts:
             if not ca or ca.get("kind") != "harvest_choices":
                 self.game.concurrent_action = _new_concurrent_action(
                     "harvest_choices",
                     list(prompts.keys()),
-                    data={"phase": "scan", "prompts": prompts},
+                    data={"phase": "scan", "prompts": prompts, "prompt_seq": seq},
                 )
             else:
                 # Preserve the same concurrent_action dict; just update prompt payloads.
                 ca.setdefault("data", {})
                 ca["data"]["phase"] = "scan"
                 ca["data"]["prompts"] = prompts
+                ca["data"]["prompt_seq"] = seq
                 ca["pending"] = [pid for pid in prompts.keys()]
             return True
 
@@ -893,6 +1027,15 @@ class HarvestEngine:
         cost_res = prc["cost_resource"]
         cost_amt = prc["cost_amount"]
         gain_amt = prc["gain_amount"]
+        # Resolution order is player-chosen now, so an earlier decision may have
+        # spent the resource this exchange was priced against. Re-check before
+        # paying so reordering can never push a balance negative.
+        if int(getattr(player, self._WILD_SCORE_MAP[cost_res], 0) or 0) < cost_amt:
+            self.game._log_game_event(
+                f"{self.game._player_label(player_id)} could no longer afford harvest exchange "
+                f"({prc.get('command')}); skipped."
+            )
+            return
         before = self.game._player_scores_line(player)
         setattr(player, self._WILD_SCORE_MAP[cost_res],
                 int(getattr(player, self._WILD_SCORE_MAP[cost_res], 0)) - cost_amt)
@@ -955,6 +1098,15 @@ class HarvestEngine:
             return
         gain_res = prc["gain_resource"]
         gain_amt = prc["gain_amount"]
+        # Resolution order is player-chosen now, so an earlier decision may have
+        # spent the resource this exchange was priced against. Re-check before
+        # paying so reordering can never push a balance negative.
+        if int(getattr(player, self._WILD_SCORE_MAP[cost_res], 0) or 0) < cost_amt:
+            self.game._log_game_event(
+                f"{self.game._player_label(player_id)} could no longer afford harvest exchange "
+                f"({prc.get('command')}); skipped."
+            )
+            return
         before = self.game._player_scores_line(player)
         setattr(player, self._WILD_SCORE_MAP[cost_res],
                 int(getattr(player, self._WILD_SCORE_MAP[cost_res], 0)) - cost_amt)
