@@ -96,11 +96,22 @@ class PayoutsEngine:
         )
         self.game.domain_effects._apply_domain_activation_effect(player, acquired)
 
-    def _execute_build_domain_activation_payout(self, player_id):
-        """Offer the active player an optional free domain build (Ararmartin Ridge)."""
+    def _execute_build_domain_activation_payout(self, player_id, balance_hint=None):
+        """Offer the active player an optional free domain build (Ararmartin Ridge).
+
+        `balance_hint` carries the running resource totals when this runs as a leg
+        of a compound payout (e.g. Ararmartin Ridge's `g 3 + build_domain`). The
+        earlier `g 3` leg's gold is accumulated into the hint but not yet written
+        to `player.gold_score`, so affordability must consult the hint to avoid
+        reporting "no affordable domains" against the player's pre-gain gold.
+        """
         player = self.game._player_by_id(player_id)
         if not player:
             return [-9999, 0, 0, 0]
+        if isinstance(balance_hint, dict) and "g" in balance_hint:
+            available_gold = int(balance_hint.get("g", 0) or 0)
+        else:
+            available_gold = int(getattr(player, "gold_score", 0) or 0)
         have = self.game._player_citizen_role_totals(player)
         has_pratchett = self.game._player_has_action_effect_flag(player, "action.pratchettsplateau")
         options = []
@@ -125,7 +136,7 @@ class PayoutsEngine:
                 gold_cost = max(0, gold_cost - 1)
             if self.game._player_has_action_effect_flag(player, "action.blessedlands"):
                 gold_cost = max(0, gold_cost - self.game.events.blessed_lands_discount())
-            if int(getattr(player, "gold_score", 0) or 0) < gold_cost:
+            if available_gold < gold_cost:
                 continue
             options.append({
                 "stack_idx": stack_idx,
@@ -829,7 +840,7 @@ class PayoutsEngine:
                 suppress_exchange_optional_prompt=suppress_exchange_optional_prompt,
             )
         if low == "build_domain":
-            return self._execute_build_domain_activation_payout(player_id)
+            return self._execute_build_domain_activation_payout(player_id, balance_hint=balance_hint)
         if low == "concurrent_flip_one_citizen":
             self.game.dice._begin_concurrent_flip_one_citizen(player_id)
             return [0, 0, 0, 0]

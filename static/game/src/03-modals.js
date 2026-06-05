@@ -649,7 +649,7 @@ function fillCardModalInspectInfo(infoEl, card, ownerPlayerId) {
       note.textContent = 'The next domain in this pile stays face-down until the end of the turn of the player who built from here.';
     } else if (isHiddenDuke) {
       note.textContent = dukeTableData
-        ? "This duke is hidden, but here's how every duke would score for this tableau right now."
+        ? "This duke is hidden, but here's how every duke except yours would score for this tableau right now."
         : "This duke is hidden from opponents. You'll see its identity at end-of-game scoring.";
     } else {
       note.textContent = 'This card is not visible to you right now.';

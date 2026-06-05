@@ -3043,15 +3043,22 @@
                     const p = players.find(x => (x?.player_id || '') === pid);
                     return (p?.name ?? pid ?? 'Player').toString();
                 }
+                // Trim before comparing so a player id carrying stray whitespace
+                // still matches its prompt bucket (mirrors idsMatch in the main client).
+                const sameId = (a, b) => String(a ?? '').trim() === String(b ?? '').trim();
                 function promptListFor(pid) {
-                    const raw = prompts[pid] || prompts[String(pid)] || null;
+                    let raw = prompts[pid] || prompts[String(pid)] || null;
+                    if (!raw) {
+                        const key = Object.keys(prompts).find(k => sameId(k, pid));
+                        raw = key ? prompts[key] : null;
+                    }
                     if (Array.isArray(raw)) return raw;
                     return raw ? [raw] : [];
                 }
 
                 // Viewer's own payouts: all decisions at once, resolvable in any order.
                 const myPrompts = promptListFor(myPid);
-                const iAmPending = pending.some(p => String(p) === String(myPid));
+                const iAmPending = pending.some(p => sameId(p, myPid));
                 let mineHtml = '';
                 if (iAmPending && myPrompts.length) {
                     const decisions = myPrompts.map(prompt => {
@@ -3078,9 +3085,9 @@
                 }
 
                 // Opponents: status only — no specific payout is revealed.
-                const others = participantIds.filter(pid => String(pid) !== String(myPid));
+                const others = participantIds.filter(pid => !sameId(pid, myPid));
                 const othersHtml = others.map(pid => {
-                    const isPending = pending.some(p => String(p) === String(pid));
+                    const isPending = pending.some(p => sameId(p, pid));
                     const statusHtml = isPending
                         ? `<div style="display:inline-flex;align-items:center;gap:6px;color:#666;font-weight:600;"><span class="harvest-spinner" style="display:inline-block;width:16px;height:16px;border-radius:50%;border:2px solid #ddd;border-top-color:#7a7a7a;animation:harvest-spin .85s linear infinite;"></span><span>Deciding…</span></div>`
                         : `<div style="display:inline-flex;align-items:center;gap:6px;color:#1f6a3a;font-weight:700;"><span style="display:inline-flex;width:18px;height:18px;border-radius:50%;background:#e3f5e9;border:1px solid #8ad0a4;align-items:center;justify-content:center;color:#1f6a3a;font-weight:800;font-size:13px;">&#10003;</span><span>Done</span></div>`;

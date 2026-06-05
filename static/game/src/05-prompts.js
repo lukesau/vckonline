@@ -1079,8 +1079,6 @@ function renderConcurrentHarvestChoices(state, concurrent) {
     : {}) || {};
   const phase = (concurrent?.data && concurrent.data.phase) || 'scan';
 
-  const myPid = (PLAYER_ID || '').toString();
-
   // Preserve harvest seat order if known; otherwise fall back to player_list
   // order. We always include every participant (pending + completed) so the
   // viewer can see whose decisions are still outstanding.
@@ -1115,9 +1113,17 @@ function renderConcurrentHarvestChoices(state, concurrent) {
   // ── Your payouts ────────────────────────────────────────────────────────
   // Every decision the viewer owns is shown at once so they can resolve them
   // in whatever order they like. The list scrolls when there are many.
-  const myRaw = prompts[myPid] || prompts[String(myPid)] || null;
+  // Match the viewer to their prompt bucket the same way every other concurrent
+  // renderer does — via idsMatch, which trims before comparing. A raw === lookup
+  // (or prompts[myPid] keyed access) silently fails when a player's PLAYER_ID
+  // carries whitespace the server-side id doesn't, dropping them into the
+  // "Other players / Deciding…" roster even though they own a live prompt.
+  const myPromptKey = PLAYER_ID
+    ? Object.keys(prompts).find(k => idsMatch(k, PLAYER_ID))
+    : null;
+  const myRaw = myPromptKey ? prompts[myPromptKey] : null;
   const myPrompts = Array.isArray(myRaw) ? myRaw : (myRaw ? [myRaw] : []);
-  const iAmPending = pending.some(p => String(p) === myPid);
+  const iAmPending = !!(PLAYER_ID && pending.some(p => idsMatch(p, PLAYER_ID)));
 
   if (iAmPending && myPrompts.length) {
     const mine = mk('prompt-harvest-mine');
@@ -1165,8 +1171,8 @@ function renderConcurrentHarvestChoices(state, concurrent) {
   // longer surface which specific payout they happen to be resolving.
   const roster = mk('prompt-harvest-roster');
   participantIds.forEach(pid => {
-    if (String(pid) === myPid) return;
-    const isPending = pending.some(p => String(p) === String(pid));
+    if (idsMatch(pid, PLAYER_ID)) return;
+    const isPending = pending.some(p => idsMatch(p, pid));
 
     const row = mk('prompt-harvest-row prompt-harvest-row--status');
     row.classList.add(isPending ? 'is-pending' : 'is-done');
