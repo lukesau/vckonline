@@ -243,6 +243,9 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 .wiki-chip:hover {
   border-color: var(--accent-soft);
@@ -538,13 +541,25 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   margin-bottom: 12px;
 }
 .wiki-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
-  padding: 3px 8px;
+  padding: 3px 8px 3px 5px;
   border-radius: 999px;
   color: #fff;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+.wiki-role-icon {
+  display: block;
+  width: 1.5em;
+  height: 1.5em;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  object-fit: contain;
+  flex: none;
 }
 .wiki-role.shadow  { background: var(--shadow); }
 .wiki-role.holy    { background: var(--holy); color: #1a1a1a; }
@@ -644,8 +659,19 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
 }
 .wiki-mult.zero { opacity: 0.4; }
 .wiki-mult-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: var(--muted);
   text-transform: capitalize;
+}
+.wiki-mult-label .wiki-role-icon {
+  width: 1.4em;
+  height: 1.4em;
+}
+.wiki-chip .wiki-role-icon {
+  width: 1.3em;
+  height: 1.3em;
 }
 .wiki-mult-value {
   font-weight: 600;

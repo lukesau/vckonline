@@ -83,6 +83,19 @@
 
   const titleCase = (s) => (s || "").toString().replace(/\b\w/g, c => c.toUpperCase());
 
+  // Citizen-role icon art (lives at /images/<role>.png). Rendered alongside
+  // the text label so the wiki stays readable at a glance.
+  const ROLE_ICONS = {
+    shadow:  "/images/shadow.png",
+    holy:    "/images/holy.png",
+    soldier: "/images/soldier.png",
+    worker:  "/images/worker.png",
+  };
+  const roleIcon = (role) =>
+    ROLE_ICONS[role]
+      ? h("img", { class: "wiki-role-icon", src: ROLE_ICONS[role], alt: "", "aria-hidden": "true" })
+      : null;
+
   // ── alt artwork helpers ───────────────────────────────────────────────
   const altKey = (type, id) => `${type}_${id}`;
   const isAltActive = (type, id) => state.altSelections.has(altKey(type, id));
@@ -168,9 +181,10 @@
         h("span", { class: "wiki-filter-label" }, group.label));
       for (const opt of group.options) {
         const active = (state.filters[type]?.[group.key]) === opt.value;
+        const chipIcon = group.key === "role" ? roleIcon(opt.value) : null;
         const chip = h("button", {
-          class: "wiki-chip" + (active ? " active" : ""),
-        }, opt.label);
+          class: "wiki-chip" + (chipIcon ? " wiki-chip--icon" : "") + (active ? " active" : ""),
+        }, chipIcon, opt.label);
         chip.addEventListener("click", () => {
           state.filters[type] = state.filters[type] || {};
           if (state.filters[type][group.key] === opt.value) {
@@ -584,10 +598,10 @@
 
   function renderRoles(card) {
     const roles = [];
-    if (card.shadow_count > 0)  roles.push(h("span", { class: "wiki-role shadow"  }, `Shadow × ${card.shadow_count}`));
-    if (card.holy_count > 0)    roles.push(h("span", { class: "wiki-role holy"    }, `Holy × ${card.holy_count}`));
-    if (card.soldier_count > 0) roles.push(h("span", { class: "wiki-role soldier" }, `Soldier × ${card.soldier_count}`));
-    if (card.worker_count > 0)  roles.push(h("span", { class: "wiki-role worker"  }, `Worker × ${card.worker_count}`));
+    if (card.shadow_count > 0)  roles.push(h("span", { class: "wiki-role shadow"  }, roleIcon("shadow"),  `Shadow × ${card.shadow_count}`));
+    if (card.holy_count > 0)    roles.push(h("span", { class: "wiki-role holy"    }, roleIcon("holy"),    `Holy × ${card.holy_count}`));
+    if (card.soldier_count > 0) roles.push(h("span", { class: "wiki-role soldier" }, roleIcon("soldier"), `Soldier × ${card.soldier_count}`));
+    if (card.worker_count > 0)  roles.push(h("span", { class: "wiki-role worker"  }, roleIcon("worker"),  `Worker × ${card.worker_count}`));
     if (!roles.length) return null;
     return h("div", { class: "wiki-roles" }, ...roles);
   }
@@ -747,8 +761,9 @@
     ];
     const mults = multFields.map(([key, label]) => {
       const v = Number(card[key] || 0);
+      const role = key.replace("_multiplier", "");
       return h("div", { class: "wiki-mult" + (v === 0 ? " zero" : "") },
-        h("span", { class: "wiki-mult-label" }, label),
+        h("span", { class: "wiki-mult-label" }, roleIcon(role), label),
         h("span", { class: "wiki-mult-value" }, v.toString()),
       );
     });

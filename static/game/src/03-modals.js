@@ -3,6 +3,10 @@ function detailPill(label, value) {
   return `<span class="player-detail-pill"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</span>`;
 }
 
+function detailRolePill(role, label, value) {
+  return `<span class="player-detail-pill player-detail-pill--role" title="${escapeHtml(label)}">${roleIconHtml(role)}<strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</span>`;
+}
+
 function tableauCardFullText(card) {
   if (!card || typeof card !== 'object') return '';
   const rawText = (card.text ?? '').toString().trim();
@@ -85,14 +89,14 @@ function renderDetailCardItem(card, count = 1) {
 
   const { sn, hn, son, wn } = citizenRoleCounts(card);
   const roleParts = [];
-  if (sn > 0) roleParts.push(`Shadow +${sn}`);
-  if (hn > 0) roleParts.push(`Holy +${hn}`);
-  if (son > 0) roleParts.push(`Soldier +${son}`);
-  if (wn > 0) roleParts.push(`Worker +${wn}`);
+  if (sn > 0) roleParts.push(`${roleIconHtml('shadow')}Shadow +${sn}`);
+  if (hn > 0) roleParts.push(`${roleIconHtml('holy')}Holy +${hn}`);
+  if (son > 0) roleParts.push(`${roleIconHtml('soldier')}Soldier +${son}`);
+  if (wn > 0) roleParts.push(`${roleIconHtml('worker')}Worker +${wn}`);
   const isDomain = card.domain_id !== undefined && card.domain_id !== null;
   const showRoleRow = (isCitizen || isDomain) && roleParts.length;
   const roleBlock = showRoleRow
-    ? `<div class="player-detail-item-sub"><strong>Roles:</strong> ${escapeHtml(roleParts.join(' · '))}</div>`
+    ? `<div class="player-detail-item-sub"><strong>Roles:</strong> ${roleParts.map(p => `<span class="role-inline">${p}</span>`).join(' ')}</div>`
     : '';
 
   const subtitle = hints.length ? `<div class="player-detail-item-sub">${escapeHtml(hints.join(' · '))}</div>` : '';
@@ -140,10 +144,10 @@ function renderPlayerDetailInner(state, playerId) {
       ${detailPill('Strength', subject.strength_score ?? 0)}
       ${detailPill('Magic', subject.magic_score ?? 0)}
       ${detailPill('Victory', subject.victory_score ?? 0)}
-      ${detailPill('Shadow', subject.shadow_count ?? 0)}
-      ${detailPill('Holy', subject.holy_count ?? 0)}
-      ${detailPill('Soldier', subject.soldier_count ?? 0)}
-      ${detailPill('Worker', subject.worker_count ?? 0)}
+      ${detailRolePill('shadow', 'Shadow', subject.shadow_count ?? 0)}
+      ${detailRolePill('holy', 'Holy', subject.holy_count ?? 0)}
+      ${detailRolePill('soldier', 'Soldier', subject.soldier_count ?? 0)}
+      ${detailRolePill('worker', 'Worker', subject.worker_count ?? 0)}
       ${detailPill('Minion', subject.minion_count ?? 0)}
       ${detailPill('Titan', subject.titan_count ?? 0)}
       ${detailPill('Warden', subject.warden_count ?? 0)}
@@ -996,12 +1000,19 @@ function buildCardStats(card) {
   if (card.magic_reward)    push('Mag reward',   card.magic_reward,    'modal-mag',  'magic', true);
 
   if (card.domain_id != null) {
-    const req = [];
-    if (card.shadow_count)  req.push(`${card.shadow_count} Shadow`);
-    if (card.holy_count)    req.push(`${card.holy_count} Holy`);
-    if (card.soldier_count) req.push(`${card.soldier_count} Soldier`);
-    if (card.worker_count)  req.push(`${card.worker_count} Worker`);
-    if (req.length) push('Requires', req.join(', '));
+    const reqRoles = [
+      ['shadow',  'Shadow',  card.shadow_count],
+      ['holy',    'Holy',    card.holy_count],
+      ['soldier', 'Soldier', card.soldier_count],
+      ['worker',  'Worker',  card.worker_count],
+    ].filter(([, , n]) => n);
+    if (reqRoles.length) {
+      const html = reqRoles
+        .map(([role, label, n]) => `<span class="role-inline">${roleIconHtml(role)}${n} ${label}</span>`)
+        .join(' ');
+      const text = reqRoles.map(([, label, n]) => `${n} ${label}`).join(', ');
+      rows.push({ label: 'Requires', value: text, html, cls: '', resource: null, leadingPlus: false });
+    }
   }
 
   if (card.starter_id != null) {

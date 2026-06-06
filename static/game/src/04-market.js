@@ -1065,30 +1065,39 @@ function appendMarketCompactStatLine(infoEl, card, ctx) {
   if (card.magic_reward)    items.push(makeSignedModalResource('magic', card.magic_reward, 'modal-mag', '+'));
 
   if (card.domain_id != null) {
-    const req = [];
-    if (card.shadow_count)  req.push(`${card.shadow_count} Shadow`);
-    if (card.holy_count)    req.push(`${card.holy_count} Holy`);
-    if (card.soldier_count) req.push(`${card.soldier_count} Soldier`);
-    if (card.worker_count)  req.push(`${card.worker_count} Worker`);
-    if (req.length) {
+    const reqRoles = [
+      ['shadow',  'Shadow',  card.shadow_count],
+      ['holy',    'Holy',    card.holy_count],
+      ['soldier', 'Soldier', card.soldier_count],
+      ['worker',  'Worker',  card.worker_count],
+    ].filter(([, , n]) => n);
+    if (reqRoles.length) {
       const el = document.createElement('span');
       el.className = 'market-stat-inline-text';
-      el.textContent = `Requires ${req.join(', ')}`;
+      el.append('Requires ');
+      reqRoles.forEach(([role, label, n], i) => {
+        if (i > 0) el.append(', ');
+        el.appendChild(makeRoleInlineEl(role, `${n} ${label}`));
+      });
       items.push(el);
     }
   }
 
   if (card.citizen_id != null || card.domain_id != null) {
     const rc = citizenRoleCounts(card);
-    const rp = [];
-    if (rc.sn > 0)  rp.push(`Shadow +${rc.sn}`);
-    if (rc.hn > 0)  rp.push(`Holy +${rc.hn}`);
-    if (rc.son > 0) rp.push(`Soldier +${rc.son}`);
-    if (rc.wn > 0)  rp.push(`Worker +${rc.wn}`);
+    const rp = [
+      ['shadow',  'Shadow',  rc.sn],
+      ['holy',    'Holy',    rc.hn],
+      ['soldier', 'Soldier', rc.son],
+      ['worker',  'Worker',  rc.wn],
+    ].filter(([, , n]) => n > 0);
     if (rp.length) {
       const el = document.createElement('span');
       el.className = 'market-stat-inline-text';
-      el.textContent = rp.join(' · ');
+      rp.forEach(([role, label, n], i) => {
+        if (i > 0) el.append(' · ');
+        el.appendChild(makeRoleInlineEl(role, `${label} +${n}`));
+      });
       items.push(el);
     }
   }

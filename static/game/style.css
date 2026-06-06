@@ -2997,6 +2997,31 @@ select.lobby-input:disabled {
   object-fit: contain;
 }
 
+/* Citizen-role icons (Shadow / Holy / Soldier / Worker). Shown next to the
+   role text in modals and the market inspect panel. */
+.role-icon {
+  display: inline-block;
+  vertical-align: middle;
+  width: 1.4em;
+  height: 1.4em;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  object-fit: contain;
+  flex: none;
+}
+.role-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.player-detail-pill--role {
+  align-items: center;
+}
+.player-detail-pill--role .role-icon {
+  margin-right: 2px;
+}
+
 .modal-card-text {
   font-size: 16px;
   color: rgba(255,255,255,0.65);

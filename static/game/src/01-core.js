@@ -259,3 +259,41 @@ function escapeHtml(s) {
     .replaceAll("'", '&#039;');
 }
 
+// Citizen-role icon art (lives at /images/<role>.png). Shown next to the role
+// text in modals/inspect panels and standalone where space is tight.
+const ROLE_ICON_SRC = {
+  shadow:  '/images/shadow.png',
+  holy:    '/images/holy.png',
+  soldier: '/images/soldier.png',
+  worker:  '/images/worker.png',
+};
+
+/** Inline <img> HTML for a citizen role, or '' for unknown roles. */
+function roleIconHtml(role) {
+  const src = ROLE_ICON_SRC[(role || '').toString().toLowerCase()];
+  if (!src) return '';
+  return `<img class="role-icon" src="${src}" alt="" aria-hidden="true">`;
+}
+
+/** Detached <img> element for a citizen role, or null for unknown roles. */
+function roleIconEl(role) {
+  const src = ROLE_ICON_SRC[(role || '').toString().toLowerCase()];
+  if (!src) return null;
+  const img = document.createElement('img');
+  img.className = 'role-icon';
+  img.src = src;
+  img.alt = '';
+  img.setAttribute('aria-hidden', 'true');
+  return img;
+}
+
+/** Span element: role icon followed by text (e.g. "2 Shadow"). */
+function makeRoleInlineEl(role, text) {
+  const span = document.createElement('span');
+  span.className = 'role-inline';
+  const icon = roleIconEl(role);
+  if (icon) span.appendChild(icon);
+  span.append(text);
+  return span;
+}
+

@@ -1148,7 +1148,8 @@ function createModalStatValueEl(row) {
   }
   const v = document.createElement('span');
   v.className = row.cls ? `modal-stat-value ${row.cls}` : 'modal-stat-value';
-  v.textContent = row.value;
+  if (row.html != null) v.innerHTML = row.html;
+  else v.textContent = row.value;
   return v;
 }
 
