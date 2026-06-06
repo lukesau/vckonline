@@ -1,8 +1,25 @@
 import unittest
 
-from cards import Citizen, Event
+from cards import Citizen, Event, Starter
 from game import Game
 from game_models import Player
+
+
+def make_no_payout_starter(starter_id, gold_on=1, gold_off=1):
+    """A -1/-1 starter with a flat `no_payout`/`doubles` gold payout.
+
+    Mirrors Herald/Margrave's activation gate (never roll-matches; fires on
+    the doubles and end-of-harvest no_payout outcomes) with a non-interactive
+    flat payout so the harvest stays automatic.
+    """
+    return Starter(
+        starter_id, "Test Slot Starter", -1, -1,
+        gold_on, gold_off,
+        0, 0, 0, 0,
+        False, False, "", "",
+        "test",
+        "doubles_or_no_payout",
+    )
 
 
 def make_match1_citizen(citizen_id, gold_on=2, gold_off=1):
@@ -105,23 +122,35 @@ class FivePlayerRestingTests(unittest.TestCase):
         ])
         self.assertNotIn(players[1].player_id, order)
 
-    def test_resting_seat_excluded_from_no_payout_consolation(self):
+    def test_resting_seat_excluded_from_no_payout_starter_payout(self):
         game, players = make_n_player_game(5, turn_index=0, with_match_citizens=False)
+        # Every player owns a flat no_payout starter; nobody has dice-matching
+        # cards, so the end-of-harvest no_payout leg fires its depicted payout.
+        for p in players:
+            p.owned_starters.append(make_no_payout_starter(200 + int(p.player_id[1:])))
 
-        # Drive the harvest forward; nobody has matching cards, so the engine
-        # finalizes harvest and opens a `harvest_choices` concurrent gate for
-        # the missed-harvest bonus decisions (excluding the resting seat).
         game.advance_tick()
 
-        ca = game.concurrent_action or {}
-        self.assertEqual(ca.get("kind"), "harvest_choices")
-        self.assertEqual((ca.get("data") or {}).get("phase"), "finalize_bonus")
+        self.assertEqual(players[0].gold_score, 1,
+                         "Active player's no_payout starter pays its on-turn amount")
+        for p in players[1:4]:
+            self.assertEqual(p.gold_score, 1,
+                             "Off-turn players' no_payout starter pays out")
+        self.assertEqual(players[4].gold_score, 0,
+                         "Resting player's no_payout starter must not fire")
 
-        pending = list(ca.get("pending") or [])
-        self.assertNotIn(players[4].player_id, pending,
-                         "Resting player must not get the no-payout consolation")
-        for p in players[:4]:
-            self.assertIn(p.player_id, pending)
+    def test_no_slot_starter_means_nothing_on_no_payout(self):
+        # A board with no -1/-1 starter at all: the no_payout outcome grants
+        # nothing and opens no consolation prompt.
+        game, players = make_n_player_game(4, turn_index=0, with_match_citizens=False)
+
+        game.advance_tick()
+
+        self.assertIsNone(game.concurrent_action)
+        for p in players:
+            self.assertEqual(p.gold_score, 0)
+            self.assertEqual(p.strength_score, 0)
+            self.assertEqual(p.magic_score, 0)
 
     def test_four_player_game_has_no_resting_seat(self):
         game, players = make_n_player_game(4, turn_index=0)

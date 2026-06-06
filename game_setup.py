@@ -120,8 +120,8 @@ def _sort_monster_areas_by_top_card_cost(chosen_areas, grouped_monsters):
         stack = list(grouped_monsters.get(area) or [])
         if not stack:
             return 9999
-        # Compare the opposite end of the stack from the face-up board top.
-        top = stack[0]
+        # Compare the face-up board top of the stack.
+        top = stack[-1]
         strength = int(getattr(top, "strength_cost", 0) or 0)
         magic = int(getattr(top, "magic_cost", 0) or 0)
         return strength + magic

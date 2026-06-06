@@ -279,19 +279,24 @@ class HarvestEngine:
         self.game.harvest_player_order = None
         self.game.harvest_player_idx = 0
         # Snapshot which players had any card activate this harvest BEFORE
-        # resetting the bookkeeping. We gate the end-of-harvest bonus
-        # (legacy bonus_resource_choice or Herald's `no_payout` trigger) on
-        # "no cards of yours fired", not on "harvest_delta is zero" — those
-        # diverge whenever a card activates but its payout nets nothing
-        # (e.g. an `exchange` you can't afford, a `count` that finds zero
-        # of the counted thing, a steal against an empty victim, etc.).
+        # resetting the bookkeeping. The end-of-harvest `no_payout` trigger
+        # is gated on "no cards of yours fired", not on "harvest_delta is
+        # zero" — those diverge whenever a card activates but its payout nets
+        # nothing (e.g. an `exchange` you can't afford, a `count` that finds
+        # zero of the counted thing, a steal against an empty victim, etc.).
         #
-        # A -1/-1 starter (Herald/Margrave) carries BOTH a `doubles` leg and a
-        # `no_payout` leg. The rulebook is explicit that on a doubles roll that
-        # does not activate any dice-value citizens the starter fires TWICE —
-        # once for doubles, once for no_payout. So that starter's own in-band
-        # doubles activation must NOT suppress its own no_payout trigger. Every
-        # other activation (peasant on 5, knight on 6, any citizen, or another
+        # The end-of-harvest payout is ENTIRELY card-driven: only a player who
+        # owns a -1/-1 starter (e.g. Herald/Margrave) with a `no_payout`
+        # activation trigger gets anything, and they get exactly what their
+        # card depicts. There is no default consolation — a board with no
+        # -1/-1 starter at all means nothing happens on the no_payout outcome.
+        #
+        # A -1/-1 starter carries BOTH a `doubles` leg and a `no_payout` leg.
+        # The rulebook is explicit that on a doubles roll that does not
+        # activate any dice-value citizens the starter fires TWICE — once for
+        # doubles, once for no_payout. So that starter's own in-band doubles
+        # activation must NOT suppress its own no_payout trigger. Every other
+        # activation (peasant on 5, knight on 6, any citizen, or another
         # starter) still suppresses it.
         activated_pids = set()
         for pid, keys in self.game.harvest_consumed.items():
@@ -309,14 +314,21 @@ class HarvestEngine:
         self.game.pending_harvest_slays = []
         self.game.pending_harvest_choices = []
         # 5-player resting seat: that player did not harvest at all this round,
-        # so they do NOT get the missed-harvest consolation prompt either (they
-        # would otherwise look identical to "had no matching cards").
+        # so they are excluded here too (they would otherwise look identical to
+        # "had no matching cards").
+        #
+        # Only players who own a `no_payout` starter are enqueued — the
+        # end-of-harvest payout comes solely from that card. A player with no
+        # such starter gets nothing on the no_payout outcome.
         resting_pid = self.game.resting_player_id()
         for p in self.game.player_list:
             if resting_pid is not None and p.player_id == resting_pid:
                 continue
-            if p.player_id not in activated_pids:
-                self.game.pending_harvest_choices.append(p.player_id)
+            if p.player_id in activated_pids:
+                continue
+            if self._find_owned_starter_with_trigger(p, "no_payout") is None:
+                continue
+            self.game.pending_harvest_choices.append(p.player_id)
         if self.game.pending_harvest_choices:
             bonus_targets = list(self.game.pending_harvest_choices)
             prompts = {}
@@ -389,32 +401,25 @@ class HarvestEngine:
         return None
 
     def _activate_finalize_bonus_for(self, player_id):
-        """Open the end-of-harvest bonus prompt for `player_id`.
+        """Fire the end-of-harvest `no_payout` starter payout for `player_id`.
 
-        This method is now *non-iterative*: it opens exactly one prompt for
-        `player_id` and does not walk `pending_harvest_choices`. The concurrent
-        wrapper (finalize_bonus) is responsible for opening the gate for all
-        relevant players at once.
+        This method is *non-iterative*: it resolves exactly the depicted
+        payout of the player's `no_payout` starter and does not walk
+        `pending_harvest_choices`. The concurrent wrapper (finalize_bonus) is
+        responsible for opening the gate for all relevant players at once.
+
+        The end-of-harvest payout is entirely card-driven: there is no default
+        consolation. `_harvest_complete_finalize` only enqueues players who own
+        a `no_payout` starter, so a missing starter here is a no-op.
         """
         player = self.game._player_by_id(player_id)
         if not player:
             return
         starter = self._find_owned_starter_with_trigger(player, "no_payout")
-        if starter is not None:
-            on_turn = player_id == self.game.lifecycle.current_player_id()
-            self._apply_harvest_activation(player, starter, "starter", on_turn)
-            aa = (self.game.action_required.get("action") or "").strip()
-            aid = self.game.action_required.get("id")
-            # Activation normally opens a `choose ...` prompt; if it didn't (e.g.
-            # malformed special_payout), fall back to the legacy bonus prompt.
-            if not (aid == player_id and aa):
-                self.game.action_required["id"] = player_id
-                self.game.action_required["action"] = "bonus_resource_choice"
+        if starter is None:
             return
-
-        # Legacy fallback: hard-coded bonus_resource_choice prompt.
-        self.game.action_required["id"] = player_id
-        self.game.action_required["action"] = "bonus_resource_choice"
+        on_turn = player_id == self.game.lifecycle.current_player_id()
+        self._apply_harvest_activation(player, starter, "starter", on_turn)
 
     def _harvest_run_automation_until_blocked(self):
         # Steal pre-phase: all steal effects across all players fire first, in harvest

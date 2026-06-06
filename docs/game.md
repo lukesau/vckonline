@@ -229,9 +229,16 @@ The skip is implemented in one place — `_harvest_player_id_order_starting_acti
 filters the resting seat out of the harvest turn order, which is what both
 the interactive harvest loop (`_harvest_run_automation_until_blocked`) and
 the silent batch path (`harvest_phase`) iterate. `_harvest_complete_finalize`
-also excludes the resting seat from `pending_harvest_choices` so the
-missed-harvest consolation (legacy `bonus_resource_choice` or Herald's
-`no_payout` starter) does not fire for that player.
+also excludes the resting seat from `pending_harvest_choices` so its
+`no_payout` starter (if any) does not fire for that player.
+
+The end-of-harvest "no payout" / "doubles" outcome is entirely card-driven:
+the only thing that can fire is an owned -1/-1 starter (e.g. Herald,
+Margrave) via its `activation_trigger`, and it pays exactly what the card
+depicts. There is no default consolation — a player who owns no such starter
+(or a hypothetical board with no -1/-1 starter at all) gets nothing on the
+no_payout and doubles outcomes. `_harvest_complete_finalize` enqueues a
+player for the finalize-bonus gate only when they own a `no_payout` starter.
 
 `resting_player_id` is exposed on the serialized game state; clients render
 a "Resting" badge on that player's tableau (see `static/game/src/02-render-and-board.js`

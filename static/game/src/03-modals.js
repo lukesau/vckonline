@@ -255,21 +255,21 @@ function finalResultFromState(state) {
   if (vpTied.length === 1) {
     return { kind: 'win', headline: `${scores[0].name} wins!`, detail: null };
   }
-  const minTableau = Math.min(...vpTied.map(s => Number(s.tableau_size) || 0));
-  const winners = vpTied.filter(s => Number(s.tableau_size) === minTableau);
+  const maxTableau = Math.max(...vpTied.map(s => Number(s.tableau_size) || 0));
+  const winners = vpTied.filter(s => Number(s.tableau_size) === maxTableau);
   if (winners.length === 1) {
     const w = winners[0];
     return {
       kind: 'tiebreak',
       headline: `${w.name} wins on tie-break!`,
-      detail: `Tied at ${topVp} VP; ${w.name} had the smaller tableau.`,
+      detail: `Tied at ${topVp} VP; ${w.name} had the larger tableau.`,
     };
   }
   const names = winners.map(s => s.name).join(', ');
   return {
     kind: 'tie',
     headline: 'Tie game!',
-    detail: `${names} tied at ${topVp} VP with ${minTableau} tableau cards each.`,
+    detail: `${names} tied at ${topVp} VP with ${maxTableau} tableau cards each.`,
   };
 }
 

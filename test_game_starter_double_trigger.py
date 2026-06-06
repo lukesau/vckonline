@@ -23,6 +23,19 @@ def make_herald(starter_id, gold_on=1, gold_off=1):
     )
 
 
+def make_margrave(starter_id):
+    """A -1/-1 no-payout starter with Margrave's printed payout shape."""
+    return Starter(
+        starter_id, "Margrave", -1, -1,
+        1, 0,
+        1, 0,
+        1, 0,
+        False, True, "", "exchange wild 1 v 1",
+        "test",
+        "doubles_or_no_payout",
+    )
+
+
 def make_sum_match_citizen(citizen_id, roll_sum):
     """Citizen that fires when die_sum == roll_sum, paying 1 gold."""
     return Citizen(
@@ -93,15 +106,7 @@ class HeraldDoubleTriggerTests(unittest.TestCase):
         self.assertEqual(players[0].gold_score, 2, "Herald doubles + no_payout both fired")
         self.assertEqual(players[1].gold_score, 2, "Herald doubles + no_payout both fired")
 
-        ca = game.concurrent_action or {}
-        self.assertEqual(ca.get("kind"), "harvest_choices")
-        self.assertEqual((ca.get("data") or {}).get("phase"), "finalize_bonus")
-
-        pending = set(ca.get("pending") or [])
-        self.assertIn(players[0].player_id, pending,
-                      "Doubles-only player must still get the no_payout bonus")
-        self.assertIn(players[1].player_id, pending,
-                      "Doubles-only player must still get the no_payout bonus")
+        self.assertIsNone(game.concurrent_action)
 
     def test_other_card_activation_suppresses_no_payout(self):
         # Same doubles roll, but player 1 also owns a citizen that fires on the
@@ -114,15 +119,40 @@ class HeraldDoubleTriggerTests(unittest.TestCase):
 
         game.advance_tick()
 
-        ca = game.concurrent_action or {}
-        self.assertEqual(ca.get("kind"), "harvest_choices")
-        self.assertEqual((ca.get("data") or {}).get("phase"), "finalize_bonus")
-
-        pending = set(ca.get("pending") or [])
-        self.assertNotIn(players[0].player_id, pending,
+        self.assertEqual(players[0].gold_score, 2,
                          "A citizen activation must suppress that player's no_payout")
-        self.assertIn(players[1].player_id, pending,
-                      "Herald-only player still gets the no_payout bonus")
+        self.assertEqual(players[1].gold_score, 2,
+                         "Herald-only player still gets the no_payout bonus")
+        self.assertIsNone(game.concurrent_action)
+
+    def test_margrave_on_turn_no_payout_does_not_fall_back_to_wild_bonus(self):
+        game, players = make_doubles_harvest_game(
+            [{"herald": False}, {"herald": False}],
+            die=2,
+        )
+        players[0].owned_starters.append(make_margrave(4))
+
+        game.harvest._activate_finalize_bonus_for(players[0].player_id)
+
+        self.assertEqual(players[0].gold_score, 1)
+        self.assertEqual(players[0].strength_score, 1)
+        self.assertEqual(players[0].magic_score, 1)
+        self.assertEqual(game.action_required.get("action"), "")
+
+    def test_margrave_off_turn_unaffordable_exchange_does_not_fall_back_to_wild_bonus(self):
+        game, players = make_doubles_harvest_game(
+            [{"herald": False}, {"herald": False}],
+            die=2,
+        )
+        players[1].owned_starters.append(make_margrave(4))
+
+        game.harvest._activate_finalize_bonus_for(players[1].player_id)
+
+        self.assertEqual(players[1].gold_score, 0)
+        self.assertEqual(players[1].strength_score, 0)
+        self.assertEqual(players[1].magic_score, 0)
+        self.assertEqual(players[1].victory_score, 0)
+        self.assertEqual(game.action_required.get("action"), "")
 
 
 if __name__ == "__main__":

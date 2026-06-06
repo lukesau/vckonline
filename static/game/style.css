@@ -490,17 +490,16 @@ html, body {
 /* 5-player "resting" seat badge: the player immediately before the active
    seat sits the harvest out for this turn (no on-turn / off-turn payouts). */
 .player-resting-badge {
-  margin-left: 4px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
   color: #2a1f06;
   background: #f0d27a;
   border: 1px solid #b78b1f;
-  flex-shrink: 0;
 }
 
 /* Hurry-up countdown on whoever’s turn it is (all seats). The server arms

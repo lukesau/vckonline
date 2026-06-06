@@ -1,10 +1,26 @@
 import json
 import unittest
 
-from cards import Citizen
+from cards import Citizen, Starter
 from game import Game
 from game_models import Player
 from game_serialization import GameObjectEncoder
+
+
+def make_herald_starter(starter_id):
+    """Herald: a -1/-1 starter whose no_payout/doubles leg is `choose g 1 s 1 m 1`.
+
+    Matches the shipped Herald row — the end-of-harvest leg opens an
+    interactive `choose` prompt rather than any hardcoded default.
+    """
+    return Starter(
+        starter_id, "Herald", -1, -1,
+        0, 0,
+        0, 0, 0, 0,
+        True, True, "choose g 1 s 1 m 1", "choose g 1 s 1 m 1",
+        "test",
+        "doubles_or_no_payout",
+    )
 
 
 def make_exchange_citizen(citizen_id, special_cmd):
@@ -133,6 +149,8 @@ class ConcurrentHarvestTests(unittest.TestCase):
         for p in (p1, p2):
             p.gold_score = 0
             p.owned_citizens = []
+            # Only a no_payout starter (Herald) drives the end-of-harvest leg.
+            p.owned_starters.append(make_herald_starter(300 + int(p.player_id[1:])))
 
         game = make_game_for_test([p1, p2])
         game.advance_tick()
@@ -142,6 +160,9 @@ class ConcurrentHarvestTests(unittest.TestCase):
         self.assertEqual(ca.get("kind"), "harvest_choices")
         self.assertEqual((ca.get("data") or {}).get("phase"), "finalize_bonus")
         self.assertEqual(set(ca.get("pending") or []), {p1.player_id, p2.player_id})
+        prompts = ((ca.get("data") or {}).get("prompts") or {})
+        for pid in (p1.player_id, p2.player_id):
+            self.assertEqual(prompts[pid][0]["sub_kind"], "harvest_choose")
 
     def test_steal_phase_resolves_before_nonsteal_concurrent_gate(self):
         # Thief (p1) only has a steal citizen. The others have exchange citizens.
@@ -190,18 +211,19 @@ class ConcurrentHarvestTests(unittest.TestCase):
         self.assertEqual(set(ca.get("pending") or []), {p2.player_id, p3.player_id})
 
     def test_finalize_bonus_does_not_reopen_after_resolution(self):
-        # Bug repro: when no player has a triggered starter/citizen, the
-        # end-of-harvest bonus gate opens. After every player picks a free
-        # resource, the gate previously cycled forever (handler.finalize
-        # re-called _harvest_complete_finalize, which recomputed activated_pids
-        # against an already-cleared harvest_consumed and re-opened the bonus
-        # gate for everyone). Verify the gate clears once and the game
-        # advances into the action phase.
+        # Bug repro: when players own a no_payout starter (Herald) and nothing
+        # else triggers, the end-of-harvest leg opens a concurrent `choose`
+        # gate. After every player resolves it, the gate previously cycled
+        # forever (handler.finalize re-called _harvest_complete_finalize, which
+        # recomputed activated_pids against an already-cleared harvest_consumed
+        # and re-opened the gate for everyone). Verify the gate clears once and
+        # the game advances into the action phase.
         p1 = Player("p1", "Player 1")
         p2 = Player("p2", "Player 2")
         for p in (p1, p2):
             p.gold_score = 0
             p.owned_citizens = []
+            p.owned_starters.append(make_herald_starter(300 + int(p.player_id[1:])))
 
         game = make_game_for_test([p1, p2])
         game.advance_tick()
@@ -211,8 +233,9 @@ class ConcurrentHarvestTests(unittest.TestCase):
         self.assertEqual((ca.get("data") or {}).get("phase"), "finalize_bonus")
         self.assertEqual(set(ca.get("pending") or []), {p1.player_id, p2.player_id})
 
-        game.submit_concurrent_action(p1.player_id, "gold", kind="harvest_choices")
-        game.submit_concurrent_action(p2.player_id, "gold", kind="harvest_choices")
+        # Each Herald's `choose g 1 s 1 m 1`: option 1 is +1 gold.
+        game.submit_concurrent_action(p1.player_id, "choose 1", kind="harvest_choices")
+        game.submit_concurrent_action(p2.player_id, "choose 1", kind="harvest_choices")
 
         self.assertIsNone(
             game.concurrent_action,
