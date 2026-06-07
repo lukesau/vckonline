@@ -336,9 +336,15 @@ class ChooseEngine:
     # ----------------------------------------------------------------------
 
     def _filter_unavailable_choose_options(self, options):
+        maps_enabled = self.game.maps_enabled()
         out = []
         for opt in options or []:
             token = (opt.get("token") or "").strip().lower()
+            # Maps are a Crimson Seas mechanic. Outside that preset, drop the
+            # map option entirely so the player is only offered the card's
+            # non-map "out". (Crimson Seas cards always provide one.)
+            if token == "p" and not maps_enabled:
+                continue
             if token == "citizens_where":
                 spec = opt.get("spec") or {}
                 count = int(opt.get("amount", 1) or 1)

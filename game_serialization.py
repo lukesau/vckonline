@@ -94,6 +94,7 @@ class GameObjectEncoder(JSONEncoder):
             return {
                 "game_id": obj.game_id,
                 "debug_mode": bool(getattr(obj, "debug_mode", False)),
+                "preset": getattr(obj, "preset", "current"),
                 "player_list": obj.player_list,
                 # Public duke catalog (multipliers only, no ownership). Safe to
                 # send to every client; the duke inspect modal lists each duke's

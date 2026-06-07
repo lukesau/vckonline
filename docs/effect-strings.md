@@ -227,6 +227,14 @@ choose m 2 p 1                              # pick one: +2 magic or +1 map (Crim
 and render with `/images/map.png`. There is currently no way to *spend* maps —
 they are only earned (citizen payouts, the `+1 Map` standard action) and shown.
 
+Maps are gated to the **Crimson Seas preset** via `Game.maps_enabled()` (true
+only when `preset == "crimsonseas"`). Crimson Seas citizens/monsters can still
+appear in other presets (e.g. `random`), but they always have a non-map "out",
+so outside Crimson Seas the engine drops `p` legs from `choose` prompts, rejects
+the `+1 Map` standard action, and the client hides the map score pill and the
+`+1 Map` button. Any incidental standalone `p N` gain still increments
+`map_score` silently — it just isn't shown.
+
 ### 4. `exchange` — only exists in citizens
 
 No equivalent pattern in domains or monsters. Could be expressed as a compound but `exchange` is readable:

@@ -70,6 +70,12 @@ class Game:
         # (extra starting resources, citizens, and roll-modifier domains).
         # See `docs/game.md` "Debug mode" section.
         self.debug_mode = bool(game_state.get('debug_mode', False))
+        # The lobby preset this game was dealt from (e.g. "crimsonseas",
+        # "shadowvale", "random"). Drives expansion-gated features such as the
+        # Crimson Seas "map" resource: maps are only surfaced / takeable when
+        # this is the Crimson Seas preset. Defaults to "current" for older
+        # saves that predate the field.
+        self.preset = (game_state.get('preset') or 'current')
         self.player_list = game_state['player_list']
         # Full duke catalog for this game's config (every duke that could be in
         # play), snapshot at setup before dealing. Used to surface a per-duke VP
@@ -372,6 +378,19 @@ class Game:
         if p and getattr(p, "name", None):
             return p.name
         return str(player_id)[:8]
+
+    def maps_enabled(self):
+        """True when the "map" resource is an active part of this game.
+
+        Maps are a Crimson Seas mechanic. Other presets may still deal Crimson
+        Seas citizens/monsters (e.g. `random`), but those cards are designed to
+        always have a non-map "out", so outside the Crimson Seas preset we keep
+        maps invisible/unusable: the score pill and +1 Map action are hidden,
+        the standard-action map take is rejected, and map options are dropped
+        from `choose` prompts. Any incidental map gain still tracks silently on
+        `map_score`.
+        """
+        return (self.preset or "").strip().lower() == "crimsonseas"
 
     def _player_scores_line(self, player):
         if not player:

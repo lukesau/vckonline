@@ -968,6 +968,23 @@ class TributeToTheKingTests(unittest.TestCase):
         self.assertEqual(players[1].victory_score, 0)
         self.assertIsNone(game.concurrent_action)
 
+    def test_mid_action_resolution_restores_remaining_action(self):
+        game, players = make_game(2, phase="action", gold=4, strength=4, magic=4)
+        game.turn_index = 0
+        game.actions_remaining = 1
+        game.action_required = {"id": game.game_id, "action": ""}
+        fire(game, self._event(), players[0].player_id)
+
+        game.submit_concurrent_action(players[0].player_id, "accept", kind="event_self_convert")
+        game.submit_concurrent_action(players[1].player_id, "skip", kind="event_self_convert")
+
+        self.assertIsNone(game.concurrent_action)
+        self.assertEqual(game.phase, "action")
+        self.assertEqual(game.actions_remaining, 1)
+        self.assertEqual(game.action_required["id"], players[0].player_id)
+        self.assertEqual(game.action_required["action"], "standard_action")
+        self.assertTrue(game.consume_player_action(players[0].player_id, action_type="take_resource"))
+
     def test_resource_choice_not_accepted_for_compound(self):
         game, players = make_game(2, gold=4, strength=4, magic=4)
         fire(game, self._event(), players[0].player_id)

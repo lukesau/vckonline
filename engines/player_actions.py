@@ -1416,9 +1416,15 @@ class PlayerActionsEngine:
                             break
             else:
                 # Mid-game concurrent action (e.g. Cursed Cavern flip during action phase):
-                # if the active player spent their last action before the concurrent prompt,
-                # finish_turn_if_no_actions_remaining will advance the turn now that the
-                # block is cleared. If they still have actions, this is a no-op.
+                # if the active player still has actions, refresh the standard-action
+                # gate and drain any queued event activation that was waiting behind
+                # this prompt. If they spent their last action, finish the turn now
+                # that the block is cleared.
+                if (
+                    getattr(self.game, "phase", None) == "action"
+                    and int(getattr(self.game, "actions_remaining", 0) or 0) > 0
+                ):
+                    self.game.lifecycle.advance_tick()
                 self.game.lifecycle.finish_turn_if_no_actions_remaining()
 
     def hire_citizen(self, player_id, citizen_id, gp=0, mp=0, sp=0):
@@ -1705,6 +1711,8 @@ class PlayerActionsEngine:
         choice = (resource or "").strip().lower()
         if choice not in ("gold", "strength", "magic", "map"):
             raise ValueError('resource must be "gold", "strength", "magic", or "map".')
+        if choice == "map" and not self.game.maps_enabled():
+            raise ValueError("Maps are only available in the Crimson Seas preset.")
 
         player = None
         for p in self.game.player_list:

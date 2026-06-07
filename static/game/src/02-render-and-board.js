@@ -5,6 +5,13 @@ function idsMatch(a, b) {
   return String(a ?? '').trim() === String(b ?? '').trim();
 }
 
+// Maps are a Crimson Seas mechanic. Hide all map UI (score pill, +1 Map action)
+// unless this game was dealt from the Crimson Seas preset. The engine performs
+// the matching server-side gating; this just keeps the UI clean elsewhere.
+function mapsEnabled(state) {
+  return String(state?.preset ?? '').trim().toLowerCase() === 'crimsonseas';
+}
+
 function playerIndexInList(state, player) {
   if (!player) return -1;
   const all = state.player_list || [];
@@ -672,7 +679,8 @@ function makeResourceActionBar(state) {
   const canTake = canOfferTakeResourceAction(state);
   const resourceBar = document.createElement('div');
   resourceBar.className = 'resource-action-bar' + (canTake ? '' : ' resource-action-bar--inactive');
-  ['gold', 'strength', 'magic', 'map'].forEach(r => {
+  const resources = mapsEnabled(state) ? ['gold', 'strength', 'magic', 'map'] : ['gold', 'strength', 'magic'];
+  resources.forEach(r => {
     const lab = r.charAt(0).toUpperCase() + r.slice(1);
     const btn = promptButton('', () => {
       if (!canOfferTakeResourceAction(latestGameState)) return;
@@ -1230,7 +1238,9 @@ function makeHeader(player, state) {
   resRow.appendChild(makeResourceScorePill('gold', player.gold_score, 'Gold', TABLEAU_RESOURCE_ICONS.gold));
   resRow.appendChild(makeResourceScorePill('strength', player.strength_score, 'Strength', TABLEAU_RESOURCE_ICONS.strength));
   resRow.appendChild(makeResourceScorePill('magic', player.magic_score, 'Magic', TABLEAU_RESOURCE_ICONS.magic));
-  resRow.appendChild(makeResourceScorePill('map', player.map_score, 'Map', TABLEAU_RESOURCE_ICONS.map));
+  if (mapsEnabled(state)) {
+    resRow.appendChild(makeResourceScorePill('map', player.map_score, 'Map', TABLEAU_RESOURCE_ICONS.map));
+  }
   resRow.appendChild(makeVpScorePill(player.victory_score));
   h.appendChild(resRow);
 

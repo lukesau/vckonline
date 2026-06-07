@@ -801,6 +801,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
         game_state = {
             "game_id": game_id,
             "debug_mode": bool(debug_mode),
+            "preset": preset,
             "pending_required_choice": None,
             "player_list": player_list,
             "all_dukes": all_dukes,
