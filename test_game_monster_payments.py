@@ -93,6 +93,29 @@ class MonsterPaymentTests(unittest.TestCase):
         self.assertEqual(options[0]["strength_cost"], 9)
         self.assertEqual(options[0]["magic_cost"], 4)
 
+    def test_monster_extra_costs_survive_serialization_round_trip(self):
+        monster = make_gold_golem()
+        monster.extra_gold_cost = 1
+        monster.extra_strength_cost = 2
+        monster.extra_magic_cost = 3
+
+        as_dict = monster.to_dict()
+        self.assertEqual(as_dict["extra_gold_cost"], 1)
+        self.assertEqual(as_dict["extra_strength_cost"], 2)
+        self.assertEqual(as_dict["extra_magic_cost"], 3)
+
+        restored = Monster.from_dict(as_dict)
+        self.assertEqual(restored.extra_gold_cost, 1)
+        self.assertEqual(restored.extra_strength_cost, 2)
+        self.assertEqual(restored.extra_magic_cost, 3)
+
+    def test_fresh_monster_defaults_extra_costs_to_zero(self):
+        monster = make_gold_golem()
+        as_dict = monster.to_dict()
+        self.assertEqual(as_dict["extra_gold_cost"], 0)
+        self.assertEqual(as_dict["extra_strength_cost"], 0)
+        self.assertEqual(as_dict["extra_magic_cost"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

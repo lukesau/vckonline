@@ -1147,7 +1147,7 @@ class HarvestEngine:
             entry = self.game.pending_harvest_slays[0]
             pid = entry.get("player_id")
             label = entry.get("source_label", "Effect")
-            options = self.game.slay._immediate_slay_monster_options()
+            options = self.game.slay._immediate_slay_monster_options(pid)
             if not options:
                 self.game._log_game_event(
                     f"{self.game._player_label(pid)} could not use \"{label}\" "

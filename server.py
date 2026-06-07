@@ -1413,6 +1413,37 @@ def _serialize_game_for_player(game, viewer_player_id: Optional[str]):
                 continue
             top["extra_magic_cost"] = int(top.get("extra_magic_cost", 0) or 0) + monster_surcharge
 
+    viewer_player = None
+    if viewer_player_id is not None:
+        for pl in game.player_list:
+            if str(pl.player_id) == str(viewer_player_id):
+                viewer_player = pl
+                break
+    if viewer_player is not None:
+        def _apply_monster_scaling_cost_to_top(top):
+            if not isinstance(top, dict) or not top.get("is_accessible"):
+                return
+            if top.get("monster_id") is None and top.get("event_id") is None:
+                return
+            if not top.get("has_special_cost"):
+                return
+            sc = top.get("special_cost")
+            if not sc or not str(sc).strip():
+                return
+            deltas = game._monster_special_cost_deltas(viewer_player, sc)
+            if deltas.get("s"):
+                top["extra_strength_cost"] = int(top.get("extra_strength_cost", 0) or 0) + int(deltas["s"])
+            if deltas.get("m"):
+                top["extra_magic_cost"] = int(top.get("extra_magic_cost", 0) or 0) + int(deltas["m"])
+            if deltas.get("g"):
+                top["extra_gold_cost"] = int(top.get("extra_gold_cost", 0) or 0) + int(deltas["g"])
+
+        for grid_key in ("monster_grid", "citizen_grid", "domain_grid"):
+            for stack in (state.get(grid_key) or []):
+                if not isinstance(stack, list) or not stack:
+                    continue
+                _apply_monster_scaling_cost_to_top(stack[-1])
+
     players = state.get("player_list") or []
     if not isinstance(players, list):
         return state

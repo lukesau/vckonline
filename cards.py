@@ -288,6 +288,12 @@ class Monster(Card):
         self.order = order
         self.strength_cost = strength_cost
         self.magic_cost = magic_cost
+        # Event/domain effects (add_slay_cost, Ancient Tomb, etc.) bump these
+        # extra-cost fields at runtime. They must serialize so clients render
+        # the true slay cost (and enable the gold pay field when gold is added).
+        self.extra_strength_cost = 0
+        self.extra_magic_cost = 0
+        self.extra_gold_cost = 0
         self.vp_reward = vp_reward
         self.gold_reward = gold_reward
         self.strength_reward = strength_reward
@@ -308,6 +314,9 @@ class Monster(Card):
             "order": self.order,
             "strength_cost": self.strength_cost,
             "magic_cost": self.magic_cost,
+            "extra_strength_cost": int(getattr(self, "extra_strength_cost", 0) or 0),
+            "extra_magic_cost": int(getattr(self, "extra_magic_cost", 0) or 0),
+            "extra_gold_cost": int(getattr(self, "extra_gold_cost", 0) or 0),
             "vp_reward": self.vp_reward,
             "gold_reward": self.gold_reward,
             "strength_reward": self.strength_reward,
@@ -342,6 +351,9 @@ class Monster(Card):
             d['is_extra'],
             d['expansion'],
         )
+        card.extra_strength_cost = _coerce_int(d.get("extra_strength_cost", 0))
+        card.extra_magic_cost = _coerce_int(d.get("extra_magic_cost", 0))
+        card.extra_gold_cost = _coerce_int(d.get("extra_gold_cost", 0))
         return _apply_persisted_card_flags(card, d)
 
     def add_strength_cost(self, added_strength):

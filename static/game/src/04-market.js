@@ -143,6 +143,17 @@ function ownedNameCount(player, name) {
   return n;
 }
 
+function ownedMonsterNameCount(player, name) {
+  const target = (name ?? '').toString();
+  if (!target) return 0;
+  const monsters = Array.isArray(player?.owned_monsters) ? player.owned_monsters : [];
+  let n = 0;
+  monsters.forEach(m => {
+    if ((m?.name ?? '').toString() === target) n += 1;
+  });
+  return n;
+}
+
 function citizenRoleCounts(card) {
   const r = card && card.roles;
   if (r && typeof r === 'object') {
@@ -573,6 +584,7 @@ function evaluateMarketCardContext(card, state) {
   let emeraldHint = '';
   let defiantHint = '';
   let fortskylerHint = '';
+  let scalingHint = '';
 
   if (actingPlayer && loc && top && !blockReason) {
     if (card.citizen_id != null) {
@@ -602,6 +614,7 @@ function evaluateMarketCardContext(card, state) {
       evalRes = canAffordCost(actingPlayer, { gold: effectiveGold, strength: 0, magicMin: 0 });
       pratchettHint = pratchettActive && baseCost !== effectiveGold ? `base ${baseCost}g − 1 (Pratchett's Plateau)` : '';
     } else if (card.monster_id != null) {
+      const ownedSame = top?.has_special_cost ? ownedMonsterNameCount(actingPlayer, top.name) : 0;
       const rawStr = Number(top.strength_cost || 0) + Number(top.extra_strength_cost || 0);
       evalRes = canAffordMonsterCost(actingPlayer, {
         gold:     Number(top.extra_gold_cost || 0),
@@ -609,6 +622,7 @@ function evaluateMarketCardContext(card, state) {
         magicMin: Number(top.magic_cost || 0) + Number(top.extra_magic_cost || 0),
       });
       fortskylerHint = fortskylerActive && rawStr > 0 ? 'Fort Skyler: −1 monster strength cost.' : '';
+      scalingHint = ownedSame ? `+${ownedSame} duplicate(s) slain` : '';
     } else if (card.event_id != null) {
       evalRes = canAffordMonsterCost(actingPlayer, {
         gold:     Number(top.extra_gold_cost     || 0),
@@ -651,6 +665,7 @@ function evaluateMarketCardContext(card, state) {
     emeraldHint,
     defiantHint,
     fortskylerHint,
+    scalingHint,
     canActThisCard,
   };
 }
@@ -1009,6 +1024,17 @@ function effectiveMarketCardCosts(card, ctx) {
     strengthTip: '',
     magicTip: '',
   };
+  // Monster/event slay costs carry runtime extras (add_slay_cost, Ancient Tomb,
+  // duplicate scaling, Dark Lord surcharge) baked into extra_* by the server.
+  // Reflect them even for inspect-only views (no acting player) so the displayed
+  // cost always matches what the engine will charge.
+  if (card.monster_id != null || card.event_id != null) {
+    out.strength = Number(card.strength_cost || 0) + Number(card.extra_strength_cost || 0);
+    out.magic    = Number(card.magic_cost    || 0) + Number(card.extra_magic_cost    || 0);
+    if (Number(card.extra_gold_cost || 0) > 0) {
+      out.gold = Number(card.extra_gold_cost || 0);
+    }
+  }
   if (!ctx || !ctx.actingPlayer || ctx.blockReason) return out;
   if (card.citizen_id != null) {
     const base = Number(ctx.baseCost || 0);
@@ -1030,6 +1056,10 @@ function effectiveMarketCardCosts(card, ctx) {
     out.magic    = Number(ctx.top.magic_cost    || 0) + Number(ctx.top.extra_magic_cost    || 0);
     if (Number(ctx.top.extra_gold_cost || 0) > 0) {
       out.gold = Number(ctx.top.extra_gold_cost || 0);
+    }
+    if (ctx.scalingHint) {
+      out.strengthTip = ctx.scalingHint;
+      out.magicTip = ctx.scalingHint;
     }
   }
   return out;

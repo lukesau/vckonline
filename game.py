@@ -507,6 +507,48 @@ class Game:
 
         return return_dict
 
+    def _owned_monster_name_count(self, player_or_id, name):
+        """Count owned monsters with an exact name match (case-insensitive)."""
+        want = (name or "").strip().lower()
+        if not want:
+            return 0
+        player = player_or_id
+        if not hasattr(player, "owned_monsters"):
+            player = self._player_by_id(player_or_id)
+        if not player:
+            return 0
+        n = 0
+        for monster in list(getattr(player, "owned_monsters", []) or []):
+            if (getattr(monster, "name", "") or "").strip().lower() == want:
+                n += 1
+        return n
+
+    def _monster_special_cost_deltas(self, player_or_id, special_cost):
+        """Return {g, s, m} slay-cost deltas from a compound special_cost string."""
+        deltas = {"g": 0, "s": 0, "m": 0}
+        raw = (special_cost or "").strip()
+        if not raw:
+            return deltas
+        for part in raw.split(" + "):
+            part = (part or "").strip()
+            if not part:
+                continue
+            tokens = self.payouts._tokenize_payout(part)
+            if len(tokens) < 5:
+                continue
+            if tokens[0].lower() != "count" or tokens[1].lower() != "owned_monster_name":
+                continue
+            resource = tokens[3].lower()
+            if resource not in deltas:
+                continue
+            try:
+                mult = int(tokens[4])
+            except (TypeError, ValueError):
+                continue
+            total = self._owned_monster_name_count(player_or_id, tokens[2]) * mult
+            deltas[resource] += total
+        return deltas
+
     def _player_citizen_role_totals(self, player):
         totals = {"shadow": 0, "holy": 0, "soldier": 0, "worker": 0}
         for c in list(getattr(player, "owned_citizens", []) or []):

@@ -28,7 +28,7 @@ class SlayEngine:
     def __init__(self, game):
         self.game = game
 
-    def _immediate_slay_monster_options(self):
+    def _immediate_slay_monster_options(self, player_id=None):
         """Return option dicts for every accessible monster top across all grids.
 
         Includes Event cards with is_monster=True (they can occupy any grid slot)
@@ -48,6 +48,11 @@ class SlayEngine:
             top = stack[-1]
             if not getattr(top, "is_accessible", False):
                 continue
+            cost_deltas = {"g": 0, "s": 0, "m": 0}
+            if player_id is not None and getattr(top, "has_special_cost", False):
+                cost_deltas = self.game._monster_special_cost_deltas(
+                    player_id, getattr(top, "special_cost", None)
+                )
             eid = getattr(top, "event_id", None)
             if eid is not None:
                 # Event occupying a monster slot — only include if it acts as a monster.
@@ -57,14 +62,19 @@ class SlayEngine:
                     "event_id": int(eid),
                     "name": getattr(top, "name", "?"),
                     "area": "",
-                    "gold_cost": int(getattr(top, "extra_gold_cost", 0) or 0),
+                    "gold_cost": (
+                        int(getattr(top, "extra_gold_cost", 0) or 0)
+                        + int(cost_deltas.get("g", 0) or 0)
+                    ),
                     "strength_cost": (
                         int(getattr(top, "strength_cost", 0) or 0)
                         + int(getattr(top, "extra_strength_cost", 0) or 0)
+                        + int(cost_deltas.get("s", 0) or 0)
                     ),
                     "magic_cost": (
                         int(getattr(top, "magic_cost", 0) or 0)
                         + int(getattr(top, "extra_magic_cost", 0) or 0)
+                        + int(cost_deltas.get("m", 0) or 0)
                         + surcharge
                     ),
                 })
@@ -76,14 +86,19 @@ class SlayEngine:
                 "monster_id": mid,
                 "name": getattr(top, "name", "?"),
                 "area": getattr(top, "area", ""),
-                "gold_cost": int(getattr(top, "extra_gold_cost", 0) or 0),
+                "gold_cost": (
+                    int(getattr(top, "extra_gold_cost", 0) or 0)
+                    + int(cost_deltas.get("g", 0) or 0)
+                ),
                 "strength_cost": (
                     int(getattr(top, "strength_cost", 0) or 0)
                     + int(getattr(top, "extra_strength_cost", 0) or 0)
+                    + int(cost_deltas.get("s", 0) or 0)
                 ),
                 "magic_cost": (
                     int(getattr(top, "magic_cost", 0) or 0)
                     + int(getattr(top, "extra_magic_cost", 0) or 0)
+                    + int(cost_deltas.get("m", 0) or 0)
                     + surcharge
                 ),
             })
@@ -97,7 +112,7 @@ class SlayEngine:
         on a no-op blocker.
         """
         source_label = (source_label or "Effect").strip() or "Effect"
-        options = self._immediate_slay_monster_options()
+        options = self._immediate_slay_monster_options(player_id)
         if not options:
             self.game._log_game_event(
                 f"{self.game._player_label(player_id)} could not use \"{source_label}\" "

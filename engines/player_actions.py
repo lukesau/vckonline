@@ -1544,6 +1544,13 @@ class PlayerActionsEngine:
                 + int(getattr(top, "extra_magic_cost", 0) or 0)
             )
             effective_gold_cost = int(getattr(top, "extra_gold_cost", 0) or 0)
+            if getattr(top, "has_special_cost", False):
+                cost_deltas = self.game._monster_special_cost_deltas(
+                    player, getattr(top, "special_cost", None)
+                )
+                effective_strength_cost += int(cost_deltas.get("s", 0) or 0)
+                effective_magic_cost += int(cost_deltas.get("m", 0) or 0)
+                effective_gold_cost += int(cost_deltas.get("g", 0) or 0)
             if self.game._player_has_action_effect_flag(player, "action.fortskyler"):
                 effective_strength_cost = max(0, effective_strength_cost - 1)
             if self.game._player_has_action_effect_flag(player, "action.darklordrising"):
