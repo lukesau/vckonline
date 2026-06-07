@@ -889,6 +889,22 @@ class PayoutsEngine:
             except (TypeError, ValueError):
                 payout[0] = -9999
                 return payout
+        if first_word == "p":
+            # Maps (Crimson Seas) have no slot in the [g, s, m, v] payout vector,
+            # so grant them directly to the player (mirrors how the choose engine
+            # awards maps) and return an empty vector.
+            try:
+                amount = int(second_word)
+            except (TypeError, ValueError):
+                payout[0] = -9999
+                return payout
+            target_p = self.game._player_by_id(player_id)
+            if not target_p:
+                payout[0] = -9999
+                return payout
+            target_p.map_score = int(getattr(target_p, "map_score", 0)) + amount
+            self.game.harvest._bump_harvest_delta(target_p, 0, 0, 0, 0, amount)
+            return [0, 0, 0, 0]
         match first_word:
             case "count":
                 match second_word:

@@ -135,12 +135,22 @@ class StarterSlotIntegrationTests(unittest.TestCase):
             )
 
     def test_random_preset_grants_at_most_one_slot_starter(self):
+        from game_setup import load_draft_card_pool
+
+        # The random preset can grant any -1/-1 slot starter that passes
+        # keep_for_random (implemented + has art), so derive the allowed id set
+        # from the live DB instead of hard-coding it — new expansion slot
+        # starters (e.g. Coxswain) shouldn't break this test.
+        _m, _c, starter_rows = load_draft_card_pool(2)
+        allowed_slot_ids = {int(r["id_starters"]) for r in starter_rows}
+        self.assertTrue(allowed_slot_ids, "expected at least one keep_for_random slot starter")
+
         random.seed(42)
         state = self._load("random")
         for player in state["player_list"]:
             slot_ids = _slot_starter_ids(player)
             self.assertEqual(len(slot_ids), 1)
-            self.assertIn(slot_ids[0], {3, 4})
+            self.assertIn(slot_ids[0], allowed_slot_ids)
 
 
 if __name__ == "__main__":
