@@ -18,6 +18,7 @@
   --str:   #c45433;
   --mag:   #8bb8e6;
   --vp:    #a060f0;
+  --map:   #c79b6e;
   --text:  #ddd;
   --muted: #888;
 
@@ -284,6 +285,7 @@ html, body {
 .resource-action-bar .resource-action-btn--gold     { color: var(--gold); }
 .resource-action-bar .resource-action-btn--strength { color: var(--str); }
 .resource-action-bar .resource-action-btn--magic    { color: var(--mag); }
+.resource-action-bar .resource-action-btn--map      { color: var(--map); }
 
 .tableau-carousel-slide {
   flex: 0 0 100%;
@@ -485,6 +487,7 @@ html, body {
 .score-pill.strength { color: var(--str); }
 .score-pill.magic    { color: var(--mag); }
 .score-pill.victory  { color: var(--vp); }
+.score-pill.map      { color: var(--map); }
 
 
 /* 5-player "resting" seat badge: the player immediately before the active

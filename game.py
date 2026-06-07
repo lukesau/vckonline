@@ -375,12 +375,13 @@ class Game:
 
     def _player_scores_line(self, player):
         if not player:
-            return "G?/S?/M?/VP?"
+            return "G?/S?/M?/VP?/P?"
         g = int(getattr(player, "gold_score", 0) or 0)
         s = int(getattr(player, "strength_score", 0) or 0)
         m = int(getattr(player, "magic_score", 0) or 0)
         v = int(getattr(player, "victory_score", 0) or 0)
-        return f"G{g}/S{s}/M{m}/VP{v}"
+        p = int(getattr(player, "map_score", 0) or 0)
+        return f"G{g}/S{s}/M{m}/VP{v}/P{p}"
 
     def _format_resource_payment(self, gp, sp, mp):
         gp, sp, mp = _n(gp), _n(sp), _n(mp)

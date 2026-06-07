@@ -18,6 +18,7 @@ class SummaryEncoder(JSONEncoder):
                 "strength_score": obj.strength_score,
                 "magic_score": obj.magic_score,
                 "victory_score": obj.victory_score,
+                "map_score": getattr(obj, "map_score", 0),
                 "is_first": obj.is_first,
             }
         if isinstance(obj, LobbyMember):
@@ -55,6 +56,7 @@ class GameObjectEncoder(JSONEncoder):
                 "strength_score": obj.strength_score,
                 "magic_score": obj.magic_score,
                 "victory_score": obj.victory_score,
+                "map_score": getattr(obj, "map_score", 0),
                 "is_first": obj.is_first,
                 "shadow_count": roles["shadow_count"],
                 "holy_count": roles["holy_count"],
@@ -67,7 +69,7 @@ class GameObjectEncoder(JSONEncoder):
                 "beast_count": roles["beast_count"],
                 "effects": obj.effects,
                 "granted_effects": list(getattr(obj, "granted_effects", None) or []),
-                "harvest_delta": getattr(obj, "harvest_delta", {"gold": 0, "strength": 0, "magic": 0, "victory": 0}),
+                "harvest_delta": getattr(obj, "harvest_delta", {"gold": 0, "strength": 0, "magic": 0, "victory": 0, "map": 0}),
             }
         if isinstance(obj, Duke):
             return obj.to_dict()

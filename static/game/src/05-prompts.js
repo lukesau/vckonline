@@ -174,6 +174,7 @@ function makePromptResourcesPanel(state) {
     pills.appendChild(makeResourceScorePill('gold', p.gold_score, 'Gold', TABLEAU_RESOURCE_ICONS.gold));
     pills.appendChild(makeResourceScorePill('strength', p.strength_score, 'Strength', TABLEAU_RESOURCE_ICONS.strength));
     pills.appendChild(makeResourceScorePill('magic', p.magic_score, 'Magic', TABLEAU_RESOURCE_ICONS.magic));
+    pills.appendChild(makeResourceScorePill('map', p.map_score, 'Map', TABLEAU_RESOURCE_ICONS.map));
     pills.appendChild(makeVpScorePill(p.victory_score));
     row.appendChild(pills);
 
@@ -431,6 +432,7 @@ function labelForChoiceToken(tok) {
   if (t === 's') return 'Strength';
   if (t === 'm') return 'Magic';
   if (t === 'v') return 'Victory';
+  if (t === 'p') return 'Map';
   if (t.startsWith('citizens.')) {
     const name = t.split('.', 2)[1] || '';
     return name ? `${name} citizen` : 'Citizen';
@@ -446,7 +448,7 @@ function parseChooseCommand(cmd) {
     const token = parts[i];
     const amount = parts[i + 1];
     const tl = (token || '').toString().trim().toLowerCase();
-    if (!(tl === 'g' || tl === 's' || tl === 'm' || tl === 'v' || tl.startsWith('citizens.'))) continue;
+    if (!(tl === 'g' || tl === 's' || tl === 'm' || tl === 'v' || tl === 'p' || tl.startsWith('citizens.'))) continue;
     options.push({ token, amount });
     if (options.length >= 3) break;
   }

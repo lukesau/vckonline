@@ -260,7 +260,7 @@
                         }
                         card += '</div>';
                         if (isOwner) {
-                            const presetOpts = ['current', 'base', 'flamesandfrost', 'shadowvale', 'random']
+                            const presetOpts = ['current', 'base', 'flamesandfrost', 'shadowvale', 'crimsonseas', 'random']
                                 .map(v => `<option value="${v}"${v === lb.preset ? ' selected' : ''}>${v}</option>`)
                                 .join('');
                             const minOpts = [2, 3, 4, 5]
@@ -1471,10 +1471,12 @@
                     const s = Number(d.strength || 0);
                     const m = Number(d.magic || 0);
                     const v = Number(d.victory || 0);
+                    const mp = Number(d.map || 0);
                     const G = Number(p?.gold_score || 0);
                     const S = Number(p?.strength_score || 0);
                     const M = Number(p?.magic_score || 0);
                     const V = Number(p?.victory_score || 0);
+                    const P = Number(p?.map_score || 0);
 
                     const card = document.createElement('div');
                     card.className = 'delta-card';
@@ -1494,12 +1496,14 @@
                             <span class="delta-cell"><span class="delta-label">ΔS</span><span class="delta-value ${cls(s)}">${fmt(s)}</span></span>
                             <span class="delta-cell"><span class="delta-label">ΔM</span><span class="delta-value ${cls(m)}">${fmt(m)}</span></span>
                             <span class="delta-cell"><span class="delta-label">ΔVP</span><span class="delta-value ${cls(v)}">${fmt(v)}</span></span>
+                            <span class="delta-cell"><span class="delta-label">ΔP</span><span class="delta-value ${cls(mp)}">${fmt(mp)}</span></span>
 
                             <span class="delta-muted">Totals</span>
                             <span class="delta-cell"><span class="delta-label">G</span><span class="delta-value delta-totals">${G}</span></span>
                             <span class="delta-cell"><span class="delta-label">S</span><span class="delta-value delta-totals">${S}</span></span>
                             <span class="delta-cell"><span class="delta-label">M</span><span class="delta-value delta-totals">${M}</span></span>
                             <span class="delta-cell"><span class="delta-label">VP</span><span class="delta-value delta-totals">${V}</span></span>
+                            <span class="delta-cell"><span class="delta-label">P</span><span class="delta-value delta-totals">${P}</span></span>
                         </div>
                     `;
                     deltaEl.appendChild(card);
@@ -1684,6 +1688,7 @@
                 if (t === 's') return 'Strength';
                 if (t === 'm') return 'Magic';
                 if (t === 'v') return 'Victory';
+                if (t === 'p') return 'Map';
                 if (t.startsWith('citizens.')) {
                     const name = t.split('.', 2)[1] || '';
                     return name ? `${name} citizen` : 'Citizen';
@@ -1703,7 +1708,7 @@
                     const token = parts[i];
                     const amount = parts[i + 1];
                     const tl = (token || '').toString().trim().toLowerCase();
-                    if (!(tl === 'g' || tl === 's' || tl === 'm' || tl === 'v' || tl.startsWith('citizens.'))) continue;
+                    if (!(tl === 'g' || tl === 's' || tl === 'm' || tl === 'v' || tl === 'p' || tl.startsWith('citizens.'))) continue;
                     options.push({ token, amount });
                     if (options.length >= 3) break;
                 }

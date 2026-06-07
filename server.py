@@ -122,7 +122,7 @@ manager = ConnectionManager()
 # that swapping `current` to a future format does not remove Base Set from
 # the dropdown. `random` deals from every implemented card across all
 # expansions (see `card_filters.keep_for_random`).
-_VALID_LOBBY_PRESETS = ("current", "base", "flamesandfrost", "shadowvale", "random", "draft")
+_VALID_LOBBY_PRESETS = ("current", "base", "flamesandfrost", "shadowvale", "crimsonseas", "random", "draft")
 
 # Lobby min-players bounds. The lower bound matches the historical default
 # (the game has always required 2 players); the upper bound matches the
@@ -1018,7 +1018,7 @@ class GameActionRequest(BaseModel):
     domain_id: Optional[int] = None
     monster_id: Optional[int] = None
     event_id: Optional[int] = None  # For slaying Event cards on the board
-    # take_resource: "gold" | "strength" | "magic"
+    # take_resource: "gold" | "strength" | "magic" | "map"
     resource: Optional[str] = None
     gold_cost: Optional[int] = None
     strength_cost: Optional[int] = None
@@ -1644,10 +1644,10 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
         
         elif request.action_type == "take_resource":
             if request.resource is None or not str(request.resource).strip():
-                raise HTTPException(status_code=400, detail='resource required ("gold", "strength", or "magic")')
+                raise HTTPException(status_code=400, detail='resource required ("gold", "strength", "magic", or "map")')
             r = str(request.resource).strip().lower()
-            if r not in ("gold", "strength", "magic"):
-                raise HTTPException(status_code=400, detail='resource must be "gold", "strength", or "magic"')
+            if r not in ("gold", "strength", "magic", "map"):
+                raise HTTPException(status_code=400, detail='resource must be "gold", "strength", "magic", or "map"')
             if not game.consume_player_action(request.player_id, action_type="take_resource"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             try:

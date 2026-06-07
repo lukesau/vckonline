@@ -171,7 +171,7 @@ class LifecycleEngine:
             if not getattr(self.game, "harvest_processed", False):
                 if getattr(self.game, "harvest_player_order", None) is None:
                     for p in self.game.player_list:
-                        p.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0}
+                        p.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0, "map": 0}
                     self.game.harvest_consumed = {}
                     self.game.harvest_player_idx = 0
                     self.game.harvest_player_order = self.game._harvest_player_id_order_starting_active()

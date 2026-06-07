@@ -397,6 +397,7 @@ const LOBBY_PRESET_SHORT_LABELS = {
   base: 'Base Set',
   flamesandfrost: 'Flames+Frost',
   shadowvale: 'Shadowvale',
+  crimsonseas: 'Crimson Seas',
   random: 'Random',
   draft: 'Draft',
 };

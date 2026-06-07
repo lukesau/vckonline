@@ -63,7 +63,7 @@ class PlayerActionsEngine:
                 player.victory_score = player.victory_score + payout[3]
                 # If this payout is resolving a harvest-time choice, track it on the same harvest delta.
                 if not hasattr(player, "harvest_delta") or not isinstance(player.harvest_delta, dict):
-                    player.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0}
+                    player.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0, "map": 0}
                 player.harvest_delta["gold"] = int(player.harvest_delta.get("gold", 0)) + int(payout[0])
                 player.harvest_delta["strength"] = int(player.harvest_delta.get("strength", 0)) + int(payout[1])
                 player.harvest_delta["magic"] = int(player.harvest_delta.get("magic", 0)) + int(payout[2])
@@ -1700,11 +1700,11 @@ class PlayerActionsEngine:
 
     def take_resource(self, player_id, resource):
         """
-        Spend a standard action to gain +1 gold, strength, or magic (player's choice).
+        Spend a standard action to gain +1 gold, strength, magic, or map (player's choice).
         """
         choice = (resource or "").strip().lower()
-        if choice not in ("gold", "strength", "magic"):
-            raise ValueError('resource must be "gold", "strength", or "magic".')
+        if choice not in ("gold", "strength", "magic", "map"):
+            raise ValueError('resource must be "gold", "strength", "magic", or "map".')
 
         player = None
         for p in self.game.player_list:
@@ -1719,12 +1719,14 @@ class PlayerActionsEngine:
             player.gold_score = int(getattr(player, "gold_score", 0)) + 1
         elif choice == "strength":
             player.strength_score = int(getattr(player, "strength_score", 0)) + 1
+        elif choice == "map":
+            player.map_score = int(getattr(player, "map_score", 0)) + 1
         else:
             player.magic_score = int(getattr(player, "magic_score", 0)) + 1
 
         after = self.game._player_scores_line(player)
         self.game._log_game_event(
-            f"{self.game._player_label(player_id)} took +1 {choice} (standard action; no gold/strength/magic cost); "
+            f"{self.game._player_label(player_id)} took +1 {choice} (standard action; no resource cost); "
             f"scores {before} -> {after}"
         )
 

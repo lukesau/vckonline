@@ -61,7 +61,8 @@ def _parse_domain_effect_kv(effect):
 
 def _parse_resource_kv(spec):
     """
-    'g:3' / 'vp:1' / 'm:1' -> (letter, amount) with vp mapped to 'v'.
+    'g:3' / 'vp:1' / 'm:1' / 'p:1' -> (letter, amount) with vp mapped to 'v'.
+    'p' is the Crimson Seas "map" resource.
     """
     if not spec or ":" not in spec:
         return None, 0
@@ -73,7 +74,7 @@ def _parse_resource_kv(spec):
         return None, 0
     if kind == "vp":
         kind = "v"
-    if kind not in ("g", "s", "m", "v"):
+    if kind not in ("g", "s", "m", "v", "p"):
         return None, 0
     return kind, n
 
@@ -109,11 +110,12 @@ def _player_resource_balances(player):
         "s": int(getattr(player, "strength_score", 0)),
         "m": int(getattr(player, "magic_score", 0)),
         "v": int(getattr(player, "victory_score", 0)),
+        "p": int(getattr(player, "map_score", 0)),
     }
 
 
 def _balances_allow_payout(balances, payout_vec):
-    """balances: dict g,s,m,v; payout_vec: [dg, ds, dm, dv]."""
+    """balances: dict g,s,m,v[,p]; payout_vec: [dg, ds, dm, dv]."""
     if not balances:
         return False
     keys = ("g", "s", "m", "v")

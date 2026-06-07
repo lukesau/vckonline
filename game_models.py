@@ -22,6 +22,9 @@ class Player:
         self.strength_score = 0
         self.magic_score = 1
         self.victory_score = 0
+        # Crimson Seas expansion: "maps" are a new resource used to sail. No way
+        # to spend them exists yet; for now they are only earned and displayed.
+        self.map_score = 0
         self.is_first = False
         self.shadow_count = 0
         self.holy_count = 0
@@ -42,7 +45,7 @@ class Player:
         # from domain-derived flags: these persist for the rest of the game
         # regardless of the granting card's board position.
         self.granted_effects = []
-        self.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0}
+        self.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0, "map": 0}
 
     @classmethod
     def from_dict(cls, data):
@@ -63,10 +66,13 @@ class Player:
         player.strength_score = data["strength_score"]
         player.magic_score = data["magic_score"]
         player.victory_score = data["victory_score"]
+        player.map_score = data.get("map_score", 0)
         player.is_first = data["is_first"]
         player.effects = data["effects"]
         player.granted_effects = list(data.get("granted_effects") or [])
-        player.harvest_delta = data.get("harvest_delta", {"gold": 0, "strength": 0, "magic": 0, "victory": 0})
+        player.harvest_delta = data.get(
+            "harvest_delta", {"gold": 0, "strength": 0, "magic": 0, "victory": 0, "map": 0}
+        )
         roles = player.calc_roles()
         player.shadow_count = roles["shadow_count"]
         player.holy_count = roles["holy_count"]

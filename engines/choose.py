@@ -79,7 +79,7 @@ class ChooseEngine:
                 amt = int(amt_s)
             except (TypeError, ValueError):
                 return (command or ""), []
-            if tok not in ("g", "s", "m", "v") or amt <= 0:
+            if tok not in ("g", "s", "m", "v", "p") or amt <= 0:
                 return (command or ""), []
             options.append({"token": tok, "amount": amt})
             i = k
@@ -87,7 +87,7 @@ class ChooseEngine:
             return (command or ""), []
         norm_parts = []
         for o in options:
-            if o["token"] in ("g", "s", "m", "v"):
+            if o["token"] in ("g", "s", "m", "v", "p"):
                 norm_parts.append(f"{o['token']} {o['amount']}")
             elif o["token"] == "count_area":
                 area_tok = self.game.payouts._emit_payout_token(o.get('area'))
@@ -128,7 +128,7 @@ class ChooseEngine:
                 mult = int(parts[4])
             except (TypeError, ValueError):
                 return None
-            if mult <= 0 or resource not in ("g", "s", "m", "v"):
+            if mult <= 0 or resource not in ("g", "s", "m", "v", "p"):
                 return None
             if area not in self.game._active_areas():
                 return None
@@ -153,7 +153,7 @@ class ChooseEngine:
                 amt = int(p[1])
             except (TypeError, ValueError):
                 return None
-            if tok not in ("g", "s", "m", "v") or amt <= 0:
+            if tok not in ("g", "s", "m", "v", "p") or amt <= 0:
                 return None
             extras.append({"token": tok, "amount": amt})
         return {"token": "citizens_where", "amount": 1, "spec": spec, "extras": extras}
@@ -351,7 +351,7 @@ class ChooseEngine:
         expanded = []
         for opt in options or []:
             token = (opt.get("token") or "").strip().lower()
-            if token in ("g", "s", "m", "v"):
+            if token in ("g", "s", "m", "v", "p"):
                 expanded.append({"token": token, "amount": int(opt.get("amount", 0) or 0)})
                 continue
             if token == "count_area":
@@ -431,6 +431,9 @@ class ChooseEngine:
                 elif t == "v":
                     target.victory_score = int(getattr(target, "victory_score", 0)) + n
                     self.game.harvest._bump_harvest_delta(target, 0, 0, 0, n)
+                elif t == "p":
+                    target.map_score = int(getattr(target, "map_score", 0)) + n
+                    self.game.harvest._bump_harvest_delta(target, 0, 0, 0, 0, n)
                 else:
                     return False
             return True
@@ -452,10 +455,13 @@ class ChooseEngine:
             elif resource == "v":
                 target.victory_score = int(getattr(target, "victory_score", 0)) + total
                 self.game.harvest._bump_harvest_delta(target, 0, 0, 0, total)
+            elif resource == "p":
+                target.map_score = int(getattr(target, "map_score", 0)) + total
+                self.game.harvest._bump_harvest_delta(target, 0, 0, 0, 0, total)
             else:
                 return False
             return True
-        dg = ds = dm = dv = 0
+        dg = ds = dm = dv = dp = 0
         if token == "g":
             dg = amount
         elif token == "s":
@@ -464,27 +470,30 @@ class ChooseEngine:
             dm = amount
         elif token == "v":
             dv = amount
+        elif token == "p":
+            dp = amount
         else:
             return False
         target.gold_score = int(target.gold_score) + int(dg)
         target.strength_score = int(target.strength_score) + int(ds)
         target.magic_score = int(target.magic_score) + int(dm)
         target.victory_score = int(getattr(target, "victory_score", 0)) + int(dv)
+        target.map_score = int(getattr(target, "map_score", 0)) + int(dp)
         if not hasattr(target, "harvest_delta") or not isinstance(target.harvest_delta, dict):
-            target.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0}
-        self.game.harvest._bump_harvest_delta(target, dg, ds, dm, dv)
+            target.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0, "map": 0}
+        self.game.harvest._bump_harvest_delta(target, dg, ds, dm, dv, dp)
         return True
 
     def _describe_choose_option(self, opt):
         token = (opt.get("token") or "").strip().lower()
-        if token in ("g", "s", "m", "v"):
-            label = {"g": "gold", "s": "strength", "m": "magic", "v": "victory"}[token]
+        if token in ("g", "s", "m", "v", "p"):
+            label = {"g": "gold", "s": "strength", "m": "magic", "v": "victory", "p": "map"}[token]
             return f"+{int(opt.get('amount', 0) or 0)} {label}"
         if token == "count_area":
             area = opt.get("area")
             resource = (opt.get("resource") or "").strip().lower()
             mult = int(opt.get("mult", 0) or 0)
-            label = {"g": "gold", "s": "strength", "m": "magic", "v": "victory"}.get(resource, resource)
+            label = {"g": "gold", "s": "strength", "m": "magic", "v": "victory", "p": "map"}.get(resource, resource)
             return f"+({mult} x {area}) {label}"
         if token == "citizens.choice":
             name = (opt.get("name") or "Citizen").strip()
@@ -495,7 +504,7 @@ class ChooseEngine:
                 for e in extras:
                     et = (e.get("token") or "").strip().lower()
                     ea = int(e.get("amount", 0) or 0)
-                    el = {"g": "gold", "s": "strength", "m": "magic", "v": "victory"}.get(et, et)
+                    el = {"g": "gold", "s": "strength", "m": "magic", "v": "victory", "p": "map"}.get(et, et)
                     parts.append(f"+{ea} {el}")
                 suffix = " + " + " + ".join(parts)
             return f"gain 1 {name} citizen{suffix}"

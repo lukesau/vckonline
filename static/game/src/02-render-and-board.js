@@ -672,7 +672,7 @@ function makeResourceActionBar(state) {
   const canTake = canOfferTakeResourceAction(state);
   const resourceBar = document.createElement('div');
   resourceBar.className = 'resource-action-bar' + (canTake ? '' : ' resource-action-bar--inactive');
-  ['gold', 'strength', 'magic'].forEach(r => {
+  ['gold', 'strength', 'magic', 'map'].forEach(r => {
     const lab = r.charAt(0).toUpperCase() + r.slice(1);
     const btn = promptButton('', () => {
       if (!canOfferTakeResourceAction(latestGameState)) return;
@@ -1065,6 +1065,7 @@ const TABLEAU_RESOURCE_ICONS = {
   magic: '/images/magic_icon.png',
   strength: '/images/strength_icon.png',
   victory: '/images/vp_icon.png',
+  map: '/images/map.png',
 };
 
 function makeResourceScorePill(cls, val, fullName, iconSrc) {
@@ -1110,7 +1111,7 @@ function makeModalResourceInline(kind, num, cls, leadingPlus) {
   img.className = 'modal-resource-icon';
   img.alt = '';
   img.src = TABLEAU_RESOURCE_ICONS[kind];
-  const names = { gold: 'Gold', strength: 'Strength', magic: 'Magic' };
+  const names = { gold: 'Gold', strength: 'Strength', magic: 'Magic', map: 'Map' };
   const n = Number(num);
   const tip = `${n} times ${names[kind]}`;
   wrap.title = tip;
@@ -1229,6 +1230,7 @@ function makeHeader(player, state) {
   resRow.appendChild(makeResourceScorePill('gold', player.gold_score, 'Gold', TABLEAU_RESOURCE_ICONS.gold));
   resRow.appendChild(makeResourceScorePill('strength', player.strength_score, 'Strength', TABLEAU_RESOURCE_ICONS.strength));
   resRow.appendChild(makeResourceScorePill('magic', player.magic_score, 'Magic', TABLEAU_RESOURCE_ICONS.magic));
+  resRow.appendChild(makeResourceScorePill('map', player.map_score, 'Map', TABLEAU_RESOURCE_ICONS.map));
   resRow.appendChild(makeVpScorePill(player.victory_score));
   h.appendChild(resRow);
 

@@ -51,12 +51,13 @@ class HarvestEngine:
             return True, count
         return False, 0
 
-    def _bump_harvest_delta(self, player, dg, ds, dm, dv=0):
+    def _bump_harvest_delta(self, player, dg, ds, dm, dv=0, dp=0):
         hd = player.harvest_delta
         hd["gold"] = int(hd.get("gold", 0)) + int(dg)
         hd["strength"] = int(hd.get("strength", 0)) + int(ds)
         hd["magic"] = int(hd.get("magic", 0)) + int(dm)
         hd["victory"] = int(hd.get("victory", 0)) + int(dv)
+        hd["map"] = int(hd.get("map", 0)) + int(dp)
 
     def _apply_harvest_activation(self, player, starter_or_citizen, kind, on_turn):
         """
@@ -807,7 +808,7 @@ class HarvestEngine:
     def harvest_phase(self):
         """Resolve the entire harvest non-interactively (local scripts / play_turn)."""
         for p in self.game.player_list:
-            p.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0}
+            p.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0, "map": 0}
         active = self.game._player_by_id(self.game.lifecycle.current_player_id())
         self._apply_harvest_jousting_passive(active)
         resting_pid = self.game.resting_player_id()

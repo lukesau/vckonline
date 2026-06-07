@@ -19,6 +19,9 @@ This document covers how effect strings work across the three card tables (citiz
 | Purser | `count owned_citizens g 1` | Gain 1g per owned face-up Citizen (including the Purser; excluding flipped peers; not counting starter citizens) |
 | Thief (on-turn) | `steal g 3 m 3` | Choose an opponent, then steal 3g or 3m from them |
 | Thief (off-turn) | `choose g 2 m 2` | Pick one: +2g or +2m |
+| Hydromancer (on-turn) | `choose m 2 p 1` | Pick one: +2 magic or +1 map (Crimson Seas) |
+| Engineer (on-turn) | `choose g 2 s 2 p 1` | Pick one: +2 gold, +2 strength, or +1 map (Crimson Seas) |
+| Smuggler (on-turn) | `choose g 4 p 2` | Pick one: +4 gold or +2 maps (Crimson Seas) |
 
 ### Domains — `activation_effect`
 
@@ -213,7 +216,16 @@ The bracket vs no-bracket distinction does carry real meaning and is worth keepi
 choose g 1 m 1                              # pick one of these resource amounts
 choose g 3 <citizens where name==Knight>    # pick a resource amount OR an entity
 choose <citizens where gold_cost<=2>        # pick an entity from a filtered set
+choose m 2 p 1                              # pick one: +2 magic or +1 map (Crimson Seas)
 ```
+
+#### Resource letters
+
+`g` = gold, `s` = strength, `m` = magic, `v`/`vp` = victory points, and `p` =
+**map** (the Crimson Seas "sail" resource). `m` was already magic, so maps use
+`p`. Maps are tracked on `Player.map_score`, surface in `harvest_delta["map"]`,
+and render with `/images/map.png`. There is currently no way to *spend* maps —
+they are only earned (citizen payouts, the `+1 Map` standard action) and shown.
 
 ### 4. `exchange` — only exists in citizens
 

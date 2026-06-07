@@ -42,6 +42,10 @@ DEBUG_DIE_TWO_VALUES = (4, 5)
 # Third starter slot: Herald by default; other candidates use roll_match -1/-1.
 DEFAULT_SLOT_STARTER_ID = 3
 
+# Crimson Seas uses its own -1/-1 slot starter (id 5 / expansion "crimsonseas").
+# Until that card exists in the DB, `_choose_slot_starter` falls back to Herald.
+CRIMSONSEAS_SLOT_STARTER_ID = 5
+
 
 def _is_slot_starter_row(row):
     try:
@@ -68,6 +72,16 @@ def _choose_slot_starter(slot_candidates, preset, draft_selections=None):
         slot_id = int(draft_selections["starter_id"])
     elif preset == "random":
         return random.choice(slot_candidates)
+    elif preset == "crimsonseas":
+        # Prefer a Crimson Seas -1/-1 starter (by expansion, then by id 5);
+        # fall back to the default Herald slot if neither exists yet.
+        cs = [
+            s for s in slot_candidates
+            if (getattr(s, "expansion", "") or "").strip().lower() == "crimsonseas"
+        ]
+        if cs:
+            return cs[0]
+        slot_id = CRIMSONSEAS_SLOT_STARTER_ID
     else:
         slot_id = DEFAULT_SLOT_STARTER_ID
 
@@ -302,6 +316,21 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             domain_expansion_filters = ("shadowvale",)
             duke_expansion_filters = ("base", "shadowvale")
             event_expansion_filters = ("shadowvale",)
+            choose_one_citizen_per_roll = True
+        case "crimsonseas":
+            # Crimson Seas expansion preset:
+            # - monsters/citizens/events: expansion = "crimsonseas"
+            # - domains: expansion in ("crimsonseas", "base")
+            # - dukes: all dukes (random across every expansion; default query)
+            # - starters: regular Peasant/Knight plus a Crimson Seas -1/-1 slot
+            #   starter (see `_choose_slot_starter`); the default starter query
+            #   already loads all starters.
+            # Banned cards are still filtered by the shared domain/duke deal.
+            monster_expansion_filters = ("crimsonseas",)
+            citizen_expansion_filters = ("crimsonseas",)
+            domain_expansion_filters = ("crimsonseas", "base")
+            event_expansion_filters = ("crimsonseas",)
+            duke_query = "select_random_dukes"
             choose_one_citizen_per_roll = True
         case "random":
             # Pull every card (every expansion) and let
