@@ -418,12 +418,15 @@ function lobbyOptionsShortLabel(lobby) {
   return parts.length ? ` • ${parts.join(', ')}` : '';
 }
 
-function syncExpansionOnlyControl(preset, wrapEl, inputEl, checked, ownerEnabled) {
-  if (!wrapEl || !inputEl) return;
-  const show = lobbySupportsExpansionOnly(preset);
-  wrapEl.hidden = !show;
-  inputEl.checked = !!checked;
-  inputEl.disabled = !ownerEnabled || !show;
+// The unlabeled row-1 dropdown ("All …" / "Expansion …") controls whether
+// dukes/domains are drawn from every set or just the preset's expansion.
+// It's only meaningful for the expansion-capable presets; for the others we
+// force it back to "all" and disable it.
+function syncPoolControl(preset, selectEl, expansionOnly, ownerEnabled) {
+  if (!selectEl) return;
+  const supported = lobbySupportsExpansionOnly(preset);
+  selectEl.value = (supported && expansionOnly) ? 'expansion' : 'all';
+  selectEl.disabled = !ownerEnabled || !supported;
 }
 
 function syncPresetWarning(preset, warningEl) {
@@ -887,8 +890,7 @@ function initLobbyModal() {
   const createPresetSelect = document.getElementById('lobby-create-preset');
   const createMinPlayersSelect = document.getElementById('lobby-create-min-players');
   const createDukeSelect = document.getElementById('lobby-create-duke-select');
-  const createExpansionOnlyWrap = document.getElementById('lobby-create-expansion-only-wrap');
-  const createExpansionOnlyInput = document.getElementById('lobby-create-expansion-only');
+  const createPoolSelect = document.getElementById('lobby-create-pool');
   const createPresetWarning = document.getElementById('lobby-create-preset-warning');
   const createBtn = document.getElementById('lobby-create-btn');
   const backToNameBtn = document.getElementById('lobby-back-to-name-btn');
@@ -897,8 +899,7 @@ function initLobbyModal() {
   const presetSelect = document.getElementById('lobby-preset-select');
   const minPlayersSelect = document.getElementById('lobby-min-players-select');
   const dukeSelect = document.getElementById('lobby-duke-select');
-  const expansionOnlyWrap = document.getElementById('lobby-expansion-only-wrap');
-  const expansionOnlyInput = document.getElementById('lobby-expansion-only');
+  const poolSelect = document.getElementById('lobby-pool-select');
   const presetWarning = document.getElementById('lobby-preset-warning');
   const readyBtn = document.getElementById('lobby-ready-btn');
   const leaveBtn = document.getElementById('lobby-leave-btn');
@@ -1284,10 +1285,9 @@ function initLobbyModal() {
       dukeSelect.value = String(Number(lobby.duke_select_count) || 2);
       dukeSelect.disabled = !isOwner;
     }
-    syncExpansionOnlyControl(
+    syncPoolControl(
       lobby.preset || 'current',
-      expansionOnlyWrap,
-      expansionOnlyInput,
+      poolSelect,
       lobby.expansion_only,
       isOwner,
     );
@@ -1499,8 +1499,8 @@ function initLobbyModal() {
       const minPlayers = Number(createMinPlayersSelect.value) || 2;
       const dukeSelectCount = Number(createDukeSelect && createDukeSelect.value) || 2;
       const expansionOnly = !!(
-        createExpansionOnlyInput
-        && createExpansionOnlyInput.checked
+        createPoolSelect
+        && createPoolSelect.value === 'expansion'
         && lobbySupportsExpansionOnly(preset)
       );
       const res = await fetch('/api/lobby/create', {
@@ -1585,16 +1585,10 @@ function initLobbyModal() {
         if (!res.ok) {
           throw new Error(data.detail != null ? String(data.detail) : res.statusText || 'Preset update failed');
         }
-        if (!lobbySupportsExpansionOnly(preset) && expansionOnlyInput) {
-          expansionOnlyInput.checked = false;
-        }
-        syncExpansionOnlyControl(
-          preset,
-          expansionOnlyWrap,
-          expansionOnlyInput,
-          expansionOnlyInput ? expansionOnlyInput.checked : false,
-          true,
-        );
+        const stillExpansion = poolSelect
+          && poolSelect.value === 'expansion'
+          && lobbySupportsExpansionOnly(preset);
+        syncPoolControl(preset, poolSelect, stillExpansion, true);
         syncPresetWarning(preset, presetWarning);
       } catch (e) {
         showLobbyError(e.message || 'Could not change preset.');
@@ -1602,13 +1596,13 @@ function initLobbyModal() {
     });
   }
 
-  if (expansionOnlyInput) {
-    expansionOnlyInput.addEventListener('change', async () => {
+  if (poolSelect) {
+    poolSelect.addEventListener('change', async () => {
       const pid = lobbyPlayerId || vckStoredPlayerId();
       if (!pid) return;
       const preset = presetSelect ? (presetSelect.value || 'current') : 'current';
       if (!lobbySupportsExpansionOnly(preset)) {
-        expansionOnlyInput.checked = false;
+        poolSelect.value = 'all';
         return;
       }
       showLobbyError('');
@@ -1618,15 +1612,15 @@ function initLobbyModal() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             player_id: pid,
-            expansion_only: expansionOnlyInput.checked,
+            expansion_only: poolSelect.value === 'expansion',
           }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          throw new Error(data.detail != null ? String(data.detail) : res.statusText || 'Expansion-only update failed');
+          throw new Error(data.detail != null ? String(data.detail) : res.statusText || 'Card pool update failed');
         }
       } catch (e) {
-        showLobbyError(e.message || 'Could not change expansion-only setting.');
+        showLobbyError(e.message || 'Could not change card pool setting.');
       }
     });
   }
@@ -1658,17 +1652,12 @@ function initLobbyModal() {
 
   if (createPresetSelect) {
     createPresetSelect.addEventListener('change', () => {
-      syncExpansionOnlyControl(
-        createPresetSelect.value || 'current',
-        createExpansionOnlyWrap,
-        createExpansionOnlyInput,
-        createExpansionOnlyInput ? createExpansionOnlyInput.checked : false,
-        true,
-      );
-      if (!lobbySupportsExpansionOnly(createPresetSelect.value || 'current') && createExpansionOnlyInput) {
-        createExpansionOnlyInput.checked = false;
-      }
-      syncPresetWarning(createPresetSelect.value || 'current', createPresetWarning);
+      const preset = createPresetSelect.value || 'current';
+      const stillExpansion = createPoolSelect
+        && createPoolSelect.value === 'expansion'
+        && lobbySupportsExpansionOnly(preset);
+      syncPoolControl(preset, createPoolSelect, stillExpansion, true);
+      syncPresetWarning(preset, createPresetWarning);
     });
   }
 
@@ -1877,13 +1866,7 @@ function initLobbyModal() {
   }
 
   if (createPresetSelect) {
-    syncExpansionOnlyControl(
-      createPresetSelect.value || 'current',
-      createExpansionOnlyWrap,
-      createExpansionOnlyInput,
-      false,
-      true,
-    );
+    syncPoolControl(createPresetSelect.value || 'current', createPoolSelect, false, true);
     syncPresetWarning(createPresetSelect.value || 'current', createPresetWarning);
   }
 

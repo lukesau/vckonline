@@ -79,21 +79,25 @@
         <p id="lobby-list-empty" class="lobby-list-empty lobby-hidden">No open lobbies yet. Create the first one below.</p>
         <div class="lobby-create-card">
           <h2 class="lobby-create-title">Create a lobby</h2>
-          <div class="lobby-field lobby-field--preset">
-            <label class="lobby-label" for="lobby-create-preset">Preset</label>
-            <select id="lobby-create-preset" class="lobby-input">
-              <option value="current">Default (Base Set)</option>
-              <option value="base">Base Set</option>
-              <option value="flamesandfrost">Flames and Frost</option>
-              <option value="shadowvale">Shadowvale</option>
-              <option value="crimsonseas">Crimson Seas</option>
-              <option value="random">Random (all implemented cards)</option>
-              <option value="draft">Draft (vote on monsters &amp; citizens)</option>
-            </select>
-            <label class="lobby-expansion-only" id="lobby-create-expansion-only-wrap" hidden>
-              <input type="checkbox" id="lobby-create-expansion-only" />
-              <span>Exp. only</span>
-            </label>
+          <div class="lobby-field-row lobby-preset-pool-row">
+            <div class="lobby-field lobby-field--half">
+              <label class="lobby-label" for="lobby-create-preset">Preset</label>
+              <select id="lobby-create-preset" class="lobby-input">
+                <option value="current">Default (Base Set)</option>
+                <option value="base">Base Set</option>
+                <option value="flamesandfrost">Flames and Frost</option>
+                <option value="shadowvale">Shadowvale</option>
+                <option value="crimsonseas">Crimson Seas</option>
+                <option value="random">Random (all implemented cards)</option>
+                <option value="draft">Draft (vote on monsters &amp; citizens)</option>
+              </select>
+            </div>
+            <div class="lobby-field lobby-field--half">
+              <select id="lobby-create-pool" class="lobby-input" aria-label="Duke &amp; domain card pool">
+                <option value="all">All — dukes &amp; domains from every set</option>
+                <option value="expansion">Expansion — only this set's dukes &amp; domains</option>
+              </select>
+            </div>
           </div>
           <p class="lobby-preset-warning" id="lobby-create-preset-warning" role="alert" hidden>
             Crimson Seas is a work in progress and likely buggy or incomplete.
@@ -125,21 +129,25 @@
       <div id="lobby-step-wait" class="lobby-step lobby-hidden">
         <p id="lobby-wait-meta" class="lobby-wait-meta"></p>
         <div class="lobby-preset-row">
-          <div class="lobby-field lobby-field--preset">
-            <label class="lobby-label" for="lobby-preset-select">Preset</label>
-            <select id="lobby-preset-select" class="lobby-input">
-              <option value="current">Default (Base Set)</option>
-              <option value="base">Base Set</option>
-              <option value="flamesandfrost">Flames and Frost</option>
-              <option value="shadowvale">Shadowvale</option>
-              <option value="crimsonseas">Crimson Seas</option>
-              <option value="random">Random (all implemented cards)</option>
-              <option value="draft">Draft (vote on monsters &amp; citizens)</option>
-            </select>
-            <label class="lobby-expansion-only" id="lobby-expansion-only-wrap" hidden>
-              <input type="checkbox" id="lobby-expansion-only" />
-              <span>Exp. only</span>
-            </label>
+          <div class="lobby-field-row lobby-preset-pool-row">
+            <div class="lobby-field lobby-field--half">
+              <label class="lobby-label" for="lobby-preset-select">Preset</label>
+              <select id="lobby-preset-select" class="lobby-input">
+                <option value="current">Default (Base Set)</option>
+                <option value="base">Base Set</option>
+                <option value="flamesandfrost">Flames and Frost</option>
+                <option value="shadowvale">Shadowvale</option>
+                <option value="crimsonseas">Crimson Seas</option>
+                <option value="random">Random (all implemented cards)</option>
+                <option value="draft">Draft (vote on monsters &amp; citizens)</option>
+              </select>
+            </div>
+            <div class="lobby-field lobby-field--half">
+              <select id="lobby-pool-select" class="lobby-input" aria-label="Duke &amp; domain card pool">
+                <option value="all">All — dukes &amp; domains from every set</option>
+                <option value="expansion">Expansion — only this set's dukes &amp; domains</option>
+              </select>
+            </div>
           </div>
           <p class="lobby-preset-warning" id="lobby-preset-warning" role="alert" hidden>
             Crimson Seas is a work in progress and likely buggy or incomplete.
