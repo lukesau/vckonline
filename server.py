@@ -116,13 +116,15 @@ manager = ConnectionManager()
 # lobbies only by leaving + (re)joining. Inactive members and empty lobbies
 # are pruned by `_prune_stale_lobbies` after `_LOBBY_MEMBER_TIMEOUT_S`.
 
-# Allowed presets the owner may choose. `current` is the live "current
-# format" alias and presently points at the canonical Base Set deal in
-# `game_setup.py`; `base` is the same deal exposed as a stable preset so
-# that swapping `current` to a future format does not remove Base Set from
-# the dropdown. `random` deals from every implemented card across all
-# expansions (see `card_filters.keep_for_random`).
-_VALID_LOBBY_PRESETS = ("current", "base", "flamesandfrost", "shadowvale", "crimsonseas", "random", "draft")
+# Allowed presets the owner may choose. `current` is the live "Rotating
+# Preset" alias and presently points at the `june2026` rotating deal in
+# `game_setup.py`; rotating it to a future month is a one-line change there.
+# `base` is the canonical Base Set deal exposed as a stable preset. The dated
+# rotating presets (e.g. `june2026`) are valid but intentionally not surfaced
+# as their own dropdown option — players reach the live one via `current`.
+# `random` deals from every implemented card across all expansions (see
+# `card_filters.keep_for_random`).
+_VALID_LOBBY_PRESETS = ("current", "june2026", "base", "flamesandfrost", "shadowvale", "crimsonseas", "random", "draft")
 
 # Lobby min-players bounds. The lower bound matches the historical default
 # (the game has always required 2 players); the upper bound matches the
@@ -239,7 +241,7 @@ def _validate_duke_select_count(duke_select_count, default=2) -> int:
     return n
 
 
-_PRESETS_WITH_EXPANSION_ONLY = frozenset({"base", "current", "flamesandfrost", "shadowvale"})
+_PRESETS_WITH_EXPANSION_ONLY = frozenset({"base", "flamesandfrost", "shadowvale"})
 
 
 def _validate_min_players(min_players, default=_MIN_PLAYERS_FLOOR) -> int:

@@ -393,7 +393,8 @@ async function initLobbyBackgroundCanvas(canvas) {
 // Full preset labels live in the HTML <option> markup. The JS only needs
 // short labels for compact lobby browser/wait rows.
 const LOBBY_PRESET_SHORT_LABELS = {
-  current: 'Default',
+  current: 'Rotating',
+  june2026: 'Rotating',
   base: 'Base Set',
   flamesandfrost: 'Flames+Frost',
   shadowvale: 'Shadowvale',
@@ -403,7 +404,7 @@ const LOBBY_PRESET_SHORT_LABELS = {
 };
 
 const LOBBY_PRESETS_WITH_EXPANSION_ONLY = new Set([
-  'current', 'base', 'flamesandfrost', 'shadowvale',
+  'base', 'flamesandfrost', 'shadowvale',
 ]);
 
 function lobbySupportsExpansionOnly(preset) {

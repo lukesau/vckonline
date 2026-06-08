@@ -72,6 +72,25 @@ class LobbyOptionsIntegrationTests(unittest.TestCase):
             for duke in player.owned_dukes:
                 self.assertIn(duke.expansion, ("base", "flamesandfrost"))
 
+    def test_rotating_preset_uses_fixed_areas_and_citizens(self):
+        from game_setup import JUNE_2026_MONSTER_AREAS, JUNE_2026_CITIZEN_IDS
+
+        for preset in ("june2026", "current"):
+            state = self._load(preset)
+            board_areas = set(state["monster_stack_areas"]) - {"Undead Samurai"}
+            self.assertEqual(board_areas, set(JUNE_2026_MONSTER_AREAS))
+            dealt_citizen_ids = {
+                int(stack[0].citizen_id)
+                for stack in state["citizen_grid"]
+                if stack
+            }
+            self.assertEqual(dealt_citizen_ids, set(JUNE_2026_CITIZEN_IDS))
+
+    def test_rotating_preset_excludes_crimson_seas_domains(self):
+        state = self._load("current")
+        for domain in self._board_domains(state):
+            self.assertNotEqual(domain.expansion, "crimsonseas")
+
     def test_expansion_only_base_scopes_dukes_to_base(self):
         state = self._load("base", expansion_only=True)
         for player in state["player_list"]:

@@ -53,6 +53,16 @@ DEFAULT_SLOT_STARTER_ID = 3
 # Until that card exists in the DB, `_choose_slot_starter` falls back to Herald.
 CRIMSONSEAS_SLOT_STARTER_ID = 5
 
+# "June 2026" rotating preset: a hand-picked board. The monster areas and
+# citizen ids are fixed (drawn from the full cross-expansion pool); domains,
+# dukes, and events are randomized like the other presets (Crimson Seas
+# domains still excluded). The `current` preset ("Rotating" in the
+# lobby) is an alias of whichever dated rotating preset is live — currently
+# this one. `june2026` itself is intentionally not offered as a separate
+# lobby dropdown option; players reach it through the rotating alias.
+JUNE_2026_MONSTER_AREAS = ("Barrens", "Gloom Gyre", "Den", "Skerry", "Fire Temple")
+JUNE_2026_CITIZEN_IDS = (19, 2, 41, 14, 33, 34, 35, 36, 9, 48)
+
 
 def _is_slot_starter_row(row):
     try:
@@ -259,6 +269,11 @@ def load_game_data(
     # aren't implemented yet, so exclude them here until they ship rather than
     # letting them leak in.
     exclude_domain_expansions = ()
+    # Preset-baked fixed selections (parallel to draft_selections but hard-coded
+    # in the preset definition). When set, the citizen pool is narrowed to these
+    # ids and the board is dealt exactly these 5 monster areas.
+    fixed_citizen_ids = None
+    fixed_monster_areas = None
     # Apply card_filters.keep_for_random (implemented AND has image) to every
     # raw row pool below. Off for the curated presets so a one-off missing
     # image or stub effect doesn't silently shrink those pools.
@@ -312,12 +327,26 @@ def load_game_data(
     harvest_processed = False
     pending_harvest_choices = []
     match preset:
-        case "base" | "current":
+        case "base":
             monster_query = "select_base_monsters"
             citizen_query = "select_base_citizens"
             choose_one_citizen_per_roll = True
             domain_query = "select_base_domains"
             duke_query = "select_random_dukes"
+        case "june2026" | "current":
+            # Rotating preset (current = "Rotating", aliased to the
+            # live dated preset). Fixed monster areas + citizens; domains,
+            # dukes, and events randomized across all expansions (no Crimson
+            # Seas domains). Pulled from the full pool so the curated areas
+            # and citizen ids can span expansions.
+            monster_query = "select_all_monsters"
+            citizen_query = "select_all_citizens"
+            choose_one_citizen_per_roll = False
+            domain_query = "select_random_domains"
+            duke_query = "select_random_dukes"
+            exclude_domain_expansions = ("crimsonseas",)
+            fixed_monster_areas = JUNE_2026_MONSTER_AREAS
+            fixed_citizen_ids = JUNE_2026_CITIZEN_IDS
         case "base1":
             monster_query = "select_base1_monsters"
             citizen_query = "select_base1_citizens"
@@ -396,7 +425,7 @@ def load_game_data(
     # (plus base dukes for expansion presets that don't have enough dukes
     # alone). Default (off) draws domains/dukes/events from the full pool.
     if expansion_only:
-        if preset in ("base", "current"):
+        if preset == "base":
             domain_query = "select_base_domains"
             domain_expansion_filters = None
             duke_expansion_filters = ("base",)
@@ -462,6 +491,9 @@ def load_game_data(
         if draft_selections and preset == "draft":
             selected_ids = {int(v) for v in draft_selections.get("citizens", {}).values()}
             results = [r for r in results if int(r["id_citizens"]) in selected_ids]
+        elif fixed_citizen_ids:
+            wanted = {int(i) for i in fixed_citizen_ids}
+            results = [r for r in results if int(r["id_citizens"]) in wanted]
         elif choose_one_citizen_per_roll:
             results = _choose_one_citizen_per_roll(results)
         _validate_citizen_rolls(results, citizen_query)
@@ -775,6 +807,17 @@ def load_game_data(
             missing = [a for a in chosen_areas if a not in grouped_monsters]
             if missing:
                 raise ValueError(f"Draft-selected areas not in available monster pool: {missing}")
+        elif fixed_monster_areas:
+            chosen_areas = list(fixed_monster_areas)
+            if len(chosen_areas) != 5:
+                raise ValueError(
+                    f"Preset {preset!r} must specify exactly 5 monster areas, got {len(chosen_areas)}."
+                )
+            missing = [a for a in chosen_areas if a not in grouped_monsters]
+            if missing:
+                raise ValueError(
+                    f"Preset {preset!r} monster areas not in available pool: {missing}."
+                )
         else:
             chosen_areas = random.sample(areas, 5)
         chosen_areas = _sort_monster_areas_by_top_card_cost(chosen_areas, grouped_monsters)
