@@ -426,6 +426,11 @@ function syncExpansionOnlyControl(preset, wrapEl, inputEl, checked, ownerEnabled
   inputEl.disabled = !ownerEnabled || !show;
 }
 
+function syncPresetWarning(preset, warningEl) {
+  if (!warningEl) return;
+  warningEl.hidden = preset !== 'crimsonseas';
+}
+
 // ── Draft mode client state ──────────────────────────────────────────────────
 let _draftPhaseKey = '';      // 'monsters', 'starters', or 'citizens_1' etc — reset votes on change
 let _draftMonsterVotes = [];  // area names the player has locally selected (up to 5)
@@ -884,6 +889,7 @@ function initLobbyModal() {
   const createDukeSelect = document.getElementById('lobby-create-duke-select');
   const createExpansionOnlyWrap = document.getElementById('lobby-create-expansion-only-wrap');
   const createExpansionOnlyInput = document.getElementById('lobby-create-expansion-only');
+  const createPresetWarning = document.getElementById('lobby-create-preset-warning');
   const createBtn = document.getElementById('lobby-create-btn');
   const backToNameBtn = document.getElementById('lobby-back-to-name-btn');
   const lobbySheet = overlay ? overlay.querySelector('.lobby-sheet') : null;
@@ -893,6 +899,7 @@ function initLobbyModal() {
   const dukeSelect = document.getElementById('lobby-duke-select');
   const expansionOnlyWrap = document.getElementById('lobby-expansion-only-wrap');
   const expansionOnlyInput = document.getElementById('lobby-expansion-only');
+  const presetWarning = document.getElementById('lobby-preset-warning');
   const readyBtn = document.getElementById('lobby-ready-btn');
   const leaveBtn = document.getElementById('lobby-leave-btn');
   const playerList = document.getElementById('lobby-player-list');
@@ -1284,6 +1291,7 @@ function initLobbyModal() {
       lobby.expansion_only,
       isOwner,
     );
+    syncPresetWarning(lobby.preset || 'current', presetWarning);
     playerList.innerHTML = '';
     let focusInputEl = null;
     (lobby.members || []).forEach(m => {
@@ -1587,6 +1595,7 @@ function initLobbyModal() {
           expansionOnlyInput ? expansionOnlyInput.checked : false,
           true,
         );
+        syncPresetWarning(preset, presetWarning);
       } catch (e) {
         showLobbyError(e.message || 'Could not change preset.');
       }
@@ -1659,6 +1668,7 @@ function initLobbyModal() {
       if (!lobbySupportsExpansionOnly(createPresetSelect.value || 'current') && createExpansionOnlyInput) {
         createExpansionOnlyInput.checked = false;
       }
+      syncPresetWarning(createPresetSelect.value || 'current', createPresetWarning);
     });
   }
 
@@ -1874,6 +1884,7 @@ function initLobbyModal() {
       false,
       true,
     );
+    syncPresetWarning(createPresetSelect.value || 'current', createPresetWarning);
   }
 
   openOverlay();

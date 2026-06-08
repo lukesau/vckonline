@@ -2647,6 +2647,21 @@ select.lobby-input:disabled {
   opacity: 0.5;
 }
 
+.lobby-preset-warning {
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #ffd9a8;
+  background: rgba(220, 120, 40, 0.14);
+  border: 1px solid rgba(240, 150, 60, 0.4);
+}
+
+.lobby-preset-warning[hidden] {
+  display: none;
+}
+
 .lobby-owner-tag {
   display: inline-block;
   margin-left: 6px;
