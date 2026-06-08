@@ -79,7 +79,7 @@
         <p id="lobby-list-empty" class="lobby-list-empty lobby-hidden">No open lobbies yet. Create the first one below.</p>
         <div class="lobby-create-card">
           <h2 class="lobby-create-title">Create a lobby</h2>
-          <div class="lobby-field">
+          <div class="lobby-field lobby-field--preset">
             <label class="lobby-label" for="lobby-create-preset">Preset</label>
             <select id="lobby-create-preset" class="lobby-input">
               <option value="current">Default (Base Set)</option>
@@ -90,15 +90,28 @@
               <option value="random">Random (all implemented cards)</option>
               <option value="draft">Draft (vote on monsters &amp; citizens)</option>
             </select>
+            <label class="lobby-expansion-only" id="lobby-create-expansion-only-wrap" hidden>
+              <input type="checkbox" id="lobby-create-expansion-only" />
+              <span>Exp. only</span>
+            </label>
           </div>
-          <div class="lobby-field">
-            <label class="lobby-label" for="lobby-create-min-players">Min players</label>
-            <select id="lobby-create-min-players" class="lobby-input">
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4">4</option>
-              <option value="5">5</option>
-            </select>
+          <div class="lobby-field-row">
+            <div class="lobby-field lobby-field--compact">
+              <label class="lobby-label" for="lobby-create-min-players">Min</label>
+              <select id="lobby-create-min-players" class="lobby-input">
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+              </select>
+            </div>
+            <div class="lobby-field lobby-field--compact">
+              <label class="lobby-label" for="lobby-create-duke-select">Dukes</label>
+              <select id="lobby-create-duke-select" class="lobby-input">
+                <option value="2">2</option>
+                <option value="3">3</option>
+              </select>
+            </div>
           </div>
           <div class="lobby-create-actions">
             <button type="button" id="lobby-back-to-name-btn" class="lobby-btn lobby-btn-ghost lobby-create-back">Back</button>
@@ -109,7 +122,7 @@
       <div id="lobby-step-wait" class="lobby-step lobby-hidden">
         <p id="lobby-wait-meta" class="lobby-wait-meta"></p>
         <div class="lobby-preset-row">
-          <div class="lobby-field">
+          <div class="lobby-field lobby-field--preset">
             <label class="lobby-label" for="lobby-preset-select">Preset</label>
             <select id="lobby-preset-select" class="lobby-input">
               <option value="current">Default (Base Set)</option>
@@ -120,15 +133,28 @@
               <option value="random">Random (all implemented cards)</option>
               <option value="draft">Draft (vote on monsters &amp; citizens)</option>
             </select>
+            <label class="lobby-expansion-only" id="lobby-expansion-only-wrap" hidden>
+              <input type="checkbox" id="lobby-expansion-only" />
+              <span>Exp. only</span>
+            </label>
           </div>
-          <div class="lobby-field">
-            <label class="lobby-label" for="lobby-min-players-select">Min players</label>
-            <select id="lobby-min-players-select" class="lobby-input">
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4">4</option>
-              <option value="5">5</option>
-            </select>
+          <div class="lobby-field-row">
+            <div class="lobby-field lobby-field--compact">
+              <label class="lobby-label" for="lobby-min-players-select">Min</label>
+              <select id="lobby-min-players-select" class="lobby-input">
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+              </select>
+            </div>
+            <div class="lobby-field lobby-field--compact">
+              <label class="lobby-label" for="lobby-duke-select">Dukes</label>
+              <select id="lobby-duke-select" class="lobby-input">
+                <option value="2">2</option>
+                <option value="3">3</option>
+              </select>
+            </div>
           </div>
         </div>
         <ul id="lobby-player-list" class="lobby-player-list"></ul>

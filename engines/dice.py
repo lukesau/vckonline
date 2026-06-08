@@ -349,15 +349,24 @@ class DiceEngine:
                                    accessible monster; stored as pending_event_slay_cost
           banish_center_citizen [optional]  — active player banishes (or may
                                               skip) a citizen from center stacks
+          banish_center_domain [optional]   — active player banishes (or may
+                                              skip) a face-up domain from center
+                                              stacks; the next domain is revealed
+          add_self_slay_cost s|m|g N [max=K]  — add N to THIS event's own slay
+                                              cost (no choice); capped at +K
         """
         raw = (event.roll_effect or "").strip()
         if not raw:
             return
         parts = raw.split()
         verb = parts[0].lower()
-        if verb == "banish_center_citizen":
+        banish_center_kinds = {
+            "banish_center_citizen": "citizen",
+            "banish_center_domain": "domain",
+        }
+        if verb in banish_center_kinds:
             optional = any(p.lower() == "optional" for p in parts[1:])
-            command = "banish_center citizen"
+            command = f"banish_center {banish_center_kinds[verb]}"
             if optional:
                 command += " optional"
             self.game.payouts._execute_banish_center_payout(command, player_id)
@@ -438,6 +447,40 @@ class DiceEngine:
                 f"Event \"{event.name}\" triggered: {self.game._player_label(player_id)} must add "
                 f"{amount}{resource} to a chosen monster's slay cost."
             )
+
+        elif verb == "add_self_slay_cost":
+            # Leviathan-style accrual: bump THIS event card's own slay cost by
+            # `amount` of `resource` (no player choice), capped at an optional
+            # `max=N` ceiling on the accumulated extra cost.
+            attr_map = {"s": "extra_strength_cost", "m": "extra_magic_cost", "g": "extra_gold_cost"}
+            attr = attr_map.get(resource)
+            if not attr:
+                self.game._log_game_event(
+                    f"Event \"{event.name}\" add_self_slay_cost: unknown resource {resource!r}"
+                )
+                return
+            cap = None
+            for tok in parts[3:]:
+                if tok.lower().startswith("max="):
+                    try:
+                        cap = int(tok.split("=", 1)[1])
+                    except (TypeError, ValueError):
+                        cap = None
+            current = int(getattr(event, attr, 0) or 0)
+            new_val = current + amount
+            if cap is not None:
+                new_val = min(new_val, cap)
+            if new_val == current:
+                self.game._log_game_event(
+                    f"Event \"{event.name}\" is already at its maximum {resource} slay cost "
+                    f"({current}); no token added."
+                )
+            else:
+                setattr(event, attr, new_val)
+                self.game._log_game_event(
+                    f"Event \"{event.name}\" gained +{new_val - current}{resource} slay cost "
+                    f"(now +{new_val}{resource})."
+                )
         else:
             self.game._log_game_event(
                 f"Event \"{event.name}\" triggered but unknown verb: {verb!r}"

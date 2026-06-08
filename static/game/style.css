@@ -2598,6 +2598,55 @@ select.lobby-input:disabled {
   gap: 8px;
 }
 
+.lobby-field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.lobby-field--compact {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.lobby-field--compact .lobby-label {
+  min-width: 42px;
+}
+
+.lobby-field--preset {
+  flex-wrap: wrap;
+}
+
+.lobby-field--preset .lobby-input {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.lobby-expansion-only {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.lobby-expansion-only input {
+  margin: 0;
+  accent-color: var(--accent, #f0c040);
+}
+
+.lobby-expansion-only input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .lobby-owner-tag {
   display: inline-block;
   margin-left: 6px;

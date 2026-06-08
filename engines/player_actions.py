@@ -1145,6 +1145,8 @@ class PlayerActionsEngine:
                     banished = self.game.payouts._banish_center_citizen(stack_idx)
                 elif card_kind == "monster":
                     banished = self.game.payouts._banish_center_monster(stack_idx)
+                elif card_kind == "domain":
+                    banished = self.game.payouts._banish_center_domain(stack_idx)
                 else:
                     banished = None
                 if not banished:

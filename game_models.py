@@ -140,7 +140,15 @@ class Lobby:
     transfers to the next member.
     """
 
-    def __init__(self, lobby_id, owner_id, preset="current", min_players=2):
+    def __init__(
+        self,
+        lobby_id,
+        owner_id,
+        preset="current",
+        min_players=2,
+        expansion_only=False,
+        duke_select_count=2,
+    ):
         self.lobby_id = lobby_id
         self.owner_id = owner_id
         self.preset = preset
@@ -148,6 +156,12 @@ class Lobby:
         # Defaults to 2 (the historical behavior). Engine cap is 5 (5-player
         # decks add is_extra monsters and a 6th citizen copy).
         self.min_players = int(min_players or 2)
+        # When True (base/flamesandfrost/shadowvale only), domains and dukes
+        # are drawn from the preset expansion set; expansion presets also mix
+        # in base dukes because the expansion alone has too few.
+        self.expansion_only = bool(expansion_only)
+        # How many dukes each player is dealt before the choose-one prompt.
+        self.duke_select_count = int(duke_select_count or 2)
         self.members = []
         self.created_at = 0
 

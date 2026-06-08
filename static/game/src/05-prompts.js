@@ -2431,7 +2431,7 @@ function renderImmediateSlayPayment(state) {
 function chooseOwnedCardCopy(prc, state) {
   const kind = (prc?.kind || '').toString();
   const cardKind = (prc?.card_kind || '').toString().toLowerCase();
-  const noun = cardKind === 'monster' ? 'monster' : 'citizen';
+  const noun = cardKind === 'monster' ? 'monster' : cardKind === 'domain' ? 'domain' : 'citizen';
 
   if (kind === 'domain_return_owned') {
     const dn = (prc?.domain_name || 'Domain').toString();

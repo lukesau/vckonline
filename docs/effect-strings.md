@@ -108,6 +108,8 @@ queues). Positive gains still reach everyone. Immediate losses floor at 0.
 | Undead Samurai Lord | activation + special_reward | `seq all_must place_reserve_monster pool=undead_samurai` / `count area "Undead Samurai" v 1` | Monster event. On reveal, in turn order each player places one set-aside Undead Samurai minion on a non-exhausted stack (any grid; it blocks the card beneath). Slaying the Lord gives 1 VP per owned Undead Samurai, then banishes any minions still on the board |
 | Recruit the King's Guard | activation | `place_kings_guard` | The only event that introduces a brand-new citizen stack. On reveal it drops the set-aside King's Guard citizens (`expansion = "kingsguard"` AND `special_citizen = 1`) on top of the event card so they can be hired like any board stack. Un-exhausting the event returns the un-hired guards to reserve (hired ones stay); re-revealing restores exactly that many. Hiring the whole stack leaves the event in place with nothing to hire (no "double exhaust") |
 | Flaming Devourer | roll_effect | `banish_center_citizen optional` | Monster event. While in play, when a 4 is rolled, the active player may banish one accessible citizen from the center stacks. The `optional` token makes the prompt skippable. |
+| Giants of Ostendaar | roll_effect + special_reward | `banish_center_domain optional` / `<domains>` | Monster event. While in play, when a 5 is rolled, the active player may banish one face-up domain from the center stacks; the next domain in that stack is revealed immediately (or the slot refills from the exhausted deck). Slaying it grants a free domain (`<domains>`). |
+| Leviathan | roll_effect + special_reward | `add_self_slay_cost s 1 max=10` / `count owned_monsters v 1` | Monster event. While in play, when a 6 is rolled, 1 Strength token is added to the Leviathan, raising its own slay cost by 1 (printed + tokens), capped at +10. Slaying it grants 1 VP per owned Monster (the slain Leviathan counts). |
 
 Notes on reuse:
 
@@ -212,7 +214,7 @@ The various `count` patterns are syntactically parallel but semantically distinc
 count owned_worker g 2          # count by citizen role pip totals (sum of worker_count on each owned citizen, scaling 2g per pip)
 count owned_citizens g 1        # count face-up citizen cards (Purser); excludes flipped citizens, excludes starters
 count owned_domains g 1         # count domain cards (Miner)
-count owned_monsters g 1        # count monster cards owned (reserved; no shipped card uses this yet)
+count owned_monsters g 1        # count monster cards owned (Leviathan ships `count owned_monsters v 1`)
 count owned_citizen_name X g 1  # count face-up owned citizens named X (Jousting Field citizen leg)
 count owned_starter_name X g 1  # count starter citizens named X (Jousting Field starter leg)
 count owned_monster_name X g 1  # count owned monsters named X (Crimson Seas scaling rewards/costs)

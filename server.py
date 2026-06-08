@@ -205,6 +205,43 @@ def _validate_preset(preset: Optional[str]) -> str:
     return p
 
 
+def _validate_expansion_only(value, default=False) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s in ("1", "true", "yes", "on"):
+            return True
+        if s in ("0", "false", "no", "off", ""):
+            return False
+    return bool(value)
+
+
+def _validate_duke_select_count(duke_select_count, default=2) -> int:
+    if duke_select_count is None or (
+        isinstance(duke_select_count, str) and not str(duke_select_count).strip()
+    ):
+        return int(default)
+    try:
+        n = int(duke_select_count)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail="duke_select_count must be 2 or 3",
+        )
+    if n not in (2, 3):
+        raise HTTPException(
+            status_code=400,
+            detail="duke_select_count must be 2 or 3",
+        )
+    return n
+
+
+_PRESETS_WITH_EXPANSION_ONLY = frozenset({"base", "current", "flamesandfrost", "shadowvale"})
+
+
 def _validate_min_players(min_players, default=_MIN_PLAYERS_FLOOR) -> int:
     if min_players is None or (isinstance(min_players, str) and not min_players.strip()):
         return int(default)
@@ -271,6 +308,8 @@ def _serialize_lobby(lb: Lobby):
         "owner_id": lb.owner_id,
         "preset": lb.preset,
         "min_players": int(getattr(lb, "min_players", _MIN_PLAYERS_FLOOR)),
+        "expansion_only": bool(getattr(lb, "expansion_only", False)),
+        "duke_select_count": int(getattr(lb, "duke_select_count", 2)),
         "members": [_serialize_member(m) for m in lb.members],
     }
 
@@ -309,6 +348,8 @@ def _maybe_start_lobby_game(lb: Lobby):
         lb.preset,
         game_gamers,
         debug_mode=debug_mode,
+        expansion_only=bool(getattr(lb, "expansion_only", False)),
+        duke_select_count=int(getattr(lb, "duke_select_count", 2)),
     )
     new_game = Game(game_state)
     new_game.last_active_time = time.time()
@@ -939,6 +980,8 @@ async def _finish_draft(lobby_id: str):
             game_gamers_list,
             debug_mode=debug_mode,
             draft_selections=draft_selections,
+            expansion_only=bool(getattr(lb, "expansion_only", False)),
+            duke_select_count=int(getattr(lb, "duke_select_count", 2)),
         )
         new_game = Game(game_state)
         new_game.last_active_time = time.time()
@@ -972,6 +1015,8 @@ class CreateLobbyRequest(BaseModel):
     name: str
     preset: Optional[str] = "current"
     min_players: Optional[int] = None
+    expansion_only: Optional[bool] = False
+    duke_select_count: Optional[int] = 2
 
 
 class JoinLobbyRequest(BaseModel):
@@ -997,6 +1042,16 @@ class SetPresetRequest(BaseModel):
 class SetMinPlayersRequest(BaseModel):
     player_id: str
     min_players: int
+
+
+class SetExpansionOnlyRequest(BaseModel):
+    player_id: str
+    expansion_only: bool
+
+
+class SetDukeSelectCountRequest(BaseModel):
+    player_id: str
+    duke_select_count: int
 
 
 class AbandonGameRequest(BaseModel):
@@ -1071,6 +1126,10 @@ async def create_lobby(request: CreateLobbyRequest):
     display_name = _normalize_display_name(request.name)
     preset = _validate_preset(request.preset or "current")
     min_players = _validate_min_players(request.min_players, default=_MIN_PLAYERS_FLOOR)
+    expansion_only = _validate_expansion_only(request.expansion_only, default=False)
+    duke_select_count = _validate_duke_select_count(request.duke_select_count, default=2)
+    if expansion_only and preset not in _PRESETS_WITH_EXPANSION_ONLY:
+        expansion_only = False
 
     player_id = str(shortuuid.uuid())
     lobby_id = str(shortuuid.uuid())
@@ -1083,6 +1142,8 @@ async def create_lobby(request: CreateLobbyRequest):
         owner_id=player_id,
         preset=preset,
         min_players=min_players,
+        expansion_only=expansion_only,
+        duke_select_count=duke_select_count,
     )
     lb.created_at = time.time()
     lb.members.append(member)
@@ -1158,12 +1219,57 @@ async def set_lobby_preset(request: SetPresetRequest):
     if lb.lobby_id in _draft_states:
         raise HTTPException(status_code=409, detail="Cannot change preset while a draft is in progress")
     lb.preset = preset
+    if preset not in _PRESETS_WITH_EXPANSION_ONLY:
+        lb.expansion_only = False
     member.last_active_time = time.time()
     # Changing the preset should reset readiness so members re-confirm.
     for m in lb.members:
         m.is_ready = False
     await lobby_ws_manager.broadcast_lobby()
     return {"message": "Preset updated", "preset": preset}
+
+
+@app.post("/api/lobby/expansion_only")
+async def set_lobby_expansion_only(request: SetExpansionOnlyRequest):
+    """Toggle expansion-only domains/dukes. Only the lobby owner may call this."""
+    expansion_only = _validate_expansion_only(request.expansion_only, default=False)
+    lb, member = _find_member(request.player_id)
+    if not lb or not member:
+        raise HTTPException(status_code=404, detail="Player not found in any lobby")
+    if lb.owner_id != member.player_id:
+        raise HTTPException(status_code=403, detail="Only the lobby owner may change expansion_only")
+    if lb.lobby_id in _draft_states:
+        raise HTTPException(status_code=409, detail="Cannot change expansion_only while a draft is in progress")
+    if expansion_only and lb.preset not in _PRESETS_WITH_EXPANSION_ONLY:
+        raise HTTPException(
+            status_code=400,
+            detail="expansion_only is only available for base, flamesandfrost, and shadowvale presets",
+        )
+    lb.expansion_only = expansion_only
+    member.last_active_time = time.time()
+    for m in lb.members:
+        m.is_ready = False
+    await lobby_ws_manager.broadcast_lobby()
+    return {"message": "expansion_only updated", "expansion_only": expansion_only}
+
+
+@app.post("/api/lobby/duke_select_count")
+async def set_lobby_duke_select_count(request: SetDukeSelectCountRequest):
+    """Set how many dukes each player is dealt (2 or 3). Only the owner may call this."""
+    duke_select_count = _validate_duke_select_count(request.duke_select_count)
+    lb, member = _find_member(request.player_id)
+    if not lb or not member:
+        raise HTTPException(status_code=404, detail="Player not found in any lobby")
+    if lb.owner_id != member.player_id:
+        raise HTTPException(status_code=403, detail="Only the lobby owner may change duke_select_count")
+    if lb.lobby_id in _draft_states:
+        raise HTTPException(status_code=409, detail="Cannot change duke_select_count while a draft is in progress")
+    lb.duke_select_count = duke_select_count
+    member.last_active_time = time.time()
+    for m in lb.members:
+        m.is_ready = False
+    await lobby_ws_manager.broadcast_lobby()
+    return {"message": "duke_select_count updated", "duke_select_count": duke_select_count}
 
 
 @app.post("/api/lobby/min_players")

@@ -402,6 +402,30 @@ const LOBBY_PRESET_SHORT_LABELS = {
   draft: 'Draft',
 };
 
+const LOBBY_PRESETS_WITH_EXPANSION_ONLY = new Set([
+  'current', 'base', 'flamesandfrost', 'shadowvale',
+]);
+
+function lobbySupportsExpansionOnly(preset) {
+  return LOBBY_PRESETS_WITH_EXPANSION_ONLY.has(preset);
+}
+
+function lobbyOptionsShortLabel(lobby) {
+  const parts = [];
+  const dukeCount = Number(lobby.duke_select_count) || 2;
+  if (dukeCount === 3) parts.push('3 dukes');
+  if (lobby.expansion_only) parts.push('exp-only');
+  return parts.length ? ` • ${parts.join(', ')}` : '';
+}
+
+function syncExpansionOnlyControl(preset, wrapEl, inputEl, checked, ownerEnabled) {
+  if (!wrapEl || !inputEl) return;
+  const show = lobbySupportsExpansionOnly(preset);
+  wrapEl.hidden = !show;
+  inputEl.checked = !!checked;
+  inputEl.disabled = !ownerEnabled || !show;
+}
+
 // ── Draft mode client state ──────────────────────────────────────────────────
 let _draftPhaseKey = '';      // 'monsters', 'starters', or 'citizens_1' etc — reset votes on change
 let _draftMonsterVotes = [];  // area names the player has locally selected (up to 5)
@@ -857,12 +881,18 @@ function initLobbyModal() {
   const lobbyListEmptyEl = document.getElementById('lobby-list-empty');
   const createPresetSelect = document.getElementById('lobby-create-preset');
   const createMinPlayersSelect = document.getElementById('lobby-create-min-players');
+  const createDukeSelect = document.getElementById('lobby-create-duke-select');
+  const createExpansionOnlyWrap = document.getElementById('lobby-create-expansion-only-wrap');
+  const createExpansionOnlyInput = document.getElementById('lobby-create-expansion-only');
   const createBtn = document.getElementById('lobby-create-btn');
   const backToNameBtn = document.getElementById('lobby-back-to-name-btn');
   const lobbySheet = overlay ? overlay.querySelector('.lobby-sheet') : null;
   const waitMetaEl = document.getElementById('lobby-wait-meta');
   const presetSelect = document.getElementById('lobby-preset-select');
   const minPlayersSelect = document.getElementById('lobby-min-players-select');
+  const dukeSelect = document.getElementById('lobby-duke-select');
+  const expansionOnlyWrap = document.getElementById('lobby-expansion-only-wrap');
+  const expansionOnlyInput = document.getElementById('lobby-expansion-only');
   const readyBtn = document.getElementById('lobby-ready-btn');
   const leaveBtn = document.getElementById('lobby-leave-btn');
   const playerList = document.getElementById('lobby-player-list');
@@ -1205,7 +1235,7 @@ function initLobbyModal() {
       const minLabel = `${memberCount}/${minPlayers} to start`;
       const primary = document.createElement('div');
       primary.className = 'lobby-list-name';
-      primary.textContent = `${lobbyPresetShortLabel(lb.preset)} • ${minLabel}`;
+      primary.textContent = `${lobbyPresetShortLabel(lb.preset)} • ${minLabel}${lobbyOptionsShortLabel(lb)}`;
       info.appendChild(primary);
       if (memberNames) {
         const roster = document.createElement('div');
@@ -1233,7 +1263,7 @@ function initLobbyModal() {
       const owner = (lobby.members || []).find(m => idsMatch(m.player_id, lobby.owner_id));
       const ownerName = truncateLobbyName(owner ? (owner.name || 'Owner') : 'Owner');
       const role = isOwner ? 'You are the owner' : `Owner: ${ownerName}`;
-      waitMetaEl.textContent = `${role} • ${lobbyPresetShortLabel(lobby.preset)} • ${floorLabel}`;
+      waitMetaEl.textContent = `${role} • ${lobbyPresetShortLabel(lobby.preset)} • ${floorLabel}${lobbyOptionsShortLabel(lobby)}`;
     }
     if (presetSelect) {
       presetSelect.value = lobby.preset || 'current';
@@ -1243,6 +1273,17 @@ function initLobbyModal() {
       minPlayersSelect.value = String(minPlayers);
       minPlayersSelect.disabled = !isOwner;
     }
+    if (dukeSelect) {
+      dukeSelect.value = String(Number(lobby.duke_select_count) || 2);
+      dukeSelect.disabled = !isOwner;
+    }
+    syncExpansionOnlyControl(
+      lobby.preset || 'current',
+      expansionOnlyWrap,
+      expansionOnlyInput,
+      lobby.expansion_only,
+      isOwner,
+    );
     playerList.innerHTML = '';
     let focusInputEl = null;
     (lobby.members || []).forEach(m => {
@@ -1448,10 +1489,22 @@ function initLobbyModal() {
     try {
       const preset = createPresetSelect.value || 'current';
       const minPlayers = Number(createMinPlayersSelect.value) || 2;
+      const dukeSelectCount = Number(createDukeSelect && createDukeSelect.value) || 2;
+      const expansionOnly = !!(
+        createExpansionOnlyInput
+        && createExpansionOnlyInput.checked
+        && lobbySupportsExpansionOnly(preset)
+      );
       const res = await fetch('/api/lobby/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, preset, min_players: minPlayers }),
+        body: JSON.stringify({
+          name,
+          preset,
+          min_players: minPlayers,
+          duke_select_count: dukeSelectCount,
+          expansion_only: expansionOnly,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1524,8 +1577,87 @@ function initLobbyModal() {
         if (!res.ok) {
           throw new Error(data.detail != null ? String(data.detail) : res.statusText || 'Preset update failed');
         }
+        if (!lobbySupportsExpansionOnly(preset) && expansionOnlyInput) {
+          expansionOnlyInput.checked = false;
+        }
+        syncExpansionOnlyControl(
+          preset,
+          expansionOnlyWrap,
+          expansionOnlyInput,
+          expansionOnlyInput ? expansionOnlyInput.checked : false,
+          true,
+        );
       } catch (e) {
         showLobbyError(e.message || 'Could not change preset.');
+      }
+    });
+  }
+
+  if (expansionOnlyInput) {
+    expansionOnlyInput.addEventListener('change', async () => {
+      const pid = lobbyPlayerId || vckStoredPlayerId();
+      if (!pid) return;
+      const preset = presetSelect ? (presetSelect.value || 'current') : 'current';
+      if (!lobbySupportsExpansionOnly(preset)) {
+        expansionOnlyInput.checked = false;
+        return;
+      }
+      showLobbyError('');
+      try {
+        const res = await fetch('/api/lobby/expansion_only', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            player_id: pid,
+            expansion_only: expansionOnlyInput.checked,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail != null ? String(data.detail) : res.statusText || 'Expansion-only update failed');
+        }
+      } catch (e) {
+        showLobbyError(e.message || 'Could not change expansion-only setting.');
+      }
+    });
+  }
+
+  if (dukeSelect) {
+    dukeSelect.addEventListener('change', async () => {
+      const pid = lobbyPlayerId || vckStoredPlayerId();
+      if (!pid) return;
+      const dukeSelectCount = Number(dukeSelect.value) || 2;
+      showLobbyError('');
+      try {
+        const res = await fetch('/api/lobby/duke_select_count', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            player_id: pid,
+            duke_select_count: dukeSelectCount,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail != null ? String(data.detail) : res.statusText || 'Duke count update failed');
+        }
+      } catch (e) {
+        showLobbyError(e.message || 'Could not change duke count.');
+      }
+    });
+  }
+
+  if (createPresetSelect) {
+    createPresetSelect.addEventListener('change', () => {
+      syncExpansionOnlyControl(
+        createPresetSelect.value || 'current',
+        createExpansionOnlyWrap,
+        createExpansionOnlyInput,
+        createExpansionOnlyInput ? createExpansionOnlyInput.checked : false,
+        true,
+      );
+      if (!lobbySupportsExpansionOnly(createPresetSelect.value || 'current') && createExpansionOnlyInput) {
+        createExpansionOnlyInput.checked = false;
       }
     });
   }
@@ -1732,6 +1864,16 @@ function initLobbyModal() {
       } catch (_) { /* ignore */ }
       draftLeaveBtn.disabled = false;
     });
+  }
+
+  if (createPresetSelect) {
+    syncExpansionOnlyControl(
+      createPresetSelect.value || 'current',
+      createExpansionOnlyWrap,
+      createExpansionOnlyInput,
+      false,
+      true,
+    );
   }
 
   openOverlay();

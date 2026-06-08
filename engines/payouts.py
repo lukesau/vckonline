@@ -162,8 +162,9 @@ class PayoutsEngine:
     def _execute_banish_center_payout(self, command, player_id):
         """Parse `banish_center <kind> [optional]` and prompt for a center-stack card.
 
-        Gnoll Bonewitch-style banish removes an accessible card from the board,
-        not from a player's tableau. The removed card lands in the global banish pile.
+        `kind` is one of citizen / monster / domain. Gnoll Bonewitch-style banish
+        removes an accessible card from the board, not from a player's tableau.
+        The removed card lands in the global banish pile.
         """
         parts = (command or "").strip().split()
         if not parts or parts[0].lower() != "banish_center":
@@ -172,7 +173,7 @@ class PayoutsEngine:
             return [-9999, 0, 0, 0]
         kind = parts[1].lower()
         optional = any(p.lower() == "optional" for p in parts[2:])
-        if kind not in ("citizen", "monster"):
+        if kind not in ("citizen", "monster", "domain"):
             return [-9999, 0, 0, 0]
         options = []
         if kind == "citizen":
@@ -189,6 +190,22 @@ class PayoutsEngine:
                     "idx": i,
                     "name": getattr(top, "name", "?"),
                     "citizen_id": int(getattr(top, "citizen_id", -1)),
+                    "gold_cost": int(getattr(top, "gold_cost", 0) or 0),
+                })
+        elif kind == "domain":
+            for i, stack in enumerate(list(getattr(self.game, "domain_grid", []) or [])):
+                if not stack:
+                    continue
+                top = stack[-1]
+                if not getattr(top, "is_accessible", False) or not getattr(top, "is_visible", True):
+                    continue
+                if getattr(top, "domain_id", None) is None:
+                    continue  # Event/Exhausted placeholder — not a valid domain target
+                options.append({
+                    "token": "domain.center",
+                    "idx": i,
+                    "name": getattr(top, "name", "?"),
+                    "domain_id": int(getattr(top, "domain_id", -1)),
                     "gold_cost": int(getattr(top, "gold_cost", 0) or 0),
                 })
         else:  # monster
@@ -263,6 +280,34 @@ class PayoutsEngine:
         banished = stack.pop(-1)
         self.game.banish_pile.append(banished)
         if stack:
+            stack[-1].toggle_accessibility(True)
+        elif self.game.exhausted_stack:
+            self.game.events.reveal_exhausted_onto_stack(stack)
+        return banished
+
+    def _banish_center_domain(self, stack_idx):
+        """Banish the face-up top domain of a center stack, then reveal the next domain.
+
+        Mirrors the Giants of Ostendaar card text: the banished domain leaves the
+        game and, if the stack still holds a card, the next one is flipped face-up
+        immediately (rather than deferring to the turn-end reveal). An emptied
+        stack refills from the exhausted deck like a normal purchase.
+        """
+        stacks = list(getattr(self.game, "domain_grid", []) or [])
+        if stack_idx < 0 or stack_idx >= len(stacks):
+            return None
+        stack = stacks[stack_idx]
+        if not stack:
+            return None
+        top = stack[-1]
+        if not getattr(top, "is_accessible", False) or not getattr(top, "is_visible", True):
+            return None
+        if getattr(top, "domain_id", None) is None:
+            return None  # Event/Exhausted placeholder — not banishable as a domain
+        banished = stack.pop(-1)
+        self.game.banish_pile.append(banished)
+        if stack:
+            stack[-1].toggle_visibility(True)
             stack[-1].toggle_accessibility(True)
         elif self.game.exhausted_stack:
             self.game.events.reveal_exhausted_onto_stack(stack)

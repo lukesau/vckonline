@@ -220,8 +220,20 @@ def load_draft_card_pool(n_players: int):
     return monsters_by_area, citizens_by_roll, starter_candidates
 
 
-def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, draft_selections=None):
+def load_game_data(
+    game_id,
+    preset,
+    player_list_from_lobby,
+    debug_mode=False,
+    draft_selections=None,
+    expansion_only=False,
+    duke_select_count=2,
+):
     import mariadb
+
+    duke_select_count = int(duke_select_count or 2)
+    if duke_select_count not in (2, 3):
+        raise ValueError(f"duke_select_count must be 2 or 3, got {duke_select_count}")
 
     monster_query = ""
     monster_stack = []
@@ -238,6 +250,12 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
     domain_expansion_filters = None
     duke_expansion_filters = None
     event_expansion_filters = None
+    # Expansions whose domains must be dropped from the deal. Used by every
+    # preset that pulls the full cross-expansion pool via select_random_domains
+    # (base1/base2/flamesandfrost/shadowvale/random/draft): Crimson Seas domains
+    # aren't implemented yet, so exclude them here until they ship rather than
+    # letting them leak in.
+    exclude_domain_expansions = ()
     # Apply card_filters.keep_for_random (implemented AND has image) to every
     # raw row pool below. Off for the curated presets so a one-off missing
     # image or stub effect doesn't silently shrink those pools.
@@ -296,39 +314,41 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             citizen_query = "select_base_citizens"
             choose_one_citizen_per_roll = True
             domain_query = "select_base_domains"
-            duke_query = "select_base_dukes"
+            duke_query = "select_random_dukes"
             event_query = "select_base_events"
         case "base1":
             monster_query = "select_base1_monsters"
             citizen_query = "select_base1_citizens"
             domain_query = "select_random_domains"
             event_query = "select_base_events"
+            exclude_domain_expansions = ("crimsonseas",)
         case "base2":
             monster_query = "select_base2_monsters"
             citizen_query = "select_base2_citizens"
             domain_query = "select_random_domains"
             event_query = "select_base_events"
+            exclude_domain_expansions = ("crimsonseas",)
         case "flamesandfrost":
             # Preset rules:
             # - starters: all starters (default starter query already does this)
-            # - dukes: expansion in ("base", "flamesandfrost")
-            # - monsters/citizens/domains/events: expansion = "flamesandfrost"
+            # - dukes: every duke (random across all expansions; default query)
+            # - monsters/citizens/events: expansion = "flamesandfrost"
+            # - domains: every expansion except Crimson Seas (random pool)
             monster_expansion_filters = ("flamesandfrost",)
             citizen_expansion_filters = ("flamesandfrost",)
-            domain_expansion_filters = ("flamesandfrost",)
-            duke_expansion_filters = ("base", "flamesandfrost")
             event_expansion_filters = ("flamesandfrost",)
+            exclude_domain_expansions = ("crimsonseas",)
             choose_one_citizen_per_roll = True
         case "shadowvale":
             # Preset rules:
             # - starters: all starters (default starter query already does this)
-            # - dukes: expansion in ("base", "shadowvale")
-            # - monsters/citizens/domains/events: expansion = "shadowvale"
+            # - dukes: every duke (random across all expansions; default query)
+            # - monsters/citizens/events: expansion = "shadowvale"
+            # - domains: every expansion except Crimson Seas (random pool)
             monster_expansion_filters = ("shadowvale",)
             citizen_expansion_filters = ("shadowvale",)
-            domain_expansion_filters = ("shadowvale",)
-            duke_expansion_filters = ("base", "shadowvale")
             event_expansion_filters = ("shadowvale",)
+            exclude_domain_expansions = ("crimsonseas",)
             choose_one_citizen_per_roll = True
         case "crimsonseas":
             # Crimson Seas expansion preset:
@@ -357,6 +377,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             duke_query = "select_random_dukes"
             event_query = "select_all_events"
             apply_implemented_image_filter = True
+            exclude_domain_expansions = ("crimsonseas",)
         case "draft":
             # Same pool as random, but monsters/citizens are pre-selected by
             # the lobby draft phase and passed in via draft_selections.
@@ -368,8 +389,24 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             duke_query = "select_random_dukes"
             event_query = "select_all_events"
             apply_implemented_image_filter = True
+            exclude_domain_expansions = ("crimsonseas",)
         case _:
             raise ValueError(f"Unknown game data preset: {preset}")
+    # Lobby option: restrict domains/dukes to the preset's expansion set (plus
+    # base dukes for expansion presets that don't have enough dukes alone).
+    if expansion_only:
+        if preset in ("base", "current"):
+            domain_query = "select_base_domains"
+            domain_expansion_filters = None
+            duke_expansion_filters = ("base",)
+        elif preset == "flamesandfrost":
+            domain_expansion_filters = ("flamesandfrost",)
+            exclude_domain_expansions = ()
+            duke_expansion_filters = ("base", "flamesandfrost")
+        elif preset == "shadowvale":
+            domain_expansion_filters = ("shadowvale",)
+            exclude_domain_expansions = ()
+            duke_expansion_filters = ("base", "shadowvale")
     try:
         my_connect = mariadb.connect(
             user="vckonline", password="vckonline", host="127.0.0.1", database="vckonline", port=3306
@@ -462,6 +499,14 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
         # regardless of fetch source, and is a no-op for the named-proc branch
         # which is already ORDER BY RAND().
         random.shuffle(results)
+        # Drop domains from excluded expansions (e.g. Crimson Seas, which has
+        # no implemented domains yet) before the deal. Set by the presets that
+        # draw the full pool via select_random_domains (base1/base2/random/draft);
+        # the curated expansion presets already constrain their pool via
+        # domain_expansion_filters.
+        if exclude_domain_expansions:
+            excluded = set(exclude_domain_expansions)
+            results = [r for r in results if (r.get("expansion") or "") not in excluded]
         skip_domains = set(banned_domain_ids())
         # Debug mode duplicates these onto every player's tableau, so also
         # filter them out of the random board deal -- no one can purchase a
@@ -524,7 +569,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
         skip_dukes = banned_duke_ids()
         if skip_dukes:
             results = [r for r in results if int(r["id_dukes"]) not in skip_dukes]
-        dukes_needed = 2 * len(player_list_from_lobby)
+        dukes_needed = duke_select_count * len(player_list_from_lobby)
         if len(results) < dukes_needed:
             raise ValueError(
                 "Not enough dukes after applying banned_cards.json "
@@ -689,7 +734,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             for starter in fixed_starters:
                 player.owned_starters.append(starter)
             player.owned_starters.append(chosen_slot)
-            for _ in range(2):
+            for _ in range(duke_select_count):
                 player.owned_dukes.append(duke_stack.pop())
         # deal monsters onto the board.
         # is_extra monsters only ship with the 5-player stack; at smaller player
