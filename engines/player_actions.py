@@ -1439,7 +1439,16 @@ class PlayerActionsEngine:
         """
         gp, sp, mp = _n(gp), _n(sp), _n(mp)
 
-        for citizen_stack in self.game.citizen_grid:
+        # Normally citizens only live on the citizen grid, but the Recruit the
+        # King's Guard event drops its guards on top of the event card wherever it
+        # was revealed (any grid). Scan every grid so those guards are hireable
+        # too; non-citizen tops are skipped by the citizen_id guard below.
+        all_stacks = (
+            list(self.game.citizen_grid)
+            + list(self.game.monster_grid)
+            + list(self.game.domain_grid)
+        )
+        for citizen_stack in all_stacks:
             if not citizen_stack:
                 continue
             top = citizen_stack[-1]

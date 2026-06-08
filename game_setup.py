@@ -39,6 +39,13 @@ DEBUG_ROLL_MODIFIER_DOMAIN_IDS = (1, 2, 19)
 DEBUG_DIE_ONE_VALUES = (2, 3)
 DEBUG_DIE_TWO_VALUES = (4, 5)
 
+# Recruit the King's Guard (event 10): the only event that introduces a brand-new
+# citizen stack. When that event is in the deck we set aside the King's Guard
+# citizens (citizens row with expansion = "kingsguard" AND special_citizen = 1)
+# so the event can drop them onto the board on reveal. See engines/events.py.
+KINGS_GUARD_EVENT_ACTIVATION = "place_kings_guard"
+KINGS_GUARD_EXPANSION = "kingsguard"
+
 # Third starter slot: Herald by default; other candidates use roll_match -1/-1.
 DEFAULT_SLOT_STARTER_ID = 3
 
@@ -247,6 +254,12 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
     # and whether the one-time "each player places a minion" step has run.
     undead_samurai_pool = []
     undead_samurai_placed = False
+    # Set-aside King's Guard citizens. `kings_guard_reserve` is the raw DB row(s)
+    # loaded while the cursor is open; `kings_guard_pool` is the materialized
+    # stack of Citizen objects, only armed if the Recruit the King's Guard event
+    # ends up in the deck (see the deck build after monster-area selection).
+    kings_guard_reserve = []
+    kings_guard_pool = []
     starter_query = "SELECT * FROM starters ORDER BY id_starters"
     starter_stack = []
     player_list = []
@@ -618,6 +631,19 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
         except Exception:
             undead_samurai_reserve = []
 
+        # Set-aside King's Guard citizen row(s). Loaded while the cursor is open;
+        # only materialized into a stack if the Recruit the King's Guard event is
+        # dealt to the deck. There must be exactly one such citizen (validated at
+        # arm time so non-kingsguard games never trip the check).
+        try:
+            my_cursor.execute(
+                "SELECT * FROM citizens WHERE expansion = %s AND special_citizen = 1",
+                (KINGS_GUARD_EXPANSION,),
+            )
+            kings_guard_reserve = [dict(r) for r in (my_cursor.fetchall() or [])]
+        except Exception:
+            kings_guard_reserve = []
+
         my_cursor.close()
         my_connect.close()
     except Exception as e:
@@ -743,6 +769,49 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             if UNDEAD_SAMURAI_AREA not in monster_stack_areas:
                 monster_stack_areas = list(monster_stack_areas) + [UNDEAD_SAMURAI_AREA]
 
+        # Arm the King's Guard reserve when the Recruit the King's Guard event made
+        # it into the deck. The set-aside guards are kept invisible/off-board until
+        # the event is revealed (engines/events.py places them on top of the event
+        # card). The number of guards mirrors the board citizen stack depth
+        # (`citizen_count`: 5 at 2-4 players, 6 at 5 players).
+        if any(
+            (getattr(ev, "activation_effect", "") or "").strip().lower() == KINGS_GUARD_EVENT_ACTIVATION
+            for ev in chosen_events
+        ):
+            if len(kings_guard_reserve) != 1:
+                raise ValueError(
+                    "Expected exactly one King's Guard citizen "
+                    f"(expansion='{KINGS_GUARD_EXPANSION}', special_citizen=1), "
+                    f"found {len(kings_guard_reserve)}."
+                )
+            kg_row = kings_guard_reserve[0]
+            for _ in range(citizen_count):
+                kings_guard_pool.append(Citizen(
+                    kg_row["id_citizens"],
+                    kg_row["name"],
+                    kg_row["gold_cost"],
+                    kg_row["roll_match1"],
+                    kg_row["roll_match2"],
+                    kg_row["shadow_count"],
+                    kg_row["holy_count"],
+                    kg_row["soldier_count"],
+                    kg_row["worker_count"],
+                    kg_row["gold_payout_on_turn"],
+                    kg_row["gold_payout_off_turn"],
+                    kg_row["strength_payout_on_turn"],
+                    kg_row["strength_payout_off_turn"],
+                    kg_row["magic_payout_on_turn"],
+                    kg_row["magic_payout_off_turn"],
+                    kg_row["vp_payout_on_turn"],
+                    kg_row["vp_payout_off_turn"],
+                    kg_row["has_special_payout_on_turn"],
+                    kg_row["has_special_payout_off_turn"],
+                    kg_row["special_payout_on_turn"],
+                    kg_row["special_payout_off_turn"],
+                    kg_row["special_citizen"],
+                    kg_row["expansion"],
+                ))
+
         # deal citizens onto the board
         citizens_by_roll = {roll: [] for roll in [1, 2, 3, 4, 5, 6, 7, 8, 9, 11]}
         for citizen in citizen_stack:
@@ -809,6 +878,7 @@ def load_game_data(game_id, preset, player_list_from_lobby, debug_mode=False, dr
             "monster_stack_areas": monster_stack_areas,
             "undead_samurai_pool": undead_samurai_pool,
             "undead_samurai_placed": undead_samurai_placed,
+            "kings_guard_pool": kings_guard_pool,
             "citizen_grid": citizen_grid,
             "domain_grid": domain_grid,
             "die_one": die_one,

@@ -262,12 +262,17 @@ function findMarketStack(card, state) {
   let grid = null;
   let idKey = null;
   // Events normally land on any grid (which stack emptied first). The Undead
-  // Samurai Lord event also scatters Undead Samurai minions (regular monsters)
-  // onto any grid, so monsters are searched grid-agnostically too. Card ids are
-  // unique, so the extra grids never yield a false match.
-  if (card.monster_id != null || card.event_id != null) {
-    const matchKey = card.monster_id != null ? 'monster_id' : 'event_id';
-    const matchVal = card.monster_id != null ? card.monster_id : card.event_id;
+  // Samurai Lord event scatters Undead Samurai minions (regular monsters) onto
+  // any grid, and the Recruit the King's Guard event drops King's Guard citizens
+  // on top of the event card wherever it was revealed — so monsters, events AND
+  // citizens are all searched grid-agnostically. Each grid is matched on its own
+  // id key, so the extra grids never yield a false match.
+  if (card.monster_id != null || card.event_id != null || card.citizen_id != null) {
+    let matchKey;
+    if (card.monster_id != null) matchKey = 'monster_id';
+    else if (card.event_id != null) matchKey = 'event_id';
+    else matchKey = 'citizen_id';
+    const matchVal = card[matchKey];
     const candidates = [
       { g: state?.monster_grid, offset: 0  },
       { g: state?.citizen_grid, offset: 5  },
@@ -283,7 +288,6 @@ function findMarketStack(card, state) {
     }
     return null;
   }
-  else if (card.citizen_id != null) { grid = state?.citizen_grid; idKey = 'citizen_id'; }
   else if (card.domain_id != null) { grid = state?.domain_grid; idKey = 'domain_id'; }
   else return null;
   const stacks = Array.isArray(grid) ? grid : [];
@@ -311,7 +315,7 @@ function globalMarketPileIndexFromCard(card, state) {
   if (!loc) return null;
   if (card.monster_id != null) return (loc.globalOffset ?? 0) + loc.stackIndex;
   if (card.event_id   != null) return (loc.globalOffset ?? 0) + loc.stackIndex;
-  if (card.citizen_id != null) return 5 + loc.stackIndex;
+  if (card.citizen_id != null) return (loc.globalOffset ?? 5) + loc.stackIndex;
   if (card.domain_id != null) return 15 + loc.stackIndex;
   return null;
 }

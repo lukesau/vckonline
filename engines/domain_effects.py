@@ -889,6 +889,12 @@ class DomainEffectsEngine:
         """
         if not stack:
             return False
+        # Recruit the King's Guard sits under its un-hired guards. Pull those back
+        # to the reserve first so the event beneath becomes the stack top and can
+        # recycle like any other spent event placeholder.
+        self.game.events.retract_kings_guard_from_stack(stack)
+        if not stack:
+            return False
         top = stack[-1]
         is_plain_exhausted = getattr(top, "name", "") == "Exhausted"
         is_nonmonster_event = isinstance(top, Event) and not bool(getattr(top, "is_monster", 0))

@@ -142,6 +142,7 @@ class GameObjectEncoder(JSONEncoder):
                 "pending_event_sequence": getattr(obj, "pending_event_sequence", None),
                 "undead_samurai_pool": list(getattr(obj, "undead_samurai_pool", None) or []),
                 "undead_samurai_placed": bool(getattr(obj, "undead_samurai_placed", False)),
+                "kings_guard_pool": list(getattr(obj, "kings_guard_pool", None) or []),
                 "pending_reroll_twilight_used": bool(getattr(obj, "_pending_reroll_twilight_used", False)),
                 "pending_reroll_blood_moon_used": bool(getattr(obj, "_pending_reroll_blood_moon_used", False)),
             }
@@ -255,6 +256,9 @@ def deserialize_save_dict_to_game(data):
     ]
     state["undead_samurai_pool"] = [
         _rehydrate_card_from_dict(c) for c in (state.get("undead_samurai_pool") or [])
+    ]
+    state["kings_guard_pool"] = [
+        _rehydrate_card_from_dict(c) for c in (state.get("kings_guard_pool") or [])
     ]
     state["all_dukes"] = [
         _rehydrate_card_from_dict(c) for c in (state.get("all_dukes") or [])

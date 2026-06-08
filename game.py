@@ -174,6 +174,12 @@ class Game:
         # (the minions already on the board stay until the Lord is slain).
         self.undead_samurai_pool = list(game_state.get('undead_samurai_pool') or [])
         self.undead_samurai_placed = bool(game_state.get('undead_samurai_placed', False))
+        # Recruit the King's Guard event: the King's Guard citizens set aside at
+        # setup, dropped onto the event's board stack when it is revealed and
+        # pulled back here while it is un-exhausted. This holds only the guards
+        # NOT currently on the board (un-hired and not in play); guards already
+        # hired into a player's tableau live there permanently.
+        self.kings_guard_pool = list(game_state.get('kings_guard_pool') or [])
         # When a may-slay flow's slay opens a follow-up prompt via the slain
         # monster's `special_reward` (e.g. Warg's `choose m 3 <citizens where
         # name==Peasant>`), we stash the resume info here instead of clobbering

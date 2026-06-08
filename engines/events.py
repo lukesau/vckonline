@@ -40,7 +40,7 @@ Effect-string grammar (stored in ``events.activation_effect`` /
   roll.on_event doubles all_gain g 1 + all_gain s 1 + all_gain m 1   (passive: doubles -> all gain 1g/1s/1m)
   grant_all action.blessedlands                        (passive: grant a rest-of-game flag to every player)
 """
-from cards import Event
+from cards import Event, Citizen
 from game_helpers import _parse_domain_effect_kv
 from game_concurrent import _new_concurrent_action
 
@@ -53,6 +53,14 @@ _ROLE_ATTR = {"shadow": "shadow_count", "holy": "holy_count", "soldier": "soldie
 # order; when the Lord is slain, any minions still on the board are banished.
 UNDEAD_SAMURAI_AREA = "Undead Samurai"
 UNDEAD_SAMURAI_LORD_EVENT = "Undead Samurai Lord"
+
+# Recruit the King's Guard (event 10): the only event that introduces a brand-new
+# citizen stack. Its opaque `place_kings_guard` activation drops the set-aside
+# King's Guard citizens onto the event's own board stack so they can be hired;
+# the guards carry expansion = "kingsguard" AND special_citizen = 1.
+KINGS_GUARD_ACTIVATION = "place_kings_guard"
+KINGS_GUARD_EVENT_NAME = "Recruit the King's Guard"
+KINGS_GUARD_EXPANSION = "kingsguard"
 
 
 def _parse_res_amount(spec):
@@ -288,6 +296,9 @@ class EventsEngine:
         if not effect:
             return
         low = effect.lower()
+        if low == KINGS_GUARD_ACTIVATION:
+            self._place_kings_guard(name)
+            return
         if low.startswith("seq "):
             self._fire_sequence(name, rid, effect[len("seq "):].strip())
             return
@@ -1034,6 +1045,105 @@ class EventsEngine:
             self.game._log_game_event(
                 f"Undead Samurai Lord slain; banished {len(removed)} Undead Samurai "
                 f"still on the center stacks."
+            )
+
+    # ---- Recruit the King's Guard ----------------------------------------
+
+    @staticmethod
+    def _is_kings_guard_event(card):
+        """The Recruit the King's Guard event: a non-monster Event whose opaque
+        activation key is ``place_kings_guard``."""
+        return (
+            isinstance(card, Event)
+            and not bool(getattr(card, "is_monster", 0))
+            and (getattr(card, "activation_effect", "") or "").strip().lower() == KINGS_GUARD_ACTIVATION
+        )
+
+    @staticmethod
+    def _is_kings_guard_citizen(card):
+        """A King's Guard citizen (expansion 'kingsguard' + special_citizen)."""
+        return (
+            isinstance(card, Citizen)
+            and (getattr(card, "expansion", "") or "").strip().lower() == KINGS_GUARD_EXPANSION
+            and bool(getattr(card, "special_citizen", 0))
+        )
+
+    def _find_kings_guard_event_stack(self):
+        """Locate the board stack that currently holds the King's Guard event.
+
+        The event may sit on any grid (it un-exhausts onto whichever center stack
+        emptied). Returns ``(stack, event)`` or ``(None, None)`` if not in play.
+        """
+        for grid in (self.game.monster_grid, self.game.citizen_grid, self.game.domain_grid):
+            for stack in (grid or []):
+                for card in stack:
+                    if self._is_kings_guard_event(card):
+                        return stack, card
+        return None, None
+
+    def _place_kings_guard(self, name):
+        """Drop the set-aside King's Guard citizens on top of the event card.
+
+        Mirrors a normal board citizen stack: every guard is face-up and only the
+        top one is accessible (hireable). Re-revealing the event after some guards
+        were hired only replaces however many were pulled back to the reserve, so
+        hiring the whole stack does not "double exhaust" — the event simply sits
+        there with nothing left to hire.
+        """
+        stack, _event = self._find_kings_guard_event_stack()
+        if stack is None:
+            self.game._log_game_event(
+                f"Event \"{name}\" could not find its board slot; King's Guard not placed."
+            )
+            return
+        pool = list(getattr(self.game, "kings_guard_pool", None) or [])
+        if not pool:
+            self.game._log_game_event(
+                f"Event \"{name}\" revealed, but no King's Guard remain to hire."
+            )
+            return
+        for guard in pool:
+            self.game._citizen_set_flipped(guard, False)
+            guard.toggle_visibility(True)
+            guard.toggle_accessibility(False)
+            stack.append(guard)
+        stack[-1].toggle_accessibility(True)
+        self.game.kings_guard_pool = []
+        self.game._log_game_event(
+            f"Event \"{name}\": placed {len(pool)} King's Guard into play."
+        )
+
+    def retract_kings_guard_from_stack(self, stack):
+        """Pull un-hired King's Guard citizens off ``stack`` back to the reserve.
+
+        Called as the King's Guard event un-exhausts (a card is returned to the
+        stack it sits on). Guards already hired into a player's tableau are
+        untouched; only the ones still sitting on top of the event return to
+        ``kings_guard_pool`` so a later re-reveal restores exactly that many.
+        """
+        if not stack:
+            return
+        ev_idx = None
+        for i, card in enumerate(stack):
+            if self._is_kings_guard_event(card):
+                ev_idx = i
+                break
+        if ev_idx is None:
+            return
+        above = stack[ev_idx + 1:]
+        if not above:
+            return
+        guards = [c for c in above if self._is_kings_guard_citizen(c)]
+        del stack[ev_idx + 1:]
+        for guard in guards:
+            self.game._citizen_set_flipped(guard, False)
+            guard.toggle_visibility(False)
+            guard.toggle_accessibility(False)
+        self.game.kings_guard_pool = list(getattr(self.game, "kings_guard_pool", None) or []) + guards
+        if guards:
+            self.game._log_game_event(
+                f"Event \"{KINGS_GUARD_EVENT_NAME}\" left play; "
+                f"returned {len(guards)} King's Guard to reserve."
             )
 
     # ---- "rest of the game" granted flags + global cost mods -------------

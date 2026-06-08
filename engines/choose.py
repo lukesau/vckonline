@@ -425,7 +425,15 @@ class ChooseEngine:
 
     def _finalize_citizen_stack_after_claiming_top(self, citizen_stack):
         if citizen_stack:
-            citizen_stack[-1].toggle_accessibility(True)
+            top = citizen_stack[-1]
+            # A revealed non-monster Event is a spent placeholder, not a hireable
+            # card. This is what's left once every King's Guard has been hired:
+            # the event stays face-up but inaccessible (no "double exhaust", and
+            # no fresh exhausted card is flipped because the stack is non-empty).
+            if isinstance(top, Event) and not bool(getattr(top, "is_monster", 0)):
+                top.toggle_accessibility(False)
+                return
+            top.toggle_accessibility(True)
             return
         if self.game.exhausted_stack:
             self.game.events.reveal_exhausted_onto_stack(citizen_stack)

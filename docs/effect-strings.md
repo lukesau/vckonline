@@ -106,6 +106,7 @@ queues). Positive gains still reach everyone. Immediate losses floor at 0.
 | Tax Collection | activation | `all_may self_convert pay=g:3 gain=v:2` | Each player may pay 3g for 2 VP |
 | Tribute to the King | activation | `all_may self_convert pay=g:1,s:1,m:1 gain=v:2` | Each player may pay 1g + 1s + 1m (all three) for 2 VP |
 | Undead Samurai Lord | activation + special_reward | `seq all_must place_reserve_monster pool=undead_samurai` / `count area "Undead Samurai" v 1` | Monster event. On reveal, in turn order each player places one set-aside Undead Samurai minion on a non-exhausted stack (any grid; it blocks the card beneath). Slaying the Lord gives 1 VP per owned Undead Samurai, then banishes any minions still on the board |
+| Recruit the King's Guard | activation | `place_kings_guard` | The only event that introduces a brand-new citizen stack. On reveal it drops the set-aside King's Guard citizens (`expansion = "kingsguard"` AND `special_citizen = 1`) on top of the event card so they can be hired like any board stack. Un-exhausting the event returns the un-hired guards to reserve (hired ones stay); re-revealing restores exactly that many. Hiring the whole stack leaves the event in place with nothing to hire (no "double exhaust") |
 
 Notes on reuse:
 
@@ -138,6 +139,19 @@ Notes on reuse:
   the deck. When the Lord is slain, `EventsEngine.on_undead_samurai_lord_slain`
   banishes any minions still on the board (owned minions are kept and were already
   tallied for the Lord's `count area "Undead Samurai" v 1` VP reward).
+- `place_kings_guard` (Recruit the King's Guard) is an opaque activation key, not
+  a parsed grammar. The King's Guard citizens are set aside at game setup
+  (`game.kings_guard_pool`, only armed when the event is dealt to the deck) and
+  the count mirrors the board citizen stack depth (5 at 2-4 players, 6 at 5).
+  On reveal the engine places the whole reserve on top of the event's own board
+  stack (any grid); only the top guard is accessible, the rest are face-up. The
+  guards are hireable through the normal hire path (the engine and client both
+  search every grid for the accessible top). When the event un-exhausts, the
+  un-hired guards are pulled back to `kings_guard_pool`
+  (`EventsEngine.retract_kings_guard_from_stack`, invoked from
+  `_unexhaust_stack_top_if_present`) and the event recycles into the deck; a
+  later re-reveal restores exactly the retracted count. Guards already hired into
+  a tableau are never touched.
 - `grant_all <flag>` is a "rest of the game" passive: on reveal it grants the
   named flag (e.g. `action.blessedlands`, `action.darklordrising`) to every
   player's `granted_effects` (idempotent). The grant is tied to the card being
