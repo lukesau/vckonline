@@ -858,7 +858,7 @@ async def _start_draft(lb: "Lobby"):
         return
 
     if len(starter_candidates) < 1:
-        print(f"[draft] No third-slot starter candidates for lobby {lobby_id}")
+        print(f"[draft] No optional -1/-1 starter candidates for lobby {lobby_id}")
         for m in lb.members:
             m.is_ready = False
         await lobby_ws_manager.broadcast_lobby()

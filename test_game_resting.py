@@ -13,7 +13,7 @@ def make_no_payout_starter(starter_id, gold_on=1, gold_off=1):
     flat payout so the harvest stays automatic.
     """
     return Starter(
-        starter_id, "Test Slot Starter", -1, -1,
+        starter_id, "Test Optional Starter", -1, -1,
         gold_on, gold_off,
         0, 0, 0, 0,
         False, False, "", "",
@@ -139,7 +139,7 @@ class FivePlayerRestingTests(unittest.TestCase):
         self.assertEqual(players[4].gold_score, 0,
                          "Resting player's no_payout starter must not fire")
 
-    def test_no_slot_starter_means_nothing_on_no_payout(self):
+    def test_no_optional_starter_means_nothing_on_no_payout(self):
         # A board with no -1/-1 starter at all: the no_payout outcome grants
         # nothing and opens no consolation prompt.
         game, players = make_n_player_game(4, turn_index=0, with_match_citizens=False)

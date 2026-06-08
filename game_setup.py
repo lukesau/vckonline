@@ -46,12 +46,14 @@ DEBUG_DIE_TWO_VALUES = (4, 5)
 KINGS_GUARD_EVENT_ACTIVATION = "place_kings_guard"
 KINGS_GUARD_EXPANSION = "kingsguard"
 
-# Third starter slot: Herald by default; other candidates use roll_match -1/-1.
-DEFAULT_SLOT_STARTER_ID = 3
-
-# Crimson Seas uses its own -1/-1 slot starter (id 5 / expansion "crimsonseas").
-# Until that card exists in the DB, `_choose_slot_starter` falls back to Herald.
-CRIMSONSEAS_SLOT_STARTER_ID = 5
+# Starters split into two groups by roll_match:
+#   - "core" starters (Peasant/Knight, real roll numbers) are mandatory: every
+#     player always gets all of them.
+#   - the "optional" starter (roll_match -1/-1, e.g. Herald/Margrave/Coxswain)
+#     fires on doubles or a no-payout roll. At most one is granted per game, and
+#     it is chosen by the preset's configured expansion. If no matching -1/-1
+#     starter exists in the pool, none is dealt and the game simply plays
+#     without a doubles/no-payout trigger.
 
 # "June 2026" rotating preset: a hand-picked board. The monster areas and
 # citizen ids are fixed (drawn from the full cross-expansion pool); domains,
@@ -64,48 +66,45 @@ JUNE_2026_MONSTER_AREAS = ("Barrens", "Gloom Gyre", "Den", "Skerry", "Fire Templ
 JUNE_2026_CITIZEN_IDS = (19, 2, 41, 14, 33, 34, 35, 36, 9, 48)
 
 
-def _is_slot_starter_row(row):
+def _is_optional_starter_row(row):
     try:
         return int(row.get("roll_match1", 0)) == -1 and int(row.get("roll_match2", 0)) == -1
     except (TypeError, ValueError):
         return False
 
 
-def _is_slot_starter(card):
+def _is_optional_starter(card):
     try:
         return int(getattr(card, "roll_match1", 0)) == -1 and int(getattr(card, "roll_match2", 0)) == -1
     except (TypeError, ValueError):
         return False
 
 
-def _choose_slot_starter(slot_candidates, preset, draft_selections=None):
-    """Pick the one third-slot starter granted to every player this game."""
-    if not slot_candidates:
-        raise ValueError("No third-slot starter candidates (roll_match1=-1, roll_match2=-1).")
+def _choose_optional_starter(candidates, preset, optional_starter_expansion, draft_selections=None):
+    """Pick the optional -1/-1 doubles-or-no-payout starter, or None.
 
-    by_id = {int(s.starter_id): s for s in slot_candidates}
+    The optional starter is not mandatory: at most one is granted per game and
+    it is selected by the preset's configured expansion. Returns None when no
+    suitable -1/-1 starter exists, in which case the game plays without any
+    doubles/no-payout trigger. (Herald is no longer a universal fallback — it is
+    simply the base-set optional starter.)
+    """
+    if not candidates:
+        return None
 
-    if preset == "draft" and draft_selections and draft_selections.get("starter_id") is not None:
-        slot_id = int(draft_selections["starter_id"])
-    elif preset == "random":
-        return random.choice(slot_candidates)
-    elif preset == "crimsonseas":
-        # Prefer a Crimson Seas -1/-1 starter (by expansion, then by id 5);
-        # fall back to the default Herald slot if neither exists yet.
-        cs = [
-            s for s in slot_candidates
-            if (getattr(s, "expansion", "") or "").strip().lower() == "crimsonseas"
-        ]
-        if cs:
-            return cs[0]
-        slot_id = CRIMSONSEAS_SLOT_STARTER_ID
-    else:
-        slot_id = DEFAULT_SLOT_STARTER_ID
+    by_id = {int(s.starter_id): s for s in candidates}
 
-    chosen = by_id.get(slot_id)
-    if chosen is None:
-        chosen = by_id.get(DEFAULT_SLOT_STARTER_ID) or slot_candidates[0]
-    return chosen
+    if preset == "draft":
+        sel = (draft_selections or {}).get("starter_id")
+        return by_id.get(int(sel)) if sel is not None else None
+    if preset == "random":
+        return random.choice(candidates)
+    if optional_starter_expansion:
+        target = optional_starter_expansion.strip().lower()
+        for s in candidates:
+            if (getattr(s, "expansion", "") or "").strip().lower() == target:
+                return s
+    return None
 
 
 def _choose_one_citizen_per_roll(rows):
@@ -189,7 +188,7 @@ def load_draft_card_pool(n_players: int):
         monsters_by_area: dict mapping area name -> list of raw DB rows, sorted
             by monster_order ascending (index 0 is the front/accessible card).
         citizens_by_roll: dict mapping roll_match1 -> list of raw DB rows.
-        starter_candidates: list of raw DB rows for the third starter slot.
+        starter_candidates: list of raw DB rows for the optional -1/-1 starter.
     """
     import mariadb
 
@@ -274,6 +273,12 @@ def load_game_data(
     # ids and the board is dealt exactly these 5 monster areas.
     fixed_citizen_ids = None
     fixed_monster_areas = None
+    # Expansion whose -1/-1 doubles-or-no-payout starter every player gets this
+    # game (Herald=base, Margrave=margraves, Coxswain=crimsonseas). None, or an
+    # expansion with no matching -1/-1 starter, means no optional starter is
+    # dealt and the game plays without a doubles/no-payout trigger. random/draft
+    # presets ignore this (they pick randomly / from the draft selection).
+    optional_starter_expansion = None
     # Apply card_filters.keep_for_random (implemented AND has image) to every
     # raw row pool below. Off for the curated presets so a one-off missing
     # image or stub effect doesn't silently shrink those pools.
@@ -333,6 +338,7 @@ def load_game_data(
             choose_one_citizen_per_roll = True
             domain_query = "select_base_domains"
             duke_query = "select_random_dukes"
+            optional_starter_expansion = "base"
         case "june2026" | "current":
             # Rotating preset (current = "Rotating", aliased to the
             # live dated preset). Fixed monster areas + citizens; domains,
@@ -347,19 +353,24 @@ def load_game_data(
             exclude_domain_expansions = ("crimsonseas",)
             fixed_monster_areas = JUNE_2026_MONSTER_AREAS
             fixed_citizen_ids = JUNE_2026_CITIZEN_IDS
+            # June 2026 hands out the Margraves -1/-1 starter (Margrave).
+            optional_starter_expansion = "margraves"
         case "base1":
             monster_query = "select_base1_monsters"
             citizen_query = "select_base1_citizens"
             domain_query = "select_random_domains"
             exclude_domain_expansions = ("crimsonseas",)
+            optional_starter_expansion = "base"
         case "base2":
             monster_query = "select_base2_monsters"
             citizen_query = "select_base2_citizens"
             domain_query = "select_random_domains"
             exclude_domain_expansions = ("crimsonseas",)
+            optional_starter_expansion = "base"
         case "flamesandfrost":
             # Preset rules:
-            # - starters: all starters (default starter query already does this)
+            # - starters: core Peasant/Knight plus the base -1/-1 starter (Herald);
+            #   Flames & Frost has no dedicated -1/-1 starter of its own.
             # - dukes: every duke (random across all expansions; default query)
             # - monsters/citizens: expansion = "flamesandfrost"
             # - domains: every expansion except Crimson Seas (random pool)
@@ -368,9 +379,11 @@ def load_game_data(
             citizen_expansion_filters = ("flamesandfrost",)
             exclude_domain_expansions = ("crimsonseas",)
             choose_one_citizen_per_roll = True
+            optional_starter_expansion = "base"
         case "shadowvale":
             # Preset rules:
-            # - starters: all starters (default starter query already does this)
+            # - starters: core Peasant/Knight plus the base -1/-1 starter (Herald);
+            #   Shadowvale has no dedicated -1/-1 starter of its own.
             # - dukes: every duke (random across all expansions; default query)
             # - monsters/citizens: expansion = "shadowvale"
             # - domains: every expansion except Crimson Seas (random pool)
@@ -379,21 +392,24 @@ def load_game_data(
             citizen_expansion_filters = ("shadowvale",)
             exclude_domain_expansions = ("crimsonseas",)
             choose_one_citizen_per_roll = True
+            optional_starter_expansion = "base"
         case "crimsonseas":
             # Crimson Seas expansion preset:
             # - monsters/citizens: expansion = "crimsonseas"
             # - domains: expansion in ("crimsonseas", "base")
             # - dukes: all dukes (random across every expansion; default query)
             # - events: every expansion (default all-events pool)
-            # - starters: regular Peasant/Knight plus a Crimson Seas -1/-1 slot
-            #   starter (see `_choose_slot_starter`); the default starter query
-            #   already loads all starters.
+            # - starters: core Peasant/Knight plus the Crimson Seas -1/-1 starter
+            #   (Coxswain; see `_choose_optional_starter`). The default starter
+            #   query already loads all starters. If Crimson Seas has no -1/-1
+            #   starter in the pool yet, the game plays without one.
             # Banned cards are still filtered by the shared domain/duke deal.
             monster_expansion_filters = ("crimsonseas",)
             citizen_expansion_filters = ("crimsonseas",)
             domain_expansion_filters = ("crimsonseas", "base")
             duke_query = "select_random_dukes"
             choose_one_citizen_per_roll = True
+            optional_starter_expansion = "crimsonseas"
         case "random":
             # Pull every card (every expansion) and let
             # card_filters.keep_for_random + the existing
@@ -750,12 +766,14 @@ def load_game_data(
             player_list.append(my_player)
         random.shuffle(player_list)
         player_list[0].is_first = True
-        # Peasant/Knight (roll_match != -1) plus one third-slot starter (-1/-1).
-        fixed_starters = [s for s in starter_stack if not _is_slot_starter(s)]
-        slot_candidates = [s for s in starter_stack if _is_slot_starter(s)]
+        # Core starters (Peasant/Knight, roll_match != -1) are mandatory; the
+        # optional -1/-1 doubles-or-no-payout starter is granted only when one
+        # matching the preset's expansion exists.
+        core_starters = [s for s in starter_stack if not _is_optional_starter(s)]
+        optional_candidates = [s for s in starter_stack if _is_optional_starter(s)]
         if preset == "random":
-            slot_candidates = [
-                s for s in slot_candidates
+            optional_candidates = [
+                s for s in optional_candidates
                 if keep_for_random("starter", {
                     "id_starters": s.starter_id,
                     "has_special_payout_on_turn": s.has_special_payout_on_turn,
@@ -764,7 +782,9 @@ def load_game_data(
                     "special_payout_off_turn": s.special_payout_off_turn,
                 })
             ]
-        chosen_slot = _choose_slot_starter(slot_candidates, preset, draft_selections)
+        chosen_optional = _choose_optional_starter(
+            optional_candidates, preset, optional_starter_expansion, draft_selections
+        )
         # Snapshot the full duke pool for this game's config (post-ban,
         # post-expansion-filter) BEFORE dealing pops cards off the stack. This
         # is the public catalog the client uses to list "every duke and the VP
@@ -772,9 +792,10 @@ def load_game_data(
         # info, so surfacing it to all players leaks nothing.
         all_dukes = list(duke_stack)
         for player in player_list:
-            for starter in fixed_starters:
+            for starter in core_starters:
                 player.owned_starters.append(starter)
-            player.owned_starters.append(chosen_slot)
+            if chosen_optional is not None:
+                player.owned_starters.append(chosen_optional)
             for _ in range(duke_select_count):
                 player.owned_dukes.append(duke_stack.pop())
         # deal monsters onto the board.
