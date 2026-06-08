@@ -2606,24 +2606,11 @@ select.lobby-input:disabled {
   gap: 8px;
 }
 
-.lobby-field--compact {
+/* Both lobby field rows split into equal halves of unlabeled selects whose
+   verbose option text is clipped with an ellipsis (see select.lobby-input).
+   The first word of each option identifies the value when truncated. */
+.lobby-field--half {
   flex: 1 1 0;
-  min-width: 0;
-}
-
-.lobby-field--compact .lobby-label {
-  min-width: 42px;
-}
-
-/* Row 1 split: Preset (with label) on the left, the unlabeled card-pool
-   dropdown on the right. Each half gets equal width; the pool half spans
-   its whole column since it has no label. */
-.lobby-preset-pool-row .lobby-field--half {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
-.lobby-preset-pool-row .lobby-label {
   min-width: 0;
 }
 
