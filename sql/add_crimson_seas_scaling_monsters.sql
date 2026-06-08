@@ -35,3 +35,17 @@ UPDATE monsters SET
   has_special_reward = 1,
   special_reward = 'choose g 2 p 1'
 WHERE id_monsters BETWEEN 169 AND 173;
+
+-- Boss special rewards scale by owned monster_type (count type ...), counted
+-- across every area, not just the Boss's own area.
+UPDATE monsters SET
+  has_special_reward = 1,
+  special_reward = 'count type Minion g 3',
+  special_reward_text = 'Gain 3 Gold for each owned Minion.'
+WHERE id_monsters = 154;
+
+UPDATE monsters SET
+  has_special_reward = 1,
+  special_reward = 'choose <count type Beast g 2> <count type Beast s 2> <count type Beast m 2>',
+  special_reward_text = 'Gain 2 Wild for each owned Beast.'
+WHERE id_monsters = 168;

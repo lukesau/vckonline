@@ -166,6 +166,8 @@ Notes on reuse:
 | Orc Warrior | `choose <citizens where gold_cost<=3>` | Take a citizen worth ≤3g |
 | Orc Batrider | `choose <citizens>` | Take any citizen |
 | Orc Chieftain | `count area Mountain g 2` | Gain 2g per Mountain monster slain |
+| Dragonkin Ravagers | `count type Minion g 3` | Gain 3g per owned Minion-type monster (any area) |
+| Wereshark | `choose <count type Beast g 2> <count type Beast s 2> <count type Beast m 2>` | "Gain 2 Wild per owned Beast": pick g/s/m, each scaling 2 per owned Beast-type monster |
 | (compound reward) | `<domains> + <citizens>` | Take a free domain, then take a free citizen (prompts open in order; reverse order also supported). |
 
 ---
@@ -198,8 +200,18 @@ count owned_domains g 1         # count domain cards (Miner)
 count owned_monsters g 1        # count monster cards owned (reserved; no shipped card uses this yet)
 count owned_citizen_name X g 1  # count face-up owned citizens named X (Jousting Field citizen leg)
 count owned_starter_name X g 1  # count starter citizens named X (Jousting Field starter leg)
+count owned_monster_name X g 1  # count owned monsters named X (Crimson Seas scaling rewards/costs)
 count area Hills g 1            # count by monster area slain
+count type Minion g 1          # count owned monsters by monster_type (Minion/Titan/Warden/Boss/Beast), any area
 ```
+
+`count type <Type> <res> <mult>` scales by the player's owned monsters of a
+given `monster_type` (the slain card is already in the owned pile, so a Boss
+that rewards `count type Beast ...` does not count itself). It works as a bare
+reward (`count type Minion g 3`) and inside a `choose` bracket
+(`choose <count type Beast g 2> <count type Beast s 2> <count type Beast m 2>`
+encodes "Gain 2 Wild per owned Beast"). Valid types are the five in
+`Constants.types`; the token is rejected (no payout) for anything else.
 
 The card-pool family (`owned_citizens` / `owned_domains` / `owned_monsters`)
 counts whole cards, not role pips. Flipped citizens are excluded from

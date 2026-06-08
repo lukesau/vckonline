@@ -523,6 +523,22 @@ class Game:
                 n += 1
         return n
 
+    def _owned_monster_type_count(self, player_or_id, monster_type):
+        """Count owned monsters with an exact monster_type match (case-insensitive)."""
+        want = (monster_type or "").strip().lower()
+        if not want:
+            return 0
+        player = player_or_id
+        if not hasattr(player, "owned_monsters"):
+            player = self._player_by_id(player_or_id)
+        if not player:
+            return 0
+        n = 0
+        for monster in list(getattr(player, "owned_monsters", []) or []):
+            if (getattr(monster, "monster_type", "") or "").strip().lower() == want:
+                n += 1
+        return n
+
     def _monster_special_cost_deltas(self, player_or_id, special_cost):
         """Return {g, s, m} slay-cost deltas from a compound special_cost string."""
         deltas = {"g": 0, "s": 0, "m": 0}

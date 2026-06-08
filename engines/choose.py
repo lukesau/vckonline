@@ -97,6 +97,11 @@ class ChooseEngine:
                 norm_parts.append(
                     f"<count owned_monster_name {name_tok} {o.get('resource')} {o.get('mult')}>"
                 )
+            elif o["token"] == "count_type":
+                type_tok = self.game.payouts._emit_payout_token(o.get('monster_type'))
+                norm_parts.append(
+                    f"<count type {type_tok} {o.get('resource')} {o.get('mult')}>"
+                )
             elif o["token"] == "citizens_where":
                 spec = o.get("spec", {})
                 extras = o.get("extras") or []
@@ -148,6 +153,22 @@ class ChooseEngine:
             if area not in self.game._active_areas():
                 return None
             return {"token": "count_area", "area": area, "resource": resource, "mult": mult, "amount": 1}
+        if len(parts) >= 5 and parts[0].lower() == "count" and parts[1].lower() == "type":
+            monster_type = parts[2]
+            resource = parts[3].lower()
+            try:
+                mult = int(parts[4])
+            except (TypeError, ValueError):
+                return None
+            if mult <= 0 or resource not in ("g", "s", "m", "v", "p"):
+                return None
+            canonical = next(
+                (t for t in Constants.types if t.lower() == monster_type.strip().lower()),
+                None,
+            )
+            if canonical is None:
+                return None
+            return {"token": "count_type", "monster_type": canonical, "resource": resource, "mult": mult, "amount": 1}
         return self._parse_citizens_inner_option(s)
 
     def _parse_citizens_inner_option(self, inner):
@@ -381,6 +402,9 @@ class ChooseEngine:
             if token == "count_monster_name":
                 expanded.append(opt)
                 continue
+            if token == "count_type":
+                expanded.append(opt)
+                continue
             if token != "citizens_where":
                 continue
             if int(opt.get("amount", 1) or 1) != 1:
@@ -435,7 +459,7 @@ class ChooseEngine:
             return False
         token = (opt.get("token") or "").strip().lower()
         amount = int(opt.get("amount", 0))
-        if amount <= 0 and token not in ("count_area", "count_monster_name"):
+        if amount <= 0 and token not in ("count_area", "count_monster_name", "count_type"):
             return False
         if token == "citizens.choice":
             if not self._claim_specific_board_citizen(player_id, opt.get("citizen_id")):
@@ -508,6 +532,29 @@ class ChooseEngine:
             else:
                 return False
             return True
+        if token == "count_type":
+            resource = (opt.get("resource") or "").strip().lower()
+            mult = int(opt.get("mult", 0) or 0)
+            count = self.game._owned_monster_type_count(player_id, opt.get("monster_type"))
+            total = count * mult
+            if resource == "g":
+                target.gold_score = int(target.gold_score) + total
+                self.game.harvest._bump_harvest_delta(target, total, 0, 0, 0)
+            elif resource == "s":
+                target.strength_score = int(target.strength_score) + total
+                self.game.harvest._bump_harvest_delta(target, 0, total, 0, 0)
+            elif resource == "m":
+                target.magic_score = int(target.magic_score) + total
+                self.game.harvest._bump_harvest_delta(target, 0, 0, total, 0)
+            elif resource == "v":
+                target.victory_score = int(getattr(target, "victory_score", 0)) + total
+                self.game.harvest._bump_harvest_delta(target, 0, 0, 0, total)
+            elif resource == "p":
+                target.map_score = int(getattr(target, "map_score", 0)) + total
+                self.game.harvest._bump_harvest_delta(target, 0, 0, 0, 0, total)
+            else:
+                return False
+            return True
         dg = ds = dm = dv = dp = 0
         if token == "g":
             dg = amount
@@ -548,6 +595,12 @@ class ChooseEngine:
             mult = int(opt.get("mult", 0) or 0)
             label = {"g": "gold", "s": "strength", "m": "magic", "v": "victory", "p": "map"}.get(resource, resource)
             return f"+({mult} x {name}) {label}"
+        if token == "count_type":
+            monster_type = (opt.get("monster_type") or "?").strip()
+            resource = (opt.get("resource") or "").strip().lower()
+            mult = int(opt.get("mult", 0) or 0)
+            label = {"g": "gold", "s": "strength", "m": "magic", "v": "victory", "p": "map"}.get(resource, resource)
+            return f"+({mult} x {monster_type}) {label}"
         if token == "citizens.choice":
             name = (opt.get("name") or "Citizen").strip()
             extras = list(opt.get("extras") or [])

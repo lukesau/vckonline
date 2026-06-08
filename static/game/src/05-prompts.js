@@ -2676,6 +2676,22 @@ function chooseOptionButtonLabel(opt, idx, state) {
     const mText = Number.isFinite(mult) ? mult : opt?.mult;
     return `+(${mText} × ${area}) ${rLabel}`;
   }
+  if (tl === 'count_monster_name') {
+    const name = (opt?.name ?? '').toString();
+    const res = (opt?.resource ?? '').toString().toLowerCase();
+    const mult = Number(opt?.mult);
+    const rLabel = labelForChoiceToken(res);
+    const mText = Number.isFinite(mult) ? mult : opt?.mult;
+    return `+(${mText} × ${name}) ${rLabel}`;
+  }
+  if (tl === 'count_type') {
+    const monsterType = (opt?.monster_type ?? '').toString();
+    const res = (opt?.resource ?? '').toString().toLowerCase();
+    const mult = Number(opt?.mult);
+    const rLabel = labelForChoiceToken(res);
+    const mText = Number.isFinite(mult) ? mult : opt?.mult;
+    return `+(${mText} × ${monsterType}) ${rLabel}`;
+  }
   if (tl.startsWith('citizens.')) {
     const name = (opt?.name ?? '').toString().trim();
     const extras = Array.isArray(opt?.extras) ? opt.extras : [];

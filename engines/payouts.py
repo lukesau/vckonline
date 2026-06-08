@@ -1054,6 +1054,22 @@ class PayoutsEngine:
                                 payout[3] = area_count * int(split_command[4])
                             case _:
                                 payout[0] = -9999
+                    case "type":
+                        # count type TYPE R N -- scale by owned monsters of a
+                        # given monster_type (e.g. Minion, Beast), counted across
+                        # every area the player has slain.
+                        type_count = self.game._owned_monster_type_count(player_id, third_word)
+                        match fourth_word:
+                            case 'g':
+                                payout[0] = type_count * int(split_command[4])
+                            case 's':
+                                payout[1] = type_count * int(split_command[4])
+                            case 'm':
+                                payout[2] = type_count * int(split_command[4])
+                            case 'v':
+                                payout[3] = type_count * int(split_command[4])
+                            case _:
+                                payout[0] = -9999
                     case _:
                         payout[0] = -9999
             case "exchange":

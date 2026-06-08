@@ -13,12 +13,14 @@ def make_scaling_monster(
     vp_reward=0,
     special_cost="",
     special_reward="",
+    monster_type="Orc",
+    area="Cutthroats",
 ):
     monster = Monster(
         monster_id,
         name,
-        "Cutthroats",
-        "Orc",
+        area,
+        monster_type,
         1,
         strength_cost,
         magic_cost,
@@ -275,6 +277,79 @@ class BryneMapFilterTests(unittest.TestCase):
         tokens = [o.get("token") for o in filtered]
         self.assertEqual(tokens, ["g"])
         self.assertEqual(normalized, "choose g 2 p 1")
+
+
+class BossTypeCountRewardTests(unittest.TestCase):
+    def test_dragonkin_ravagers_gold_per_owned_minion(self):
+        player = Player("p1", "Player 1")
+        player.gold_score = 0
+        player.strength_score = 20
+        player.magic_score = 20
+        for mid in (920, 921):
+            player.owned_monsters.append(
+                make_scaling_monster(mid, "Goblin Pirates", monster_type="Minion")
+            )
+        # A Beast and the Boss itself must not be counted toward Minions.
+        player.owned_monsters.append(
+            make_scaling_monster(922, "Harpies", monster_type="Beast")
+        )
+        boss = make_scaling_monster(
+            923,
+            "Dragonkin Ravagers",
+            strength_cost=5,
+            magic_cost=2,
+            vp_reward=6,
+            special_reward="count type Minion g 3",
+            monster_type="Boss",
+            area="Dark Waters",
+        )
+        game = make_game(player, boss)
+
+        game.slay_monster(player.player_id, boss.monster_id, sp=5, mp=2)
+        self.assertEqual(player.gold_score, 6)
+        self.assertEqual(player.victory_score, 6)
+
+    def test_wereshark_wild_choose_scales_with_owned_beasts(self):
+        player = Player("p1", "Player 1")
+        player.gold_score = 0
+        player.strength_score = 20
+        player.magic_score = 20
+        for mid in (930, 931):
+            player.owned_monsters.append(
+                make_scaling_monster(mid, "Harpies", monster_type="Beast")
+            )
+        # A Minion must not be counted toward Beasts.
+        player.owned_monsters.append(
+            make_scaling_monster(932, "Goblin Pirates", monster_type="Minion")
+        )
+        boss = make_scaling_monster(
+            933,
+            "Wereshark",
+            strength_cost=4,
+            magic_cost=3,
+            vp_reward=6,
+            special_reward=(
+                "choose <count type Beast g 2> "
+                "<count type Beast s 2> "
+                "<count type Beast m 2>"
+            ),
+            monster_type="Boss",
+            area="Skerry",
+        )
+        game = make_game(player, boss)
+
+        game.slay_monster(player.player_id, boss.monster_id, sp=4, mp=3)
+        self.assertTrue(str(game.action_required.get("action", "")).startswith("choose"))
+        prc = game.pending_required_choice or {}
+        options = prc.get("options") or []
+        self.assertEqual(len(options), 3)
+        self.assertTrue(all(o.get("token") == "count_type" for o in options))
+
+        # Pick the strength leg: 2 owned Beasts x 2 = 4 strength.
+        strength_before = player.strength_score
+        game.act_on_required_action(player.player_id, "choose 2")
+        self.assertEqual(player.strength_score, strength_before + 4)
+        self.assertEqual(player.victory_score, 6)
 
 
 if __name__ == "__main__":
