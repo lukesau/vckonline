@@ -49,6 +49,14 @@ class LobbyOptionsIntegrationTests(unittest.TestCase):
             domains.extend(stack)
         return domains
 
+    def _event_expansions(self, state):
+        return {
+            getattr(card, "expansion", None)
+            for card in state["exhausted_stack"]
+            if getattr(card, "name", None)  # Event cards have names; plain tokens don't
+            and hasattr(card, "expansion")
+        }
+
     def test_duke_select_count_three_deals_three_per_player(self):
         state = self._load("base", duke_select_count=3)
         for player in state["player_list"]:
@@ -69,6 +77,30 @@ class LobbyOptionsIntegrationTests(unittest.TestCase):
         for player in state["player_list"]:
             for duke in player.owned_dukes:
                 self.assertEqual(duke.expansion, "base")
+
+    def test_expansion_only_base_scopes_events_to_base(self):
+        state = self._load("base", expansion_only=True)
+        expansions = self._event_expansions(state)
+        self.assertTrue(expansions <= {"base"}, f"expected only base events, got {expansions}")
+
+    def test_default_base_events_can_span_expansions(self):
+        # Without expansion_only the base preset draws from the full event
+        # pool. Only n_players events are sampled per game, so load several
+        # seeds and assert at least one non-base event eventually appears
+        # (skips cleanly if the DB only has base events implemented).
+        import random as _random
+
+        seen = set()
+        for seed in range(40):
+            _random.seed(seed)
+            state = self._load("base")
+            seen |= self._event_expansions(state)
+        if seen <= {"base"}:
+            self.skipTest(f"only base events available in DB pool; saw {seen}")
+        self.assertTrue(
+            any(exp not in (None, "base") for exp in seen),
+            f"expected a non-base event across seeds, saw {seen}",
+        )
 
 
 if __name__ == "__main__":

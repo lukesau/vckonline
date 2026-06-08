@@ -2,7 +2,7 @@ import random
 from typing import List
 
 from banned_cards import banned_domain_ids, banned_duke_ids
-from card_filters import keep_for_random
+from card_filters import is_unimplemented_event, keep_for_random
 from cards import Citizen, Domain, Duke, Event, Exhausted, Monster, Starter
 from game_models import Player
 
@@ -244,7 +244,10 @@ def load_game_data(
     domain_stack = []
     duke_query = "select_random_dukes"
     duke_stack = []
-    event_query = "select_base_events"
+    # Events default to the full cross-expansion pool (including Crimson Seas)
+    # for every preset. The expansion_only lobby option narrows them to the
+    # preset's own expansion below.
+    event_query = "select_all_events"
     monster_expansion_filters = None
     citizen_expansion_filters = None
     domain_expansion_filters = None
@@ -315,46 +318,44 @@ def load_game_data(
             choose_one_citizen_per_roll = True
             domain_query = "select_base_domains"
             duke_query = "select_random_dukes"
-            event_query = "select_base_events"
         case "base1":
             monster_query = "select_base1_monsters"
             citizen_query = "select_base1_citizens"
             domain_query = "select_random_domains"
-            event_query = "select_base_events"
             exclude_domain_expansions = ("crimsonseas",)
         case "base2":
             monster_query = "select_base2_monsters"
             citizen_query = "select_base2_citizens"
             domain_query = "select_random_domains"
-            event_query = "select_base_events"
             exclude_domain_expansions = ("crimsonseas",)
         case "flamesandfrost":
             # Preset rules:
             # - starters: all starters (default starter query already does this)
             # - dukes: every duke (random across all expansions; default query)
-            # - monsters/citizens/events: expansion = "flamesandfrost"
+            # - monsters/citizens: expansion = "flamesandfrost"
             # - domains: every expansion except Crimson Seas (random pool)
+            # - events: every expansion (default all-events pool)
             monster_expansion_filters = ("flamesandfrost",)
             citizen_expansion_filters = ("flamesandfrost",)
-            event_expansion_filters = ("flamesandfrost",)
             exclude_domain_expansions = ("crimsonseas",)
             choose_one_citizen_per_roll = True
         case "shadowvale":
             # Preset rules:
             # - starters: all starters (default starter query already does this)
             # - dukes: every duke (random across all expansions; default query)
-            # - monsters/citizens/events: expansion = "shadowvale"
+            # - monsters/citizens: expansion = "shadowvale"
             # - domains: every expansion except Crimson Seas (random pool)
+            # - events: every expansion (default all-events pool)
             monster_expansion_filters = ("shadowvale",)
             citizen_expansion_filters = ("shadowvale",)
-            event_expansion_filters = ("shadowvale",)
             exclude_domain_expansions = ("crimsonseas",)
             choose_one_citizen_per_roll = True
         case "crimsonseas":
             # Crimson Seas expansion preset:
-            # - monsters/citizens/events: expansion = "crimsonseas"
+            # - monsters/citizens: expansion = "crimsonseas"
             # - domains: expansion in ("crimsonseas", "base")
             # - dukes: all dukes (random across every expansion; default query)
+            # - events: every expansion (default all-events pool)
             # - starters: regular Peasant/Knight plus a Crimson Seas -1/-1 slot
             #   starter (see `_choose_slot_starter`); the default starter query
             #   already loads all starters.
@@ -362,7 +363,6 @@ def load_game_data(
             monster_expansion_filters = ("crimsonseas",)
             citizen_expansion_filters = ("crimsonseas",)
             domain_expansion_filters = ("crimsonseas", "base")
-            event_expansion_filters = ("crimsonseas",)
             duke_query = "select_random_dukes"
             choose_one_citizen_per_roll = True
         case "random":
@@ -392,21 +392,25 @@ def load_game_data(
             exclude_domain_expansions = ("crimsonseas",)
         case _:
             raise ValueError(f"Unknown game data preset: {preset}")
-    # Lobby option: restrict domains/dukes to the preset's expansion set (plus
-    # base dukes for expansion presets that don't have enough dukes alone).
+    # Lobby option: restrict domains/dukes/events to the preset's expansion set
+    # (plus base dukes for expansion presets that don't have enough dukes
+    # alone). Default (off) draws domains/dukes/events from the full pool.
     if expansion_only:
         if preset in ("base", "current"):
             domain_query = "select_base_domains"
             domain_expansion_filters = None
             duke_expansion_filters = ("base",)
+            event_expansion_filters = ("base",)
         elif preset == "flamesandfrost":
             domain_expansion_filters = ("flamesandfrost",)
             exclude_domain_expansions = ()
             duke_expansion_filters = ("base", "flamesandfrost")
+            event_expansion_filters = ("flamesandfrost",)
         elif preset == "shadowvale":
             domain_expansion_filters = ("shadowvale",)
             exclude_domain_expansions = ()
             duke_expansion_filters = ("base", "shadowvale")
+            event_expansion_filters = ("shadowvale",)
     try:
         my_connect = mariadb.connect(
             user="vckonline", password="vckonline", host="127.0.0.1", database="vckonline", port=3306
@@ -620,13 +624,18 @@ def load_game_data(
                 row.get("activation_trigger", "") or "",
             )
             starter_stack.append(my_starter)
-        # Load events and build the exhausted_stack. Each preset names
-        # its source procedure in `event_query` (see the match block
-        # above) so adding a new event pool is "add a thin SP + a case
-        # branch" — same shape as monsters/citizens/domains/dukes.
+        # Load events and build the exhausted_stack. Every preset now draws
+        # events from the full cross-expansion pool (select_all_events) unless
+        # the expansion_only option narrowed event_expansion_filters above.
         event_rows = _fetch_pool_rows(event_query, "events", event_expansion_filters)
         if apply_implemented_image_filter:
+            # random/draft: drop unimplemented AND imageless rows.
             event_rows = [r for r in event_rows if keep_for_random("event", r)]
+        else:
+            # Curated presets pull the full event pool too, so guard against
+            # dealing a stub event the engine can't resolve. Image presence is
+            # not required here the way it is for random/draft.
+            event_rows = [r for r in event_rows if not is_unimplemented_event(r)]
         for row in event_rows:
             ev = Event(
                 event_id=row["id_events"],

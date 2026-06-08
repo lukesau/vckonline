@@ -134,13 +134,15 @@ The Python preset (passed to `load_game_data`) chooses which monster/citizen/dom
 
 | preset    | monsters                  | citizens                  | domains                  | dukes                 | events                  |
 | --------- | ------------------------- | ------------------------- | ------------------------ | --------------------- | ----------------------- |
-| `base`    | `select_base_monsters`    | `select_base_citizens`    | `select_base_domains`    | `select_base_dukes`   | `select_base_events`    |
-| `base1`   | `select_base1_monsters`   | `select_base1_citizens`   | `select_random_domains`  | `select_random_dukes` | `select_base_events`    |
-| `base2`   | `select_base2_monsters`   | `select_base2_citizens`   | `select_random_domains`  | `select_random_dukes` | `select_base_events`    |
-| `test1`   | `select_base1_monsters`   | `select_base1_citizens`   | `select_test1_domains`   | `select_random_dukes` | `select_base_events`    |
-| `test2`   | `select_base2_monsters`   | `select_base2_citizens`   | `select_test2_domains`   | `select_random_dukes` | `select_base_events`    |
+| `base`    | `select_base_monsters`    | `select_base_citizens`    | `select_base_domains`    | `select_random_dukes` | `select_all_events`     |
+| `base1`   | `select_base1_monsters`   | `select_base1_citizens`   | `select_random_domains`  | `select_random_dukes` | `select_all_events`     |
+| `base2`   | `select_base2_monsters`   | `select_base2_citizens`   | `select_random_domains`  | `select_random_dukes` | `select_all_events`     |
+| `test1`   | `select_base1_monsters`   | `select_base1_citizens`   | `select_test1_domains`   | `select_random_dukes` | `select_all_events`     |
+| `test2`   | `select_base2_monsters`   | `select_base2_citizens`   | `select_test2_domains`   | `select_random_dukes` | `select_all_events`     |
 | `random`  | `select_all_monsters`     | `select_all_citizens`     | `select_random_domains`  | `select_random_dukes` | `select_all_events`     |
 | `current` | (alias of `base`)         | (alias of `base`)         | (alias of `base`)         | (alias of `base`)     | (alias of `base`)       |
+
+Dukes and events both default to the full cross-expansion pool for every preset (events are post-filtered to drop unimplemented stubs; `random`/`draft` additionally require art via `keep_for_random`). The lobby `expansion_only` option (base / Flames+Frost / Shadowvale only) narrows domains, dukes, and events back to the preset's expansion set — base dukes are mixed into the expansion presets since an expansion alone has too few.
 
 The `base` / `current` preset uses the canonical Base Set board: all base1/base2 monster areas are fetched and Python randomly chooses 5 areas; all base1/base2 citizens are fetched and Python randomly chooses one citizen per roll-match stack; base domains and base dukes are randomized by procedure. `current` is just a Python-side alias for `base`; repointing it (e.g. when a future format becomes the default) requires editing `game_setup.py` rather than SQL — and `base` remains a separate preset value so "Base Set" stays in the lobby dropdown regardless.
 

@@ -419,9 +419,9 @@ function lobbyOptionsShortLabel(lobby) {
 }
 
 // The unlabeled row-1 dropdown ("All …" / "Expansion …") controls whether
-// dukes/domains are drawn from every set or just the preset's expansion.
-// It's only meaningful for the expansion-capable presets; for the others we
-// force it back to "all" and disable it.
+// dukes/domains/events are drawn from every set or just the preset's
+// expansion. It's only meaningful for the expansion-capable presets; for the
+// others we force it back to "all" and disable it.
 function syncPoolControl(preset, selectEl, expansionOnly, ownerEnabled) {
   if (!selectEl) return;
   const supported = lobbySupportsExpansionOnly(preset);
