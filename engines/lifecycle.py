@@ -461,9 +461,9 @@ class LifecycleEngine:
         self.game.harvest_consumed = {}
         self.game._harvest_steal_phase_done = False
 
-        # Clear the finalize prompt; harvest/action will set prompts as needed.
-        # But preserve action_required when an event roll effect needs a player choice.
-        if (self.game.action_required.get("action") or "") != "event_slay_cost_choice":
+        # Clear only the leftover finalize prompt; preserve choices opened by
+        # roll effects (event slay cost, Flaming Devourer, etc.).
+        if (self.game.action_required.get("action") or "") == "finalize_roll":
             self.game.action_required["id"] = self.game.game_id
             self.game.action_required["action"] = ""
         # Fire Northern Wall optional Minion-banish (only if nothing else is pending).

@@ -347,18 +347,28 @@ class DiceEngine:
           all_lose g|s|m N  — all players lose N of the resource (floor at 0)
           add_slay_cost g|s|m N  — active player must add N cost to a chosen
                                    accessible monster; stored as pending_event_slay_cost
+          banish_center_citizen [optional]  — active player banishes (or may
+                                              skip) a citizen from center stacks
         """
         raw = (event.roll_effect or "").strip()
         if not raw:
             return
         parts = raw.split()
+        verb = parts[0].lower()
+        if verb == "banish_center_citizen":
+            optional = any(p.lower() == "optional" for p in parts[1:])
+            command = "banish_center citizen"
+            if optional:
+                command += " optional"
+            self.game.payouts._execute_banish_center_payout(command, player_id)
+            return
+
         if len(parts) < 3:
             self.game._log_game_event(
                 f"Event \"{event.name}\" triggered but roll_effect is malformed: {raw!r}"
             )
             return
 
-        verb = parts[0].lower()
         resource = parts[1].lower()
         try:
             amount = int(parts[2])

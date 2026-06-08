@@ -107,6 +107,7 @@ queues). Positive gains still reach everyone. Immediate losses floor at 0.
 | Tribute to the King | activation | `all_may self_convert pay=g:1,s:1,m:1 gain=v:2` | Each player may pay 1g + 1s + 1m (all three) for 2 VP |
 | Undead Samurai Lord | activation + special_reward | `seq all_must place_reserve_monster pool=undead_samurai` / `count area "Undead Samurai" v 1` | Monster event. On reveal, in turn order each player places one set-aside Undead Samurai minion on a non-exhausted stack (any grid; it blocks the card beneath). Slaying the Lord gives 1 VP per owned Undead Samurai, then banishes any minions still on the board |
 | Recruit the King's Guard | activation | `place_kings_guard` | The only event that introduces a brand-new citizen stack. On reveal it drops the set-aside King's Guard citizens (`expansion = "kingsguard"` AND `special_citizen = 1`) on top of the event card so they can be hired like any board stack. Un-exhausting the event returns the un-hired guards to reserve (hired ones stay); re-revealing restores exactly that many. Hiring the whole stack leaves the event in place with nothing to hire (no "double exhaust") |
+| Flaming Devourer | roll_effect | `banish_center_citizen optional` | Monster event. While in play, when a 4 is rolled, the active player may banish one accessible citizen from the center stacks. The `optional` token makes the prompt skippable. |
 
 Notes on reuse:
 
