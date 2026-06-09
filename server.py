@@ -2026,30 +2026,6 @@ async def startup_event():
 _VARIANT_TOKEN_RE = re.compile(r"^[a-z0-9_]+$")
 
 
-def _list_card_image_variants(card_type: str, card_id: int) -> List[str]:
-    """Return the sorted variant tokens that have artwork on disk for a card.
-
-    Mirrors how ``/card-image`` resolves files: any image named
-    ``<token>_<card_type>_<id:02d>_*`` contributes ``<token>`` (e.g.
-    ``alt_01``). The canonical art (no token) is intentionally excluded.
-    """
-    dir_path = _CARD_IMAGE_DIRS.get(card_type)
-    if not dir_path or not dir_path.is_dir():
-        return []
-    core = f"_{card_type}_{card_id:02d}_"
-    variants = set()
-    for f in dir_path.iterdir():
-        if f.suffix.lower() not in _IMAGE_EXTS:
-            continue
-        idx = f.name.find(core)
-        if idx <= 0:
-            continue  # idx 0 would mean an empty token; <0 means no match
-        token = f.name[:idx]
-        if _VARIANT_TOKEN_RE.match(token):
-            variants.add(token)
-    return sorted(variants)
-
-
 @app.get("/card-image/{card_type}/{card_id}")
 async def card_image(card_type: str, card_id: int, variant: Optional[str] = None):
     """Return the card image matched by type + numeric ID prefix.
@@ -2085,7 +2061,8 @@ async def card_image_variants(card_type: str, card_id: int):
     """
     if card_type not in _CARD_IMAGE_DIRS:
         raise HTTPException(status_code=404, detail="Unknown card type")
-    return {"variants": _list_card_image_variants(card_type, card_id)}
+    from card_filters import list_card_image_variants
+    return {"variants": list_card_image_variants(card_type, card_id)}
 
 
 # Serve static files and simple HTML client

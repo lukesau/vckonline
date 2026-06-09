@@ -390,6 +390,81 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   color: #1a1a1a;
   border-color: var(--accent);
 }
+
+/* ── Alt artwork chooser (multi-variant overlay) ─────────────────────── */
+.wiki-art-wrap {
+  position: relative;
+  width: 100%;
+}
+.wiki-alt-chooser {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.86);
+  border-radius: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.wiki-alt-chooser-close {
+  align-self: flex-end;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text);
+  cursor: pointer;
+}
+.wiki-alt-chooser-close:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.wiki-alt-chooser-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+  gap: 6px;
+  align-content: start;
+}
+.wiki-alt-option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0;
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  font-family: inherit;
+}
+.wiki-alt-option:hover { border-color: var(--accent-soft); }
+.wiki-alt-option.active { border-color: var(--accent); }
+.wiki-alt-option-thumb {
+  width: 100%;
+  aspect-ratio: 400 / 570;
+  object-fit: cover;
+  display: block;
+  background: #000;
+  border-radius: 4px;
+}
+.wiki-alt-option-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text);
+  padding-bottom: 2px;
+}
 .wiki-badge {
   font-size: 10px;
   padding: 2px 6px;

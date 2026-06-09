@@ -73,6 +73,37 @@ async function lobbyBgFetchRanges() {
   return LOBBY_BG_FALLBACK_RANGES;
 }
 
+// Per-type outline colors mirroring the in-game `.card-*` border vars in
+// style.css (events reuse the exhausted border, matching `.card-event`).
+const LOBBY_BG_TYPE_BORDERS = {
+  citizen: '#3D6785',
+  domain: '#4CA366',
+  monster: '#644A4C',
+  duke: '#823956',
+  starter: '#526263',
+  event: '#A83524',
+};
+
+function lobbyBgTypeFromUrl(url) {
+  const m = /\/card-image\/([^/]+)\//.exec(url || '');
+  return m ? m[1] : '';
+}
+
+function lobbyBgBorderColor(url) {
+  return LOBBY_BG_TYPE_BORDERS[lobbyBgTypeFromUrl(url)] || '#526263';
+}
+
+function lobbyBgRoundRectPath(ctx, left, top, w, h, r) {
+  const radius = Math.max(0, Math.min(r, w * 0.5, h * 0.5));
+  ctx.beginPath();
+  ctx.moveTo(left + radius, top);
+  ctx.arcTo(left + w, top, left + w, top + h, radius);
+  ctx.arcTo(left + w, top + h, left, top + h, radius);
+  ctx.arcTo(left, top + h, left, top, radius);
+  ctx.arcTo(left, top, left + w, top, radius);
+  ctx.closePath();
+}
+
 async function paintLobbyBackgroundCollage(canvas) {
   const t0 = performance.now();
   const overlay = canvas.closest('.lobby-overlay');
@@ -226,6 +257,7 @@ function startLobbyBackgroundBounce(canvas) {
   let vx = 0;
   let vy = 0;
   let currentImg = null;
+  let currentBorderColor = '#526263';
   let nextCard = null;   // { url, img } — decoded and ready to show on the next bounce
   let preparing = false;
   let halfW = 60;
@@ -297,6 +329,7 @@ function startLobbyBackgroundBounce(canvas) {
 
   function applyCard(card) {
     currentImg = card.img;
+    currentBorderColor = lobbyBgBorderColor(card.url);
     const m = measureCard(currentImg);
     halfW = m.dw * 0.5;
     halfH = m.dh * 0.5;
@@ -373,8 +406,29 @@ function startLobbyBackgroundBounce(canvas) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#0a1610';
     ctx.fillRect(0, 0, cssW, cssH);
+
     const { dw, dh } = measureCard(currentImg);
-    ctx.drawImage(currentImg, x - dw * 0.5, y - dh * 0.5, dw, dh);
+    const left = x - dw * 0.5;
+    const top = y - dh * 0.5;
+    // Match the in-game card look (5px radius / 1px border on a ~158px card),
+    // scaled to the larger background card.
+    const radius = Math.max(4, Math.min(dw, dh) * 0.04);
+    const border = Math.max(2, Math.min(dw, dh) * 0.016);
+
+    ctx.save();
+    lobbyBgRoundRectPath(ctx, left, top, dw, dh, radius);
+    ctx.clip();
+    ctx.drawImage(currentImg, left, top, dw, dh);
+    ctx.restore();
+
+    // Colored outline drawn just inside the image edge so the rounded corners
+    // stay clean (stroke is centered on the path).
+    const inset = border * 0.5;
+    lobbyBgRoundRectPath(ctx, left + inset, top + inset, dw - border, dh - border, radius - inset);
+    ctx.lineWidth = border;
+    ctx.strokeStyle = currentBorderColor;
+    ctx.stroke();
+
     ctx.fillStyle = DARKEN;
     ctx.fillRect(0, 0, cssW, cssH);
   }

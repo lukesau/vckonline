@@ -19,11 +19,21 @@ restarts, so a cold rescan only matters if you drop a new file in and
 expect the running server to pick it up — restart the process for that.
 """
 
+import re
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+# Alternate-artwork files reuse the canonical naming with a leading variant
+# token: ``<token>_<card_type>_<id:02d>_<slug>.<ext>``. The token is what the
+# ``/card-image`` endpoint accepts as ``?variant=<token>``. Both the legacy
+# single alternate (token ``alt``, e.g. ``alt_monster_13_death_knight.jpg``)
+# and numbered alternates (``alt_01_starter_04_margrave.jpg``) are supported.
+# The token is restricted to lowercase/digits/underscore so it is safe to
+# splice straight into a filename prefix server-side.
+_VARIANT_TOKEN_RE = re.compile(r"^[a-z0-9_]+$")
 
 # Mirrors `_CARD_IMAGE_DIRS` in `server.py`. Keys are the singular type
 # names used as filename prefixes (e.g. `monster_44_gelatinous_cube.jpg`).
@@ -73,9 +83,40 @@ def _scan_image_ids(card_type):
     return found
 
 
+def _scan_image_variants(card_type):
+    """Map each card id to its sorted alternate-artwork variant tokens.
+
+    A variant token is the filename segment preceding the canonical
+    ``_{card_type}_{id:02d}_`` core (e.g. ``alt`` or ``alt_01``). Canonical
+    art (no token) is excluded. Mirrors how `/card-image` resolves a
+    ``?variant=<token>`` request.
+    """
+    out = {}
+    dir_path = _CARD_IMAGE_DIRS.get(card_type)
+    if not dir_path or not dir_path.is_dir():
+        return out
+    pat = re.compile(rf"^(?P<token>[a-z0-9_]+?)_{re.escape(card_type)}_(?P<id>\d+)_")
+    for f in dir_path.iterdir():
+        if f.suffix.lower() not in _IMAGE_EXTS:
+            continue
+        m = pat.match(f.name)
+        if not m:
+            continue
+        token = m.group("token")
+        if not _VARIANT_TOKEN_RE.match(token):
+            continue
+        try:
+            cid = int(m.group("id"))
+        except ValueError:
+            continue
+        out.setdefault(cid, set()).add(token)
+    return {cid: sorted(tokens) for cid, tokens in out.items()}
+
+
 # Built once on first import and reused. If you add card art while the
 # server is running, you'll need to restart for the random preset to see it.
 _IMAGE_ID_SETS = {kind: _scan_image_ids(kind) for kind in _CARD_IMAGE_DIRS}
+_IMAGE_VARIANT_MAPS = {kind: _scan_image_variants(kind) for kind in _CARD_IMAGE_DIRS}
 
 
 def has_card_image(card_type, card_id):
@@ -92,6 +133,21 @@ def has_card_image(card_type, card_id):
     except (TypeError, ValueError):
         return False
     return cid in _IMAGE_ID_SETS.get(card_type, set())
+
+
+def list_card_image_variants(card_type, card_id):
+    """Return the alternate-artwork variant tokens for `(card_type, card_id)`.
+
+    Sorted, canonical art excluded. Used by the wiki and the in-game artwork
+    chooser to offer options without hard-coding how many alternates exist.
+    """
+    if card_id is None:
+        return []
+    try:
+        cid = int(card_id)
+    except (TypeError, ValueError):
+        return []
+    return list(_IMAGE_VARIANT_MAPS.get(card_type, {}).get(cid, []))
 
 
 # ── "is this row implemented?" predicates ──────────────────────────────────

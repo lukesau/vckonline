@@ -27,10 +27,11 @@ It does **not** apply `banned_cards.json` filtering, expansion gating, or any pr
 - `GET /api/wiki/cards` — returns `{ counts: {citizens, monsters, domains, dukes, starters}, cards: {...} }`. Response shape per card matches the corresponding `cards.py` class's `to_dict()` output, with three additions:
   - `domains` and `dukes` entries include `is_banned` (looked up against `banned_cards.json`).
   - `citizens`, `monsters`, and `domains` entries include `is_unimplemented` — true when the row has a special/effect flag set but the corresponding text column is `NULL` or whitespace-only. See [Unimplemented detection](#unimplemented-detection) below.
-  - Every entry includes `has_alt_image` — true when an `alt_<kind>_<id>_*.{jpg,jpeg,png,webp}` file exists in the matching `images/` subdirectory. The client renders an "Alt" toggle for those cards. See [Alternate artwork](#alternate-artwork) below.
+  - Every entry includes `alt_variants` — a sorted list of the alternate-artwork variant tokens that exist on disk for that card (e.g. `["alt"]` or `["alt_01", …, "alt_05"]`), plus `has_alt_image` (`true` when `alt_variants` is non-empty, kept for backwards compatibility). The client renders an "Alt" control for those cards. See [Alternate artwork](#alternate-artwork) below.
 - `GET /api/wiki/cards?refresh=1` — bust the in-memory cache and reload from the DB. Useful when you edit a row and want to see it without restarting the server.
+- `GET /card-image-variants/{kind}/{id}` — returns `{ "variants": [...] }`, the same token list, scanned live. Used by the in-game Margrave artwork chooser so the client never hard-codes how many alternates exist.
 
-The wiki uses the existing `/card-image/{kind}/{id}` endpoint for art. To request the alternate artwork, append `?variant=alt`; the endpoint then looks for a file beginning with `alt_<kind>_<id>_` instead of `<kind>_<id>_`. Other callers of `/card-image/...` are unaffected — they keep getting the canonical art by default.
+The wiki uses the existing `/card-image/{kind}/{id}` endpoint for art. To request an alternate, append `?variant=<token>` (e.g. `?variant=alt` or `?variant=alt_01`); the endpoint then looks for a file beginning with `<token>_<kind>_<id>_` instead of `<kind>_<id>_`. The token is restricted to `[a-z0-9_]+` so it is safe to splice into a filename prefix. Other callers of `/card-image/...` are unaffected — they keep getting the canonical art by default.
 
 ## Caching
 
@@ -66,13 +67,23 @@ Dukes and starters are not flagged today — dukes are pure stat multipliers, an
 
 ## Alternate artwork
 
-Some cards have a second piece of artwork on disk. The convention is that the alternate file lives in the same `images/<kind>s/` directory as the canonical art and starts with `alt_`, keeping the same `<kind>_<id>_<slug>` skeleton. For example:
+Some cards have extra artwork on disk. Alternates live in the same `images/<kind>s/` directory as the canonical art and prefix a **variant token** onto the canonical `<kind>_<id>_<slug>` skeleton. Two conventions are supported:
 
-- `images/monsters/monster_13_death_knight.jpg` — canonical
-- `images/monsters/alt_monster_13_death_knight.jpg` — alternate
+- `alt` — a single alternate (`alt_<kind>_<id>_<slug>`):
+  - `images/monsters/monster_13_death_knight.jpg` — canonical
+  - `images/monsters/alt_monster_13_death_knight.jpg` — alternate (token `alt`)
+- `alt_NN` — numbered alternates (`alt_NN_<kind>_<id>_<slug>`), for cards with several alternates:
+  - `images/starters/starter_04_margrave.jpg` — canonical
+  - `images/starters/alt_01_starter_04_margrave.jpg` … `alt_05_…` — alternates (tokens `alt_01`…`alt_05`)
 
-`wiki_data._scan_alt_card_ids` walks each `images/<kind>s/` directory once per `/api/wiki/cards` call and collects the integer ids of any files matching `^alt_<kind>_(\d+)_.*\.(jpg|jpeg|png|webp)$`. Every card entry then gets a `has_alt_image` boolean. The scan is keyed off `<kind>` exactly, so an `alt_monster_13_*` file does not flag domain id 13.
+`card_filters.list_card_image_variants(kind, id)` is the single source of truth. It scans each `images/<kind>s/` directory once (cached at import) and, for every file matching `^<token>_<kind>_<id>_…`, records the token (validated against `[a-z0-9_]+`). `wiki_data.py` calls it to populate each card's `alt_variants` list and `has_alt_image` boolean; `server.py` exposes the same scan at `/card-image-variants/{kind}/{id}`. The scan is keyed off `<kind>` and `<id>` exactly, so an `alt_monster_13_*` file does not flag domain id 13.
 
-The wiki UI uses that flag to render a small "Alt" toggle on the grid card and a "Show alternate artwork" / "Show original artwork" button in the detail modal. Clicking either swaps the image's `src` from `/card-image/<kind>/<id>` to `/card-image/<kind>/<id>?variant=alt` and back. The selection lives only in JS state (`state.altSelections`, a `Set` of `${type}_${id}` keys) — refreshing the page resets every card to canonical art.
+The wiki UI uses `alt_variants` to render the artwork controls:
 
-Today only monster cards ship alternates, but the flag and toggle work uniformly for citizens, monsters, domains, dukes, and starters; drop a matching `alt_<kind>_<id>_*` file into the right directory and the wiki picks it up on the next cache refresh (`?refresh=1` or server restart).
+- **No alternates** → no "Alt" control.
+- **One alternate** → a small "Alt" toggle (grid) / "Show alternate artwork" button (modal) that swaps between the canonical art and the single alternate.
+- **Multiple alternates** → clicking "Alt" opens a chooser overlay laid over the card art with a thumbnail for **Original** plus each alternate; picking one swaps the image `src` to `?variant=<token>`.
+
+Selections live only in JS state (`state.altSelections`, a `Map` of `${type}_${id}` → token) and persist between the grid and the detail modal for the session — refreshing the page resets every card to canonical art. If an alternate file fails to load, the `<img>` error handler strips the `?variant=` query and retries the canonical art before showing "no image".
+
+Drop a matching `<token>_<kind>_<id>_*` file into the right directory and the wiki picks it up on the next cache refresh (`?refresh=1` or server restart). The same convention and `?variant=<token>` endpoint power the in-game Margrave artwork chooser (see the game client's `maybePromptMargraveArtwork`).
