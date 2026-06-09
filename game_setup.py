@@ -62,7 +62,7 @@ KINGS_GUARD_EXPANSION = "kingsguard"
 # lobby) is an alias of whichever dated rotating preset is live — currently
 # this one. `june2026` itself is intentionally not offered as a separate
 # lobby dropdown option; players reach it through the rotating alias.
-JUNE_2026_MONSTER_AREAS = ("Barrens", "Gloom Gyre", "Den", "Skerry", "Fire Temple")
+JUNE_2026_MONSTER_AREAS = ("Barrens", "Gloom Gyre", "Forest", "Skerry", "Fire Temple")
 JUNE_2026_CITIZEN_IDS = (19, 2, 41, 14, 33, 34, 35, 36, 9, 48)
 
 
