@@ -628,6 +628,164 @@ function makeInspectModalImageEl(card) {
   return img;
 }
 
+// ── Margrave artwork chooser ──────────────────────────────────────────────
+// Shown once per game (when a Margrave is in play) so each player can pick the
+// artwork they prefer, styled after the draft pick grid. The choice is stored
+// locally via setMargraveArtworkVariant and applied through cardImageUrl.
+let _margraveArtworkPromptGame = null;
+
+function _margravePromptedKey(gid) {
+  return 'vck_margrave_prompted_' + gid;
+}
+
+function _markMargravePrompted(gid) {
+  try { localStorage.setItem(_margravePromptedKey(gid), '1'); } catch (_) {}
+}
+
+function maybePromptMargraveArtwork(state) {
+  if (!state || !state.game_id) return;
+  if (state.phase === 'game_over') return;
+  if (!gameIncludesMargrave(state)) return;
+
+  const gid = String(state.game_id);
+  if (_margraveArtworkPromptGame === gid) return;
+
+  let prompted = false;
+  try { prompted = localStorage.getItem(_margravePromptedKey(gid)) === '1'; } catch (_) {}
+  if (prompted) { _margraveArtworkPromptGame = gid; return; }
+
+  // Never stack on top of an open modal/prompt; retry on a later render tick.
+  if (document.getElementById('margrave-artwork-overlay')) return;
+  if (document.getElementById('card-modal-overlay')) return;
+  if (getVisiblePromptOverlay()) return;
+
+  _margraveArtworkPromptGame = gid;
+  openMargraveArtworkPrompt(gid);
+}
+
+async function openMargraveArtworkPrompt(gid) {
+  let variants = [];
+  try {
+    const resp = await fetch(`/card-image-variants/starter/${MARGRAVE_STARTER_ID}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && Array.isArray(data.variants)) variants = data.variants;
+    }
+  } catch (_) {}
+
+  if (!variants.length) { _markMargravePrompted(gid); return; }
+
+  // Something may have grabbed the screen while we were fetching. If a blocking
+  // prompt appeared, defer (clear the session guard so we retry); otherwise
+  // bail if a chooser/modal is already up.
+  if (getVisiblePromptOverlay()) { _margraveArtworkPromptGame = null; return; }
+  if (document.getElementById('margrave-artwork-overlay')) return;
+  if (document.getElementById('card-modal-overlay')) return;
+
+  _markMargravePrompted(gid);
+  _buildMargraveArtworkOverlay(variants);
+}
+
+function closeMargraveArtworkOverlay() {
+  const overlay = document.getElementById('margrave-artwork-overlay');
+  if (!overlay) return;
+  if (overlay._escHandler) document.removeEventListener('keydown', overlay._escHandler);
+  overlay.remove();
+}
+
+function _buildMargraveArtworkOverlay(variants) {
+  const current = getMargraveArtworkVariant();
+  let selected = variants.includes(current) ? current : '';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'margrave-artwork-overlay';
+  overlay.className = 'card-modal-overlay margrave-art-overlay';
+
+  const modal = mk('card-modal margrave-art-modal');
+  modal.addEventListener('click', e => e.stopPropagation());
+
+  const title = document.createElement('h2');
+  title.className = 'margrave-art-title';
+  title.textContent = 'Choose your Margrave artwork';
+  modal.appendChild(title);
+
+  const sub = document.createElement('p');
+  sub.className = 'margrave-art-sub';
+  sub.textContent = 'This game includes Margraves. Pick the artwork you’d like to see — it’s cosmetic and only changes your view. Close this to keep the original.';
+  modal.appendChild(sub);
+
+  const grid = document.createElement('div');
+  grid.className = 'draft-grid margrave-art-grid';
+  modal.appendChild(grid);
+
+  const actions = document.createElement('div');
+  actions.className = 'draft-actions margrave-art-actions';
+  const spacer = document.createElement('span');
+  spacer.className = 'draft-vote-status';
+  actions.appendChild(spacer);
+  const confirmBtn = document.createElement('button');
+  confirmBtn.type = 'button';
+  confirmBtn.className = 'lobby-btn lobby-btn-primary';
+  confirmBtn.textContent = 'Use this artwork';
+  actions.appendChild(confirmBtn);
+  modal.appendChild(actions);
+
+  const syncSelection = () => {
+    grid.querySelectorAll('.draft-card').forEach(c => {
+      c.classList.toggle('draft-card--selected', c.dataset.variant === selected);
+    });
+    confirmBtn.disabled = !selected;
+  };
+
+  variants.forEach((v, i) => {
+    const card = document.createElement('div');
+    card.className = 'draft-card';
+    card.dataset.variant = v;
+
+    const img = document.createElement('img');
+    img.className = 'draft-card-img';
+    img.loading = 'lazy';
+    img.alt = `Margrave artwork ${i + 1}`;
+    installImgVariantFallback(img);
+    img.src = `/card-image/starter/${MARGRAVE_STARTER_ID}?variant=${encodeURIComponent(v)}`;
+    card.appendChild(img);
+
+    const label = document.createElement('div');
+    label.className = 'draft-card-label';
+    label.textContent = `Artwork ${i + 1}`;
+    card.appendChild(label);
+
+    card.addEventListener('click', () => { selected = v; syncSelection(); });
+    grid.appendChild(card);
+  });
+  syncSelection();
+
+  confirmBtn.addEventListener('click', () => {
+    if (!selected) return;
+    setMargraveArtworkVariant(selected);
+    closeMargraveArtworkOverlay();
+    if (typeof latestGameState !== 'undefined' && latestGameState) {
+      lastRenderedStateJson = '';  // force the dedup guard to rebuild the board
+      render(latestGameState);
+    }
+  });
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'card-modal-close';
+  closeBtn.setAttribute('aria-label', 'Keep current artwork');
+  closeBtn.textContent = '\u00d7';
+  closeBtn.addEventListener('click', closeMargraveArtworkOverlay);
+  modal.appendChild(closeBtn);
+
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', closeMargraveArtworkOverlay);
+  const onKey = e => { if (e.key === 'Escape') closeMargraveArtworkOverlay(); };
+  overlay._escHandler = onKey;
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(overlay);
+}
+
 function fillCardModalInspectInfo(infoEl, card, ownerPlayerId) {
   infoEl.innerHTML = '';
   const heading = document.createElement('h2');

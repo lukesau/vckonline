@@ -168,6 +168,7 @@ function render(state) {
   syncConcurrentPolling(state);
   maybeAutoFinalizeRoll(state);
   renderPromptModal(state);
+  maybePromptMargraveArtwork(state);
   tickHurryUpTimerElements();
   ensureHurryUpTicking();
 }
@@ -1279,6 +1280,35 @@ function obscuredTypeBackUrl(card) {
     return '/images/starters/starter_back.jpg';
   }
   return '/images/domains/domain_back.jpg';
+}
+
+// ── Margrave artwork preference (per-viewer, cosmetic) ───────────────────
+// The Margrave starter (id 04) ships with several alternate artworks. Each
+// viewer can pick which one they see via a draft-style prompt at game start;
+// the choice is stored locally and applied through `cardImageUrl`.
+const MARGRAVE_STARTER_ID = 4;
+const MARGRAVE_ARTWORK_LS_KEY = 'vck_margrave_artwork';
+
+function getMargraveArtworkVariant() {
+  try {
+    return (localStorage.getItem(MARGRAVE_ARTWORK_LS_KEY) || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+function setMargraveArtworkVariant(variant) {
+  try {
+    if (variant) localStorage.setItem(MARGRAVE_ARTWORK_LS_KEY, variant);
+    else localStorage.removeItem(MARGRAVE_ARTWORK_LS_KEY);
+  } catch (_) {}
+}
+
+function gameIncludesMargrave(state) {
+  const players = (state && state.player_list) || [];
+  return players.some(p =>
+    (p && p.owned_starters || []).some(s => s && Number(s.starter_id) === MARGRAVE_STARTER_ID)
+  );
 }
 
 function cardImageUrlBase(card) {
