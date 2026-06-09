@@ -7,12 +7,12 @@
   --zone-bg:    rgba(0,0,0,0.25);
   --zone-border:rgba(0,0,0,0.4);
 
-  --card-r:  #5a1418;  --card-r-border: #9b2335;
-  --card-b:  #152040;  --card-b-border: #2566ab;
-  --card-d:  #2e1c00;  --card-d-border: #8B6914;
-  --card-s:  #252525;  --card-s-border: #666;
-  --card-k:  #1e0e30;  --card-k-border: #7040b0;
-  --card-x:  #141414;  --card-x-border: #333;
+  --card-r:  #5a1418;  --card-r-border: #644A4C;
+  --card-b:  #152040;  --card-b-border: #3D6785;
+  --card-d:  #2e1c00;  --card-d-border: #4CA366;
+  --card-s:  #252525;  --card-s-border: #526263;
+  --card-k:  #1e0e30;  --card-k-border: #823956;
+  --card-x:  #141414;  --card-x-border: #A83524;
 
   --gold:  #dfb152;
   --str:   #c45433;
@@ -939,6 +939,7 @@ html, body {
 .card-starter  { background: var(--card-s); border-color: var(--card-s-border); }
 .card-duke     { background: var(--card-k); border-color: var(--card-k-border); }
 .card-exhausted{ background: var(--card-x); border-color: var(--card-x-border); }
+.card-event    { background: var(--card-r); border-color: var(--card-x-border); }
 .card-exhausted .card-name { color: #444; }
 
 /* Cross-fade flip stage for `.card.flipped`: tableau citizens the engine

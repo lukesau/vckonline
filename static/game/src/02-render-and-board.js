@@ -1390,7 +1390,7 @@ function makeCard(card, mode) {
 
 function cardClass(card) {
   if (card.exhausted_id !== undefined) return 'card-exhausted';
-  if (card.event_id     !== undefined) return 'card-monster';
+  if (card.event_id     !== undefined) return 'card-event';
   if (card.monster_id   !== undefined) return 'card-monster';
   if (card.citizen_id   !== undefined) return 'card-citizen';
   if (card.domain_id    !== undefined) return 'card-domain';
