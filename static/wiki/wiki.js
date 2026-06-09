@@ -579,7 +579,7 @@
       class: "wiki-badge unimplemented",
       title: "Has a flagged special effect with no text — not yet implemented",
     }, "Unimplemented"));
-    if (card.is_extra) badges.push(h("span", { class: "wiki-badge extra", title: "Only included in 5-player games" }, "5+"));
+    if (card.is_extra) badges.push(h("span", { class: "wiki-badge extra", title: "Only dealt in 5-player games" }, "5P"));
 
     const { wrap } = buildArtworkControls(type, id, card.alt_variants, { modal: false });
 
