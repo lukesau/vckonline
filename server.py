@@ -57,15 +57,18 @@ _EXHAUSTED_CARD_JPEG = _REPO_ROOT / "images" / "exhausted" / "exhausted_card.jpg
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
 # Lobby background: card faces are drawn at random from these inclusive id
-# ranges per card type and resolved through `/card-image/{type}/{id}`. Widen a
-# range here when new art lands; ids inside a range that have no file on disk
+# ranges per card type and resolved through `/card-image/{type}/{id}`. Each
+# type maps to a list of `[lo, hi]` sub-ranges so disjoint id blocks (e.g. the
+# dukes) can be expressed without dragging in the empty ids between them. Widen
+# a range here when new art lands; ids inside a range that have no file on disk
 # simply 404 and are skipped client-side (the canvas preloads each card before
-# showing it), so the ranges only need to bound each type generously.
+# showing it), so the ranges only need to bound each type.
 _LOBBY_BG_CARD_RANGES = {
-    "citizen": [1, 49],
-    "domain": [1, 80],
-    "monster": [1, 189],
-    "duke": [1, 102],
+    "citizen": [[1, 49]],
+    "domain": [[1, 80]],
+    "monster": [[1, 189]],
+    "duke": [[1, 21], [99, 102]],
+    "event": [[1, 36]],
 }
 
 

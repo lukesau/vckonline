@@ -6,39 +6,55 @@ const LOBBY_BACKGROUND_MODE = 'bounce';
 // type and resolved through the shared `/card-image/{type}/{id}` endpoint, so
 // adding art only means widening a range (server is the source of truth via
 // `/api/lobby/background-cards`; this is the fallback if that fetch fails).
+// Each type maps to a list of inclusive `[lo, hi]` sub-ranges so disjoint id
+// blocks (e.g. dukes 1-21 and 99-102) skip the empty ids between them.
 const LOBBY_BG_FALLBACK_RANGES = {
-  citizen: [1, 49],
-  domain: [1, 80],
-  monster: [1, 189],
-  duke: [1, 102],
+  citizen: [[1, 49]],
+  domain: [[1, 80]],
+  monster: [[1, 189]],
+  duke: [[1, 21], [99, 102]],
+  event: [[1, 36]],
 };
 
 function lobbyBgCardUrl(type, id) {
   return `/card-image/${type}/${id}`;
 }
 
-// One random `/card-image` URL from the ranges. Ids without art on disk 404;
-// callers preload and skip those, so picking uniformly across the range is fine.
+// One random `/card-image` URL from the ranges. Picks a type uniformly, then an
+// id uniformly across that type's sub-ranges (weighted by sub-range size). Ids
+// without art on disk 404; callers preload and skip those.
 function lobbyBgPickCardUrl(ranges) {
   const types = Object.keys(ranges || {});
   if (!types.length) return '';
   const type = types[(Math.random() * types.length) | 0];
-  const span = ranges[type];
-  if (!Array.isArray(span) || span.length < 2) return '';
-  const lo = span[0];
-  const hi = span[1];
-  const id = lo + ((Math.random() * (hi - lo + 1)) | 0);
-  return lobbyBgCardUrl(type, id);
+  const spans = ranges[type];
+  if (!Array.isArray(spans) || !spans.length) return '';
+  let total = 0;
+  for (const s of spans) {
+    if (Array.isArray(s) && s.length >= 2) total += s[1] - s[0] + 1;
+  }
+  if (total <= 0) return '';
+  let r = (Math.random() * total) | 0;
+  for (const s of spans) {
+    if (!Array.isArray(s) || s.length < 2) continue;
+    const count = s[1] - s[0] + 1;
+    if (r < count) return lobbyBgCardUrl(type, s[0] + r);
+    r -= count;
+  }
+  return '';
 }
 
-// Every candidate URL across all ranges (collage needs a finite tile deck).
+// Every candidate URL across all sub-ranges (collage needs a finite tile deck).
 function lobbyBgExpandRanges(ranges) {
   const urls = [];
   for (const type of Object.keys(ranges || {})) {
-    const span = ranges[type];
-    if (!Array.isArray(span) || span.length < 2) continue;
-    for (let id = span[0]; id <= span[1]; id++) {
-      urls.push(lobbyBgCardUrl(type, id));
+    const spans = ranges[type];
+    if (!Array.isArray(spans)) continue;
+    for (const s of spans) {
+      if (!Array.isArray(s) || s.length < 2) continue;
+      for (let id = s[0]; id <= s[1]; id++) {
+        urls.push(lobbyBgCardUrl(type, id));
+      }
     }
   }
   return urls;
