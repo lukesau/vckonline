@@ -182,16 +182,19 @@ def _card(kind, card_id, name, expansion):
 
 def _preview_monsters(cur, cfg, players):
     rows = _fetch_pool_rows(cur, cfg["monster_query"], "monsters", cfg["monster_expansion_filters"])
-    # is_extra cards only ship with the 5-player stacks; match the deal so the
-    # preview shows the same stack depth the board would get.
-    include_extra = players == 5
+    # The preview always shows the full stack, including the is_extra 7th card
+    # that only ships with 5-player games (flagged with a badge client-side).
+    # For random/draft we still mirror which AREAS are deal-eligible at this
+    # player count, but rebuild the stacks from the unfiltered rows so the
+    # is_extra card (which `_filter_monster_areas_for_random` drops below 5
+    # players) is still surfaced. Unimplemented/imageless extras are excluded by
+    # the per-card keep_for_random check so we never show an undealable card.
     if cfg["apply_implemented_image_filter"]:
-        rows = _filter_monster_areas_for_random(rows, players)
+        valid_areas = {r["area"] for r in _filter_monster_areas_for_random(rows, players)}
+        rows = [r for r in rows if r["area"] in valid_areas and keep_for_random("monster", r)]
 
     by_area = {}
     for r in rows:
-        if not include_extra and bool(r.get("is_extra")):
-            continue
         if not has_card_image("monster", r.get("id_monsters")):
             continue
         by_area.setdefault(r["area"], []).append(r)
@@ -221,10 +224,13 @@ def _preview_monsters(cur, cfg, players):
 
     groups = []
     for area in ordered_areas:
-        cards = [
-            _card("monster", r["id_monsters"], r["name"], r.get("expansion"))
-            for r in by_area[area]
-        ]
+        cards = []
+        for r in by_area[area]:
+            c = _card("monster", r["id_monsters"], r["name"], r.get("expansion"))
+            if bool(r.get("is_extra")):
+                # 7th-card-in-stack, only dealt in 5-player games.
+                c["extra_5p"] = True
+            cards.append(c)
         if cards:
             groups.append({"label": area, "cards": cards})
 
@@ -319,12 +325,11 @@ def _preview_domains(cur, cfg, players):
     ]
     rows.sort(key=lambda r: int(r["id_domains"]))
     cards = [_card("domain", r["id_domains"], r["name"], r.get("expansion")) for r in rows]
-    depth = 4 if players == 5 else 3
     return {
         "key": "domains",
         "title": "Domains",
         "selection": "random",
-        "note": f"5 stacks of {depth} domains are dealt at random from this pool.",
+        "note": "5 stacks of 3 domains (4 each in 5-player games) are dealt at random from this pool.",
         "cards": cards,
     }
 
@@ -361,7 +366,7 @@ def _preview_events(cur, cfg, players):
         "key": "events",
         "title": "Events",
         "selection": "random",
-        "note": f"{players} event(s) are shuffled into the exhausted deck at random.",
+        "note": "One event per player is shuffled into the exhausted deck at random.",
         "cards": cards,
     }
 

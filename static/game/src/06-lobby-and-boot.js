@@ -638,11 +638,19 @@ function _presetPreviewKeydown(e) {
 function _presetPreviewCardTile(card) {
   const tile = document.createElement('div');
   tile.className = 'preset-preview-card';
+  if (card.extra_5p) tile.classList.add('preset-preview-card--extra-5p');
   const img = document.createElement('img');
   img.src = `/card-image/${card.kind}/${card.id}`;
   img.alt = card.name || '';
   img.loading = 'lazy';
   tile.appendChild(img);
+  if (card.extra_5p) {
+    const badge = document.createElement('span');
+    badge.className = 'preset-preview-card-badge';
+    badge.textContent = '5P';
+    badge.title = 'Only dealt in 5-player games';
+    tile.appendChild(badge);
+  }
   const label = document.createElement('div');
   label.className = 'preset-preview-card-label';
   label.textContent = card.name || '';

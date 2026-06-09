@@ -4455,10 +4455,30 @@ body.is-virtual-keyboard-open .card-modal {
 }
 
 .preset-preview-card {
+  position: relative;
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(0, 0, 0, 0.4);
+}
+
+.preset-preview-card--extra-5p {
+  border-color: rgba(139, 184, 230, 0.55);
+}
+
+.preset-preview-card-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 5px;
+  color: #0c1018;
+  background: var(--mag);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
 }
 
 .preset-preview-card img {
