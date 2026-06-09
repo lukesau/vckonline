@@ -40,8 +40,9 @@ A player is in at most one lobby at a time and is identified by a `shortuuid` `p
 Endpoints:
 
 - `POST /api/lobby/create` body `{name, preset?, min_players?}` — creates a new lobby and joins it as owner (lobbies are nameless). Returns `{player_id, lobby_id}`.
-- `POST /api/lobby/join` body `{name, lobby_id}` — joins an existing lobby. Returns `{player_id, lobby_id}`.
+- `POST /api/lobby/join` body `{name, lobby_id, player_id?}` — joins an existing lobby. Returns `{player_id, lobby_id}`. Pass the caller's persistent `player_id` (from `vck_client`) so the server can recover from a duplicate join: if that `player_id` is already a member of this lobby (e.g. the user hit "back" and re-joined) the existing member is reused and only its display name is refreshed instead of creating a clone that can never ready up. If the `player_id` is sitting in a different lobby it is removed from there first (one client occupies one lobby).
 - `POST /api/lobby/leave?player_id=...` — removes the player from their lobby. If the leaver was the owner and other members remain, ownership transfers; if the lobby becomes empty it is deleted.
+- `POST /api/lobby/kick` body `{player_id, target_player_id}` — owner-only; removes another member (`target_player_id`) from the owner's lobby. Shares the leave path's ownership-transfer / empty-cleanup / draft-cancel behavior. The owner cannot kick themselves (use leave). The kicked client detects it is no longer a member on the next `lobby_status` broadcast and returns to the browse step.
 - `POST /api/lobby/rename` body `{player_id, name}` — updates the player's display name in their current lobby.
 - `POST /api/lobby/preset` body `{player_id, preset}` — owner-only; sets the lobby's preset. Resets every member's ready flag so they re-confirm.
 - `POST /api/lobby/min_players` body `{player_id, min_players}` — owner-only; sets the lobby's `min_players` floor (clamped to `2..5`). Resets every member's ready flag so they re-confirm under the new floor.

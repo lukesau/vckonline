@@ -2311,6 +2311,24 @@ html, body {
   flex: 0 0 auto;
 }
 
+.lobby-p-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.lobby-kick-btn {
+  width: 24px;
+  height: 24px;
+}
+
+.lobby-kick-btn:hover:not(:disabled) {
+  color: #ff8a8a;
+  border-color: rgba(255, 138, 138, 0.5);
+  background: rgba(255, 88, 88, 0.12);
+}
+
 .lobby-p-status {
   flex-shrink: 0;
   font-size: 16px;

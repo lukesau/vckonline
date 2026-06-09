@@ -1445,7 +1445,9 @@ function initLobbyModal() {
     const myLobby = findLobbyOfPlayer(data, selfId);
 
     if (selfId && currentLobbyId && !myLobby) {
-      showLobbyError('Your lobby has closed. Pick another or create a new one.');
+      // Covers both an owner closing/emptying the lobby and this player being
+      // kicked by the owner — in either case we're no longer a member.
+      showLobbyError('You are no longer in that lobby. Pick another or create a new one.');
       lobbyPlayerId = '';
       currentLobbyId = '';
       vckClientPatch({ player_id: null });
@@ -1658,10 +1660,25 @@ function initLobbyModal() {
         }
         li.appendChild(nameSpan);
       }
+      const rightGroup = document.createElement('span');
+      rightGroup.className = 'lobby-p-right';
       const stSpan = document.createElement('span');
       stSpan.className = 'lobby-p-status' + (m.is_ready ? ' is-ready' : '');
       stSpan.textContent = m.is_ready ? 'Ready' : 'Waiting';
-      li.appendChild(stSpan);
+      rightGroup.appendChild(stSpan);
+      // Owner-only: let the owner remove a stuck member who never readies up.
+      if (isOwner && !isSelf) {
+        const kickBtn = document.createElement('button');
+        kickBtn.type = 'button';
+        kickBtn.className = 'lobby-icon-btn lobby-kick-btn';
+        const who = m.name || 'player';
+        kickBtn.setAttribute('aria-label', `Remove ${who} from lobby`);
+        kickBtn.title = `Remove ${who} from lobby`;
+        kickBtn.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false" fill="currentColor"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>';
+        kickBtn.addEventListener('click', () => kickMember(m.player_id, who));
+        rightGroup.appendChild(kickBtn);
+      }
+      li.appendChild(rightGroup);
       playerList.appendChild(li);
     });
     if (focusInputEl && renameJustBegan) {
@@ -1767,6 +1784,26 @@ function initLobbyModal() {
     }
   }
 
+  async function kickMember(targetId, targetName) {
+    const pid = lobbyPlayerId || vckStoredPlayerId();
+    if (!pid || !targetId) return;
+    showLobbyError('');
+    try {
+      const res = await fetch('/api/lobby/kick', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ player_id: pid, target_player_id: targetId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.detail != null ? String(data.detail) : res.statusText || 'Kick failed');
+      }
+      // The server broadcasts the updated roster; nothing else to do here.
+    } catch (e) {
+      showLobbyError(e.message || `Could not remove ${targetName || 'player'}.`);
+    }
+  }
+
   async function joinLobbyById(lobbyId) {
     const name = rememberDisplayName();
     if (!name) {
@@ -1776,10 +1813,14 @@ function initLobbyModal() {
     }
     showLobbyError('');
     try {
+      // Send our persistent client id so the server can recognise a rejoin
+      // (e.g. after hitting "back") and refresh our existing member instead
+      // of spawning a duplicate that can never ready up.
+      const existingPid = lobbyPlayerId || vckStoredPlayerId() || '';
       const res = await fetch('/api/lobby/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, lobby_id: lobbyId }),
+        body: JSON.stringify({ name, lobby_id: lobbyId, player_id: existingPid || null }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {

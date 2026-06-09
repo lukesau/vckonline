@@ -276,6 +276,27 @@ def _find_member(player_id: str):
     return None, None
 
 
+def _remove_member_from_lobby(lb: Lobby, member: LobbyMember):
+    """Detach `member` from `lb`, transferring ownership to the next member,
+    closing the lobby when it empties, and cancelling any in-progress draft.
+
+    Shared by self-leave and owner-kick so both paths behave identically.
+    Does NOT broadcast; the caller is responsible for that. Returns True if
+    the lobby still exists afterward, False if it was removed.
+    """
+    lb.members = [m for m in lb.members if m.player_id != member.player_id]
+    if lb.owner_id == member.player_id:
+        lb.owner_id = lb.members[0].player_id if lb.members else ""
+    if not lb.members:
+        lobbies.pop(lb.lobby_id, None)
+        return False
+    if lb.lobby_id in _draft_states:
+        _cancel_draft(lb.lobby_id)
+        for m in lb.members:
+            m.is_ready = False
+    return True
+
+
 def _prune_stale_lobbies():
     """Remove inactive members; delete empty lobbies. Transfer ownership if needed."""
     cutoff = time.time() - _LOBBY_MEMBER_TIMEOUT_S
@@ -1019,6 +1040,16 @@ class CreateLobbyRequest(BaseModel):
 class JoinLobbyRequest(BaseModel):
     name: str
     lobby_id: str
+    # Persistent client id (from vck_client). When supplied and already a
+    # member of the target lobby, the join is treated as a rejoin/rename
+    # instead of spawning a duplicate member.
+    player_id: Optional[str] = None
+
+
+class KickRequest(BaseModel):
+    # Requester must be the lobby owner; `target_player_id` is the member to remove.
+    player_id: str
+    target_player_id: str
 
 
 class RenameRequest(BaseModel):
@@ -1162,7 +1193,31 @@ async def join_lobby(request: JoinLobbyRequest):
     if not lb:
         raise HTTPException(status_code=404, detail="Lobby not found")
 
-    player_id = str(shortuuid.uuid())
+    requested_pid = (request.player_id or "").strip()
+    if requested_pid:
+        existing_lb, existing_member = _find_member(requested_pid)
+        if existing_member is not None:
+            if existing_lb is lb:
+                # Duplicate-join recovery: this client is already a member
+                # (e.g. they hit "back" then re-joined the same lobby). Reuse
+                # the existing member and just refresh the display name rather
+                # than spawning a clone that can never ready up.
+                existing_member.name = display_name
+                existing_member.last_active_time = time.time()
+                await lobby_ws_manager.broadcast_lobby()
+                return {
+                    "player_id": existing_member.player_id,
+                    "lobby_id": lobby_id,
+                    "message": "Rejoined lobby",
+                }
+            # Same client was sitting in a different lobby; pull them out
+            # cleanly (ownership transfer / empty cleanup / draft cancel)
+            # before re-adding so they only ever occupy one lobby.
+            _remove_member_from_lobby(existing_lb, existing_member)
+        player_id = requested_pid
+    else:
+        player_id = str(shortuuid.uuid())
+
     member = LobbyMember(display_name, player_id, lobby_id=lobby_id)
     member.last_active_time = time.time()
     lb.members.append(member)
@@ -1191,17 +1246,30 @@ async def leave_lobby(player_id: str):
     if not lb:
         # Idempotent: already gone is fine.
         return {"message": "Not in a lobby"}
-    lb.members = [m for m in lb.members if m.player_id != member.player_id]
-    if lb.owner_id == member.player_id:
-        lb.owner_id = lb.members[0].player_id if lb.members else ""
-    if not lb.members:
-        lobbies.pop(lb.lobby_id, None)
-    elif lb.lobby_id in _draft_states:
-        _cancel_draft(lb.lobby_id)
-        for m in lb.members:
-            m.is_ready = False
+    _remove_member_from_lobby(lb, member)
     await lobby_ws_manager.broadcast_lobby()
     return {"message": "Left lobby"}
+
+
+@app.post("/api/lobby/kick")
+async def kick_member(request: KickRequest):
+    """Remove another member from the lobby. Only the lobby owner may call this."""
+    target_pid = (request.target_player_id or "").strip()
+    if not target_pid:
+        raise HTTPException(status_code=400, detail="target_player_id required")
+    lb, member = _find_member(request.player_id)
+    if not lb or not member:
+        raise HTTPException(status_code=404, detail="Player not found in any lobby")
+    if lb.owner_id != member.player_id:
+        raise HTTPException(status_code=403, detail="Only the lobby owner may kick members")
+    if target_pid == member.player_id:
+        raise HTTPException(status_code=400, detail="Owner cannot kick themselves; leave instead")
+    target = next((m for m in lb.members if m.player_id == target_pid), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Target is not a member of this lobby")
+    _remove_member_from_lobby(lb, target)
+    await lobby_ws_manager.broadcast_lobby()
+    return {"message": "Member kicked", "player_id": target_pid}
 
 
 @app.post("/api/lobby/preset")
