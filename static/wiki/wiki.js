@@ -179,15 +179,30 @@
     for (const group of groups) {
       const groupEl = h("div", { class: "wiki-filter-group" },
         h("span", { class: "wiki-filter-label" }, group.label));
+      const multiSelect = group.key === "role";
       for (const opt of group.options) {
-        const active = (state.filters[type]?.[group.key]) === opt.value;
+        const selected = state.filters[type]?.[group.key];
+        const active = multiSelect
+          ? Array.isArray(selected) && selected.includes(opt.value)
+          : selected === opt.value;
         const chipIcon = group.key === "role" ? roleIcon(opt.value) : null;
         const chip = h("button", {
           class: "wiki-chip" + (chipIcon ? " wiki-chip--icon" : "") + (active ? " active" : ""),
         }, chipIcon, opt.label);
         chip.addEventListener("click", () => {
           state.filters[type] = state.filters[type] || {};
-          if (state.filters[type][group.key] === opt.value) {
+          if (multiSelect) {
+            const current = Array.isArray(state.filters[type][group.key])
+              ? state.filters[type][group.key]
+              : [];
+            if (current.includes(opt.value)) {
+              const next = current.filter(v => v !== opt.value);
+              if (next.length) state.filters[type][group.key] = next;
+              else delete state.filters[type][group.key];
+            } else {
+              state.filters[type][group.key] = [...current, opt.value];
+            }
+          } else if (state.filters[type][group.key] === opt.value) {
             delete state.filters[type][group.key];
           } else {
             state.filters[type][group.key] = opt.value;
@@ -232,17 +247,19 @@
         { value: "unimplemented", label: "Unimplemented" },
       ],
     };
+    // Multi-select group: selecting several roles matches cards that have ALL of them.
+    const roleGroup = {
+      key: "role",
+      label: "Role",
+      options: [
+        { value: "shadow",  label: "Shadow" },
+        { value: "holy",    label: "Holy" },
+        { value: "soldier", label: "Soldier" },
+        { value: "worker",  label: "Worker" },
+      ],
+    };
     if (type === "citizens") {
-      groups.push({
-        key: "role",
-        label: "Role",
-        options: [
-          { value: "shadow",  label: "Shadow" },
-          { value: "holy",    label: "Holy" },
-          { value: "soldier", label: "Soldier" },
-          { value: "worker",  label: "Worker" },
-        ],
-      });
+      groups.push(roleGroup);
       const rollSignatures = unique(cards.map(rollSignatureFor).filter(Boolean))
         .sort(compareRollSignatures);
       if (rollSignatures.length) {
@@ -286,6 +303,7 @@
       });
       groups.push(implementationGroup);
     } else if (type === "domains") {
+      groups.push(roleGroup);
       groups.push({
         key: "effect",
         label: "Has effect",
@@ -352,6 +370,12 @@
   }
 
   // ── filtering pipeline ────────────────────────────────────────────────
+  // Role filters are multi-select: a card must carry EVERY selected role.
+  function passesRoleFilter(card, roles) {
+    if (!Array.isArray(roles) || !roles.length) return true;
+    return roles.every(role => (card[`${role}_count`] || 0) > 0);
+  }
+
   function filteredCards() {
     const type = state.activeType;
     const cards = state.raw.cards[type] || [];
@@ -379,10 +403,7 @@
       if (f.implementation === "implemented" && c.is_unimplemented) return false;
       if (f.implementation === "unimplemented" && !c.is_unimplemented) return false;
       if (type === "citizens") {
-        if (f.role) {
-          const count = c[`${f.role}_count`] || 0;
-          if (count <= 0) return false;
-        }
+        if (!passesRoleFilter(c, f.role)) return false;
         if (f.roll_match) {
           const sig = rollSignatureFor(c);
           if (sig !== f.roll_match) return false;
@@ -401,6 +422,7 @@
         if (f.has_special_reward === "yes" && !c.has_special_reward) return false;
       }
       if (type === "domains") {
+        if (!passesRoleFilter(c, f.role)) return false;
         if (f.effect === "passive" && !c.has_passive_effect) return false;
         if (f.effect === "activation" && !c.has_activation_effect) return false;
         if (f.banned === "yes" && !c.is_banned) return false;

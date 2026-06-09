@@ -2018,13 +2018,46 @@ async def startup_event():
 
 
 # ── Card image lookup ────────────────────────────────────────────────────────
+# A variant token is the filename segment that precedes the canonical
+# ``<card_type>_<id>_`` core. ``alt`` (legacy single alternate,
+# ``alt_<type>_<id>_*``) and ``alt_01`` .. ``alt_NN`` (numbered alternates,
+# ``alt_NN_<type>_<id>_*``) are both supported. Restricting the token keeps
+# the value safe to splice into a filename prefix (no path traversal).
+_VARIANT_TOKEN_RE = re.compile(r"^[a-z0-9_]+$")
+
+
+def _list_card_image_variants(card_type: str, card_id: int) -> List[str]:
+    """Return the sorted variant tokens that have artwork on disk for a card.
+
+    Mirrors how ``/card-image`` resolves files: any image named
+    ``<token>_<card_type>_<id:02d>_*`` contributes ``<token>`` (e.g.
+    ``alt_01``). The canonical art (no token) is intentionally excluded.
+    """
+    dir_path = _CARD_IMAGE_DIRS.get(card_type)
+    if not dir_path or not dir_path.is_dir():
+        return []
+    core = f"_{card_type}_{card_id:02d}_"
+    variants = set()
+    for f in dir_path.iterdir():
+        if f.suffix.lower() not in _IMAGE_EXTS:
+            continue
+        idx = f.name.find(core)
+        if idx <= 0:
+            continue  # idx 0 would mean an empty token; <0 means no match
+        token = f.name[:idx]
+        if _VARIANT_TOKEN_RE.match(token):
+            variants.add(token)
+    return sorted(variants)
+
+
 @app.get("/card-image/{card_type}/{card_id}")
 async def card_image(card_type: str, card_id: int, variant: Optional[str] = None):
     """Return the card image matched by type + numeric ID prefix.
 
-    Pass ``?variant=alt`` to return the alternate artwork file
-    (``alt_<card_type>_<id>_*``) instead of the canonical one. Falls back to
-    a 404 if no alternate exists for that id.
+    Pass ``?variant=<token>`` (e.g. ``alt`` or ``alt_01``) to return an
+    alternate artwork file (``<token>_<card_type>_<id>_*``) instead of the
+    canonical one. Unknown/invalid variants fall through to a 404 so callers
+    can fall back to the canonical image.
     """
     if card_type == "exhausted":
         if _EXHAUSTED_CARD_JPEG.is_file():
@@ -2033,14 +2066,26 @@ async def card_image(card_type: str, card_id: int, variant: Optional[str] = None
     dir_path = _CARD_IMAGE_DIRS.get(card_type)
     if not dir_path or not dir_path.exists():
         raise HTTPException(status_code=404, detail="Unknown card type")
-    if variant == "alt":
-        prefix = f"alt_{card_type}_{card_id:02d}_"
+    if variant and _VARIANT_TOKEN_RE.match(variant):
+        prefix = f"{variant}_{card_type}_{card_id:02d}_"
     else:
         prefix = f"{card_type}_{card_id:02d}_"
     for f in sorted(dir_path.iterdir()):
         if f.name.startswith(prefix) and f.suffix.lower() in _IMAGE_EXTS:
             return FileResponse(str(f), media_type="image/jpeg")
     raise HTTPException(status_code=404, detail="Image not found")
+
+
+@app.get("/card-image-variants/{card_type}/{card_id}")
+async def card_image_variants(card_type: str, card_id: int):
+    """List the alternate-artwork variant tokens available for a card.
+
+    Used by the game client to offer artwork choices (e.g. the Margrave
+    starter) without hard-coding how many alternates exist on disk.
+    """
+    if card_type not in _CARD_IMAGE_DIRS:
+        raise HTTPException(status_code=404, detail="Unknown card type")
+    return {"variants": _list_card_image_variants(card_type, card_id)}
 
 
 # Serve static files and simple HTML client

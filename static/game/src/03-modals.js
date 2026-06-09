@@ -623,6 +623,7 @@ function makeInspectModalImageEl(card) {
   if (!url) return null;
   const img = document.createElement('img');
   img.className = 'card-modal-img';
+  installImgVariantFallback(img);
   img.src = url;
   return img;
 }

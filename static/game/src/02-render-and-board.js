@@ -1281,7 +1281,7 @@ function obscuredTypeBackUrl(card) {
   return '/images/domains/domain_back.jpg';
 }
 
-function cardImageUrl(card) {
+function cardImageUrlBase(card) {
   if (cardObscuredFromViewer(card)) return obscuredTypeBackUrl(card);
   if (card.monster_id !== undefined) return `/card-image/monster/${card.monster_id}`;
   if (card.citizen_id !== undefined) return `/card-image/citizen/${card.citizen_id}`;
@@ -1291,6 +1291,42 @@ function cardImageUrl(card) {
   if (card.exhausted_id !== undefined) return `/card-image/exhausted/${card.exhausted_id}`;
   if (card.event_id     !== undefined) return `/card-image/event/${card.event_id}`;
   return null;
+}
+
+// Resolve the artwork URL for a card, honoring any per-viewer artwork variant
+// preference (currently only the Margrave starter). The variant is purely
+// cosmetic; `installImgVariantFallback` strips it back to the canonical image
+// if the alternate file fails to load.
+function cardImageUrl(card) {
+  const base = cardImageUrlBase(card);
+  if (!base) return base;
+  if (!cardObscuredFromViewer(card) &&
+      card.starter_id !== undefined &&
+      Number(card.starter_id) === MARGRAVE_STARTER_ID) {
+    const variant = getMargraveArtworkVariant();
+    if (variant) return `${base}?variant=${encodeURIComponent(variant)}`;
+  }
+  return base;
+}
+
+// On image load error, if the src carries a `?variant=` token, retry once with
+// the canonical (variant-less) URL before giving up to `finalFallback`. This
+// guarantees any broken alternate artwork degrades to the original image.
+function installImgVariantFallback(img, finalFallback) {
+  img.onerror = () => {
+    const src = img.getAttribute('src') || '';
+    const qIdx = src.indexOf('?variant=');
+    if (qIdx !== -1) {
+      img.onerror = () => {
+        img.onerror = null;
+        if (typeof finalFallback === 'function') finalFallback();
+      };
+      img.src = src.slice(0, qIdx);
+      return;
+    }
+    img.onerror = null;
+    if (typeof finalFallback === 'function') finalFallback();
+  };
 }
 
 function _appendCardText(el, card, mode) {
@@ -1365,7 +1401,7 @@ function makeCard(card, mode) {
       const frontImg = document.createElement('img');
       frontImg.className = 'card-img';
       frontImg.alt = '';
-      frontImg.onerror = fallbackToText;
+      installImgVariantFallback(frontImg, fallbackToText);
       frontImg.src = imgUrl;
       front.appendChild(frontImg);
 
@@ -1377,8 +1413,8 @@ function makeCard(card, mode) {
       const img = document.createElement('img');
       img.className = 'card-img';
       img.alt = '';
-      img.onerror = fallbackToText;
-      img.src = imgUrl;  // set src after onerror so handler is registered first
+      installImgVariantFallback(img, fallbackToText);  // wire handler before src
+      img.src = imgUrl;
       el.appendChild(img);
     }
   } else {
