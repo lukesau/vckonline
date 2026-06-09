@@ -1349,6 +1349,18 @@ function initLobbyModal() {
       isOwner,
     );
     syncPresetWarning(lobby.preset || 'current', presetWarning);
+    // A poll/broadcast-driven re-render destroys and recreates the inline
+    // rename <input>, which would silently steal focus and reset the caret
+    // mid-keystroke. Capture the live focus + selection so we can restore it
+    // onto the freshly-built input below.
+    const activeEl = document.activeElement;
+    const renameWasFocused =
+      editingSelfName &&
+      activeEl &&
+      activeEl.classList &&
+      activeEl.classList.contains('lobby-name-edit-input');
+    const renameSelStart = renameWasFocused ? activeEl.selectionStart : null;
+    const renameSelEnd = renameWasFocused ? activeEl.selectionEnd : null;
     playerList.innerHTML = '';
     let focusInputEl = null;
     (lobby.members || []).forEach(m => {
@@ -1426,6 +1438,16 @@ function initLobbyModal() {
       setTimeout(() => {
         try { focusInputEl.focus(); focusInputEl.select(); } catch (_) { /* ignore */ }
       }, 0);
+    } else if (focusInputEl && renameWasFocused) {
+      // Re-render landed while the user was mid-edit: put focus back on the
+      // new input and restore the caret/selection so polling never interrupts
+      // typing.
+      try {
+        focusInputEl.focus();
+        if (renameSelStart != null) {
+          focusInputEl.setSelectionRange(renameSelStart, renameSelEnd);
+        }
+      } catch (_) { /* ignore */ }
     }
     const me = (lobby.members || []).find(m => idsMatch(m.player_id, selfId));
     if (me) {

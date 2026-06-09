@@ -3764,6 +3764,36 @@ body.is-virtual-keyboard-open .card-modal {
   gap: 4px;
 }
 
+/* ── Margrave artwork chooser (draft-styled in-game prompt) ─────────────── */
+.margrave-art-modal {
+  gap: 12px;
+  z-index: 320;
+}
+
+.margrave-art-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.01em;
+  padding-right: 44px; /* clear the close button */
+}
+
+.margrave-art-sub {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.margrave-art-grid {
+  margin-bottom: 0;
+}
+
+.margrave-art-actions {
+  margin-bottom: 0;
+}
+
 .draft-stack-btn {
   width: 100%;
   padding: 4px 6px;
