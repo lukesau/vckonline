@@ -88,7 +88,8 @@ def _preset_config(preset, expansion_only):
             monster_query="select_base_monsters",
             citizen_query="select_base_citizens",
             choose_one_citizen_per_roll=True,
-            domain_query="select_base_domains",
+            domain_query="select_random_domains",
+            exclude_domain_expansions=("crimsonseas",),
             optional_starter_expansion="base",
         )
     elif preset in ("june2026", "current"):
@@ -143,6 +144,7 @@ def _preset_config(preset, expansion_only):
         if preset == "base":
             cfg["domain_query"] = "select_base_domains"
             cfg["domain_expansion_filters"] = None
+            cfg["exclude_domain_expansions"] = ()
             cfg["duke_expansion_filters"] = ("base",)
             cfg["event_expansion_filters"] = ("base",)
         elif preset == "flamesandfrost":

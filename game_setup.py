@@ -264,7 +264,7 @@ def load_game_data(
     event_expansion_filters = None
     # Expansions whose domains must be dropped from the deal. Used by every
     # preset that pulls the full cross-expansion pool via select_random_domains
-    # (base1/base2/flamesandfrost/shadowvale/random/draft): Crimson Seas domains
+    # (base/base1/base2/flamesandfrost/shadowvale/random/draft): Crimson Seas domains
     # aren't implemented yet, so exclude them here until they ship rather than
     # letting them leak in.
     exclude_domain_expansions = ()
@@ -336,7 +336,8 @@ def load_game_data(
             monster_query = "select_base_monsters"
             citizen_query = "select_base_citizens"
             choose_one_citizen_per_roll = True
-            domain_query = "select_base_domains"
+            domain_query = "select_random_domains"
+            exclude_domain_expansions = ("crimsonseas",)
             duke_query = "select_random_dukes"
             optional_starter_expansion = "base"
         case "june2026" | "current":
@@ -444,6 +445,7 @@ def load_game_data(
         if preset == "base":
             domain_query = "select_base_domains"
             domain_expansion_filters = None
+            exclude_domain_expansions = ()
             duke_expansion_filters = ("base",)
             event_expansion_filters = ("base",)
         elif preset == "flamesandfrost":
@@ -553,9 +555,7 @@ def load_game_data(
         random.shuffle(results)
         # Drop domains from excluded expansions (e.g. Crimson Seas, which has
         # no implemented domains yet) before the deal. Set by the presets that
-        # draw the full pool via select_random_domains (base1/base2/random/draft);
-        # the curated expansion presets already constrain their pool via
-        # domain_expansion_filters.
+        # draw the full pool via select_random_domains.
         if exclude_domain_expansions:
             excluded = set(exclude_domain_expansions)
             results = [r for r in results if (r.get("expansion") or "") not in excluded]
