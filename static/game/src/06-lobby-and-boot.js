@@ -2,6 +2,61 @@
 // `'collage'` = static overlapping card grid (original). `'bounce'` = one card, constant speed, specular wall bounces, new random card each bounce.
 const LOBBY_BACKGROUND_MODE = 'bounce';
 
+// Card faces for the background are expressed as inclusive id ranges per card
+// type and resolved through the shared `/card-image/{type}/{id}` endpoint, so
+// adding art only means widening a range (server is the source of truth via
+// `/api/lobby/background-cards`; this is the fallback if that fetch fails).
+const LOBBY_BG_FALLBACK_RANGES = {
+  citizen: [1, 49],
+  domain: [1, 80],
+  monster: [1, 189],
+  duke: [1, 102],
+};
+
+function lobbyBgCardUrl(type, id) {
+  return `/card-image/${type}/${id}`;
+}
+
+// One random `/card-image` URL from the ranges. Ids without art on disk 404;
+// callers preload and skip those, so picking uniformly across the range is fine.
+function lobbyBgPickCardUrl(ranges) {
+  const types = Object.keys(ranges || {});
+  if (!types.length) return '';
+  const type = types[(Math.random() * types.length) | 0];
+  const span = ranges[type];
+  if (!Array.isArray(span) || span.length < 2) return '';
+  const lo = span[0];
+  const hi = span[1];
+  const id = lo + ((Math.random() * (hi - lo + 1)) | 0);
+  return lobbyBgCardUrl(type, id);
+}
+
+// Every candidate URL across all ranges (collage needs a finite tile deck).
+function lobbyBgExpandRanges(ranges) {
+  const urls = [];
+  for (const type of Object.keys(ranges || {})) {
+    const span = ranges[type];
+    if (!Array.isArray(span) || span.length < 2) continue;
+    for (let id = span[0]; id <= span[1]; id++) {
+      urls.push(lobbyBgCardUrl(type, id));
+    }
+  }
+  return urls;
+}
+
+async function lobbyBgFetchRanges() {
+  try {
+    const res = await fetch('/api/lobby/background-cards');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.ranges && typeof data.ranges === 'object') {
+        return data.ranges;
+      }
+    }
+  } catch (_) {}
+  return LOBBY_BG_FALLBACK_RANGES;
+}
+
 async function paintLobbyBackgroundCollage(canvas) {
   const t0 = performance.now();
   const overlay = canvas.closest('.lobby-overlay');
@@ -13,15 +68,8 @@ async function paintLobbyBackgroundCollage(canvas) {
   const bw = Math.min(4096, Math.max(2880, Math.ceil(vw * 1.42)));
   const bh = Math.min(2560, Math.max(1800, Math.ceil(vh * 1.42)));
 
-  let urls = [];
-  try {
-    const res = await fetch('/api/lobby/background-card-urls');
-    if (!res.ok) return;
-    const data = await res.json();
-    urls = Array.isArray(data.urls) ? data.urls : [];
-  } catch (_) {
-    return;
-  }
+  const ranges = await lobbyBgFetchRanges();
+  const urls = lobbyBgExpandRanges(ranges);
   if (!urls.length) return;
 
   const tAfterList = performance.now();
@@ -144,12 +192,15 @@ function startLobbyBackgroundBounce(canvas) {
 
   const DARKEN = 'rgba(4, 10, 7, 0.4)';
   const SPEED_PX = 220;
-  const POOL_TARGET = 22;
   const CARD_MAX_H_FRAC = 0.28;
+  // Bounces can land on an id with no art on disk; retry a few random picks
+  // so a single 404 never stalls the rotation.
+  const MAX_PICK_ATTEMPTS = 16;
 
-  let urls = [];
+  let ranges = LOBBY_BG_FALLBACK_RANGES;
   let ctx = null;
   let rafId = 0;
+  let stopped = false;
   let lastTs = 0;
   let cssW = 1;
   let cssH = 1;
@@ -158,11 +209,11 @@ function startLobbyBackgroundBounce(canvas) {
   let y = 0;
   let vx = 0;
   let vy = 0;
-  let currentUrl = '';
   let currentImg = null;
+  let nextCard = null;   // { url, img } — decoded and ready to show on the next bounce
+  let preparing = false;
   let halfW = 60;
   let halfH = 84;
-  const pool = new Map();
 
   function syncSize() {
     const rect = overlay.getBoundingClientRect();
@@ -197,31 +248,6 @@ function startLobbyBackgroundBounce(canvas) {
     y = Math.max(halfH, Math.min(cssH - halfH, y));
   }
 
-  function pickRandomUrl(exclude) {
-    if (!urls.length) return '';
-    const filtered = urls.filter(u => u !== exclude);
-    const list = filtered.length ? filtered : urls;
-    return list[(Math.random() * list.length) | 0];
-  }
-
-  function pickNextFromPool(exclude) {
-    const keys = [...pool.keys()].filter(k => k !== exclude);
-    const pickFrom = keys.length ? keys : [...pool.keys()];
-    if (!pickFrom.length) return '';
-    return pickFrom[(Math.random() * pickFrom.length) | 0];
-  }
-
-  function swapCardOnBounce() {
-    const next = pickNextFromPool(currentUrl);
-    if (!next || !pool.has(next)) return;
-    currentUrl = next;
-    currentImg = pool.get(next);
-    const m = measureCard(currentImg);
-    halfW = m.dw * 0.5;
-    halfH = m.dh * 0.5;
-    clampPos();
-  }
-
   function loadImage(src) {
     return new Promise(resolve => {
       const img = new Image();
@@ -240,20 +266,48 @@ function startLobbyBackgroundBounce(canvas) {
     });
   }
 
-  async function warmPool() {
-    pool.clear();
-    const n = Math.min(POOL_TARGET, urls.length);
-    const shuffled = urls.slice().sort(() => Math.random() - 0.5);
-    const slice = shuffled.slice(0, n);
-    const loaded = await Promise.all(
-      slice.map(async u => {
-        const img = await loadImage(u);
-        return img ? [u, img] : null;
-      })
-    );
-    for (const row of loaded) {
-      if (row) pool.set(row[0], row[1]);
+  // Resolve one random card that actually has art, retrying past 404 gaps so
+  // every id in the configured ranges is reachable.
+  async function loadRandomCard() {
+    for (let i = 0; i < MAX_PICK_ATTEMPTS; i++) {
+      if (stopped) return null;
+      const url = lobbyBgPickCardUrl(ranges);
+      if (!url) return null;
+      const img = await loadImage(url);
+      if (img && img.naturalWidth) return { url, img };
     }
+    return null;
+  }
+
+  function applyCard(card) {
+    currentImg = card.img;
+    const m = measureCard(currentImg);
+    halfW = m.dw * 0.5;
+    halfH = m.dh * 0.5;
+    clampPos();
+  }
+
+  // Preload exactly one card ahead so a bounce never reveals a half-loaded
+  // (decoding) image.
+  function prepareNext() {
+    if (preparing || nextCard || stopped) return;
+    preparing = true;
+    loadRandomCard().then(card => {
+      preparing = false;
+      if (!stopped && card) nextCard = card;
+    });
+  }
+
+  function swapCardOnBounce() {
+    if (!nextCard) {
+      // Preload hasn't landed yet; keep the current card and try again.
+      prepareNext();
+      return;
+    }
+    const card = nextCard;
+    nextCard = null;
+    applyCard(card);
+    prepareNext();
   }
 
   function seedMotion() {
@@ -328,10 +382,11 @@ function startLobbyBackgroundBounce(canvas) {
   }
 
   function stop() {
+    stopped = true;
     if (rafId) window.cancelAnimationFrame(rafId);
     rafId = 0;
     window.removeEventListener('resize', onResize);
-    pool.clear();
+    nextCard = null;
     canvas.classList.remove('lobby-bg-canvas--fill');
     if (canvas._lobbyBounceStop === stop) delete canvas._lobbyBounceStop;
   }
@@ -339,42 +394,27 @@ function startLobbyBackgroundBounce(canvas) {
   canvas.classList.add('lobby-bg-canvas--fill');
   canvas._lobbyBounceStop = stop;
 
-  return fetch('/api/lobby/background-card-urls')
-    .then(res => (res.ok ? res.json() : {}))
-    .then(data => {
-      urls = Array.isArray(data.urls) ? data.urls : [];
-    })
-    .catch(() => {
-      urls = [];
-    })
-    .then(async () => {
-      if (!urls.length) {
-        stop();
-        return;
-      }
+  return lobbyBgFetchRanges()
+    .then(async r => {
+      ranges = r || LOBBY_BG_FALLBACK_RANGES;
+      if (stopped) return;
       if (!syncSize()) {
         stop();
         return;
       }
-      await warmPool();
-      if (!pool.size) {
+      const first = await loadRandomCard();
+      if (stopped) return;
+      if (!first) {
         stop();
         return;
       }
-      currentUrl = pickRandomUrl('');
-      currentImg = pool.get(currentUrl) || pool.values().next().value;
-      if (!currentImg) {
-        stop();
-        return;
-      }
-      const m0 = measureCard(currentImg);
-      halfW = m0.dw * 0.5;
-      halfH = m0.dh * 0.5;
+      applyCard(first);
       x = cssW * 0.5;
       y = cssH * 0.5;
       clampPos();
       seedMotion();
       lastTs = 0;
+      prepareNext();
       window.addEventListener('resize', onResize);
       drawFrame();
       rafId = window.requestAnimationFrame(frame);

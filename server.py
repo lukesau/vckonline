@@ -56,25 +56,17 @@ _CARD_IMAGE_DIRS: Dict[str, Path] = {
 _EXHAUSTED_CARD_JPEG = _REPO_ROOT / "images" / "exhausted" / "exhausted_card.jpg"
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
-# Lobby background: citizens / domains / monsters / dukes (no backs)
-_LOBBY_BG_IMAGE_SUBDIRS = ("citizens", "domains", "monsters", "dukes")
-_lobby_bg_urls_cache = None
-_lobby_bg_urls_cache_time = 0.0
-
-
-def _collect_lobby_background_card_urls():
-    urls = []
-    for sub in _LOBBY_BG_IMAGE_SUBDIRS:
-        dir_path = _REPO_ROOT / "images" / sub
-        if not dir_path.is_dir():
-            continue
-        for f in sorted(dir_path.iterdir()):
-            if f.suffix.lower() not in _IMAGE_EXTS:
-                continue
-            if "_back" in f.name.lower():
-                continue
-            urls.append(f"/images/{sub}/{f.name}")
-    return urls
+# Lobby background: card faces are drawn at random from these inclusive id
+# ranges per card type and resolved through `/card-image/{type}/{id}`. Widen a
+# range here when new art lands; ids inside a range that have no file on disk
+# simply 404 and are skipped client-side (the canvas preloads each card before
+# showing it), so the ranges only need to bound each type generously.
+_LOBBY_BG_CARD_RANGES = {
+    "citizen": [1, 49],
+    "domain": [1, 80],
+    "monster": [1, 189],
+    "duke": [1, 102],
+}
 
 
 app = FastAPI(title="VCK Online API", description="Development server for Valeria Card Kingdoms Online")
@@ -1428,17 +1420,14 @@ async def submit_draft_vote(request: DraftVoteRequest):
     return {"message": "Vote submitted"}
 
 
-@app.get("/api/lobby/background-card-urls")
-async def lobby_background_card_urls():
-    """Public URLs for card faces used by the lobby background canvas (cached briefly)."""
-    global _lobby_bg_urls_cache, _lobby_bg_urls_cache_time
-    ttl = 120.0
-    now = time.time()
-    if _lobby_bg_urls_cache is not None and (now - _lobby_bg_urls_cache_time) < ttl:
-        return JSONResponse({"urls": _lobby_bg_urls_cache})
-    _lobby_bg_urls_cache = _collect_lobby_background_card_urls()
-    _lobby_bg_urls_cache_time = now
-    return JSONResponse({"urls": _lobby_bg_urls_cache})
+@app.get("/api/lobby/background-cards")
+async def lobby_background_cards():
+    """Inclusive id ranges per card type for the lobby background canvas.
+
+    The client builds `/card-image/{type}/{id}` URLs from these ranges and
+    skips ids with no art on disk, so this only needs to bound each type.
+    """
+    return JSONResponse({"ranges": _LOBBY_BG_CARD_RANGES})
 
 
 @app.websocket("/ws/lobby")
