@@ -2971,12 +2971,13 @@ select.lobby-input:disabled {
   max-width: 100%;
 }
 
-/* Anchor the modal Alt button to the image's top-left so it never collides
-   with the modal's top-right close button. */
+/* Anchor the modal Alt button to the image's top-right for consistency with
+   the tableau cards. The button sits inside the image bounds, which are inset
+   from the modal edge, so it clears the modal's top-right close button. */
 .card-modal-img-wrap .card-alt-toggle--modal {
   top: 8px;
-  left: 8px;
-  right: auto;
+  right: 8px;
+  left: auto;
 }
 
 .card-modal-info {
