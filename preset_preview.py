@@ -273,8 +273,17 @@ def _preview_citizens(cur, cfg, players):
     elif by_roll and all(len(group) == 1 for group in by_roll.values()):
         # Expansion presets filter citizens to exactly one per roll slot, so the
         # per-slot pick has no choice to make — the deal is deterministic.
-        selection = "fixed"
-        note = "These citizen stacks are always dealt to the board."
+        cards = [
+            _card("citizen", by_roll[roll][0]["id_citizens"], by_roll[roll][0]["name"], by_roll[roll][0].get("expansion"))
+            for roll in sorted(by_roll)
+        ]
+        return {
+            "key": "citizens",
+            "title": "Citizens",
+            "selection": "fixed",
+            "note": "These citizen stacks are always dealt to the board.",
+            "cards": cards,
+        }
     else:
         selection = "random"
         note = "One citizen is dealt at random for each of the 10 dice slots."
