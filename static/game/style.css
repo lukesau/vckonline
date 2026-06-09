@@ -3764,13 +3764,13 @@ body.is-virtual-keyboard-open .card-modal {
   gap: 4px;
 }
 
-/* ── Margrave artwork chooser (draft-styled in-game prompt) ─────────────── */
-.margrave-art-modal {
+/* ── Card artwork chooser (draft-styled in-game overlay) ───────────────── */
+.card-art-modal {
   gap: 12px;
   z-index: 320;
 }
 
-.margrave-art-title {
+.card-art-title {
   margin: 0;
   font-size: 18px;
   font-weight: 800;
@@ -3779,19 +3779,45 @@ body.is-virtual-keyboard-open .card-modal {
   padding-right: 44px; /* clear the close button */
 }
 
-.margrave-art-sub {
+.card-art-sub {
   margin: 0;
   font-size: 13px;
   line-height: 1.4;
   color: var(--muted);
 }
 
-.margrave-art-grid {
+.card-art-grid {
   margin-bottom: 0;
 }
 
-.margrave-art-actions {
-  margin-bottom: 0;
+/* Small "Alt" pill layered over the top-right of cards that have alternate
+   artwork, mirroring the wiki's grid toggle. */
+.card-alt-toggle {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 4;
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  font-family: inherit;
+}
+.card-alt-toggle:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.card-alt-toggle.active {
+  background: var(--gold);
+  color: #1a1206;
+  border-color: var(--gold);
 }
 
 .draft-stack-btn {

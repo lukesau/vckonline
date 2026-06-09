@@ -2052,6 +2052,18 @@ async def card_image(card_type: str, card_id: int, variant: Optional[str] = None
     raise HTTPException(status_code=404, detail="Image not found")
 
 
+@app.get("/card-image-variants")
+async def card_image_variants_all():
+    """Map every card that has alternate artwork to its variant tokens.
+
+    Shape: ``{ "<card_type>": { "<card_id>": ["alt_01", ...] } }``. The game
+    client fetches this once so it knows which cards to show an "Alt" control
+    on, without probing the per-card endpoint for everything on the board.
+    """
+    from card_filters import all_card_image_variants
+    return all_card_image_variants()
+
+
 @app.get("/card-image-variants/{card_type}/{card_id}")
 async def card_image_variants(card_type: str, card_id: int):
     """List the alternate-artwork variant tokens available for a card.

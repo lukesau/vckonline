@@ -150,6 +150,19 @@ def list_card_image_variants(card_type, card_id):
     return list(_IMAGE_VARIANT_MAPS.get(card_type, {}).get(cid, []))
 
 
+def all_card_image_variants():
+    """Return ``{card_type: {card_id: [tokens]}}`` for every card with alternates.
+
+    Lets the game client learn which cards support alternate art in one round
+    trip rather than probing per card.
+    """
+    return {
+        kind: {cid: list(tokens) for cid, tokens in id_map.items()}
+        for kind, id_map in _IMAGE_VARIANT_MAPS.items()
+        if id_map
+    }
+
+
 # ── "is this row implemented?" predicates ──────────────────────────────────
 #
 # Each predicate returns True when the row has a `has_<effect>` boolean set

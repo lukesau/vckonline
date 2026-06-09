@@ -86,4 +86,6 @@ The wiki UI uses `alt_variants` to render the artwork controls:
 
 Selections live only in JS state (`state.altSelections`, a `Map` of `${type}_${id}` → token) and persist between the grid and the detail modal for the session — refreshing the page resets every card to canonical art. If an alternate file fails to load, the `<img>` error handler strips the `?variant=` query and retries the canonical art before showing "no image".
 
-Drop a matching `<token>_<kind>_<id>_*` file into the right directory and the wiki picks it up on the next cache refresh (`?refresh=1` or server restart). The same convention and `?variant=<token>` endpoint power the in-game Margrave artwork chooser (see the game client's `maybePromptMargraveArtwork`).
+Drop a matching `<token>_<kind>_<id>_*` file into the right directory and the wiki picks it up on the next cache refresh (`?refresh=1` or server restart).
+
+The same convention powers the **in-game artwork chooser**. The game client fetches the bulk `GET /card-image-variants` map once on load to learn which cards have alternates, then renders a small top-right "Alt" control on any face-up card that supports them: a single alternate toggles in place, multiple alternates open a draft-styled chooser overlay (Original + each variant). Choices persist per viewer in `localStorage` (`vck_card_art_variants`, a `{"<type>_<id>": "<token>"}` map) and are applied through the client's `cardImageUrl`. When a game includes a Margrave, `maybePromptMargraveArtwork` surfaces that same chooser once at game start so players discover the feature.

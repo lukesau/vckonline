@@ -125,6 +125,7 @@ function render(state) {
   lastRenderedStateJson = incomingJson;
 
   latestGameState = state;
+  ensureCardArtVariantsLoaded();
   syncHurryUpDeadlineFromState(state);
   if (typeof refreshOpenCardInspectModal === 'function') {
     refreshOpenCardInspectModal();
@@ -1282,26 +1283,48 @@ function obscuredTypeBackUrl(card) {
   return '/images/domains/domain_back.jpg';
 }
 
-// ── Margrave artwork preference (per-viewer, cosmetic) ───────────────────
-// The Margrave starter (id 04) ships with several alternate artworks. Each
-// viewer can pick which one they see via a draft-style prompt at game start;
-// the choice is stored locally and applied through `cardImageUrl`.
+// ── Alternate artwork preferences (per-viewer, cosmetic) ─────────────────
+// Any card with alternate artwork on disk can have a per-viewer art choice.
+// Choices are stored locally as a { "<type>_<id>": "<variant token>" } map and
+// applied through `cardImageUrl`. `_cardArtVariants` caches which cards support
+// alternates (fetched once from /card-image-variants) so we know where to show
+// the "Alt" control.
 const MARGRAVE_STARTER_ID = 4;
-const MARGRAVE_ARTWORK_LS_KEY = 'vck_margrave_artwork';
+const CARD_ART_LS_KEY = 'vck_card_art_variants';
+let _cardArtVariants = null;        // { type: { id: [tokens] } } or null until loaded
+let _cardArtVariantsLoading = false;
 
-function getMargraveArtworkVariant() {
+function _readCardArtStore() {
   try {
-    return (localStorage.getItem(MARGRAVE_ARTWORK_LS_KEY) || '').trim();
+    const obj = JSON.parse(localStorage.getItem(CARD_ART_LS_KEY) || '{}');
+    return (obj && typeof obj === 'object') ? obj : {};
   } catch (_) {
-    return '';
+    return {};
   }
 }
 
-function setMargraveArtworkVariant(variant) {
+function getCardArtVariant(type, id) {
+  if (!type || id == null) return '';
+  return _readCardArtStore()[`${type}_${id}`] || '';
+}
+
+function setCardArtVariant(type, id, token) {
+  if (!type || id == null) return;
+  const store = _readCardArtStore();
+  const key = `${type}_${id}`;
+  if (token) store[key] = token;
+  else delete store[key];
   try {
-    if (variant) localStorage.setItem(MARGRAVE_ARTWORK_LS_KEY, variant);
-    else localStorage.removeItem(MARGRAVE_ARTWORK_LS_KEY);
+    localStorage.setItem(CARD_ART_LS_KEY, JSON.stringify(store));
   } catch (_) {}
+}
+
+// Margrave start-of-game prompt shims kept for the dedicated onboarding flow.
+function getMargraveArtworkVariant() {
+  return getCardArtVariant('starter', MARGRAVE_STARTER_ID);
+}
+function setMargraveArtworkVariant(variant) {
+  setCardArtVariant('starter', MARGRAVE_STARTER_ID, variant);
 }
 
 function gameIncludesMargrave(state) {
@@ -1309,6 +1332,50 @@ function gameIncludesMargrave(state) {
   return players.some(p =>
     (p && p.owned_starters || []).some(s => s && Number(s.starter_id) === MARGRAVE_STARTER_ID)
   );
+}
+
+function cardTypeAndId(card) {
+  if (!card || typeof card !== 'object') return null;
+  if (card.monster_id != null) return { type: 'monster', id: card.monster_id };
+  if (card.citizen_id != null) return { type: 'citizen', id: card.citizen_id };
+  if (card.domain_id  != null) return { type: 'domain',  id: card.domain_id };
+  if (card.duke_id    != null) return { type: 'duke',    id: card.duke_id };
+  if (card.starter_id != null) return { type: 'starter', id: card.starter_id };
+  if (card.event_id   != null) return { type: 'event',   id: card.event_id };
+  return null;
+}
+
+function cardArtVariantsFor(type, id) {
+  if (!_cardArtVariants || !type || id == null) return [];
+  const byId = _cardArtVariants[type];
+  if (!byId) return [];
+  const list = byId[id] != null ? byId[id] : byId[String(id)];
+  return Array.isArray(list) ? list : [];
+}
+
+// Fetch the catalog of which cards have alternate art (once per page load).
+// On success, re-render so any "Alt" controls appear.
+function ensureCardArtVariantsLoaded() {
+  if (_cardArtVariants || _cardArtVariantsLoading) return;
+  _cardArtVariantsLoading = true;
+  fetch('/card-image-variants')
+    .then(r => (r.ok ? r.json() : null))
+    .then(data => {
+      _cardArtVariants = (data && typeof data === 'object') ? data : {};
+      if (latestGameState) {
+        lastRenderedStateJson = '';
+        render(latestGameState);
+      }
+    })
+    .catch(() => { _cardArtVariants = {}; });
+}
+
+// Re-render the board (and any open inspect modal) after an art-variant change.
+function rerenderForArtChange() {
+  if (typeof latestGameState !== 'undefined' && latestGameState) {
+    lastRenderedStateJson = '';
+    render(latestGameState);
+  }
 }
 
 function cardImageUrlBase(card) {
@@ -1324,16 +1391,15 @@ function cardImageUrlBase(card) {
 }
 
 // Resolve the artwork URL for a card, honoring any per-viewer artwork variant
-// preference (currently only the Margrave starter). The variant is purely
-// cosmetic; `installImgVariantFallback` strips it back to the canonical image
-// if the alternate file fails to load.
+// preference. The variant is purely cosmetic; `installImgVariantFallback`
+// strips it back to the canonical image if the alternate file fails to load.
 function cardImageUrl(card) {
   const base = cardImageUrlBase(card);
   if (!base) return base;
-  if (!cardObscuredFromViewer(card) &&
-      card.starter_id !== undefined &&
-      Number(card.starter_id) === MARGRAVE_STARTER_ID) {
-    const variant = getMargraveArtworkVariant();
+  if (cardObscuredFromViewer(card)) return base;  // card backs never get variants
+  const ti = cardTypeAndId(card);
+  if (ti) {
+    const variant = getCardArtVariant(ti.type, ti.id);
     if (variant) return `${base}?variant=${encodeURIComponent(variant)}`;
   }
   return base;
@@ -1447,11 +1513,56 @@ function makeCard(card, mode) {
       img.src = imgUrl;
       el.appendChild(img);
     }
+
+    // "Alt" control for cards whose face is shown to this viewer and that have
+    // alternate artwork on disk. Obscured/own-duke cards render a back, so they
+    // get no control here (the duke's face is reachable via the inspect modal).
+    if (!cardObscuredFromViewer(card) && !isOwnDuke) {
+      const ti = cardTypeAndId(card);
+      const variants = ti ? cardArtVariantsFor(ti.type, ti.id) : [];
+      if (ti && variants.length) {
+        el.appendChild(makeCardAltButton(ti.type, ti.id, variants, card.name));
+      }
+    }
   } else {
     _appendCardText(el, card, mode);
   }
 
   return el;
+}
+
+// Small top-right "Alt" button mirroring the wiki: a single alternate toggles
+// in place, multiple alternates open the artwork chooser. Selection persists in
+// localStorage and applies to every copy of the card via `cardImageUrl`.
+function makeCardAltButton(type, id, variants, name) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'card-alt-toggle';
+  btn.textContent = 'Alt';
+  const refresh = () => {
+    const on = !!getCardArtVariant(type, id);
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = on ? 'Change alternate artwork' : 'Show alternate artwork';
+  };
+  refresh();
+  btn.setAttribute('aria-label', 'Choose alternate artwork');
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (variants.length === 1) {
+      setCardArtVariant(type, id, getCardArtVariant(type, id) ? '' : variants[0]);
+      rerenderForArtChange();
+    } else {
+      openCardArtChooser({
+        type,
+        id,
+        variants,
+        title: name ? `${name} — artwork` : 'Choose artwork',
+      });
+    }
+  });
+  return btn;
 }
 
 function cardClass(card) {
