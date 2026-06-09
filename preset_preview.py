@@ -207,6 +207,13 @@ def _preview_monsters(cur, cfg, players):
         ordered_areas = sorted(by_area.keys())
         selection = "draft"
         note = "Players vote to pick 5 of these monster areas."
+    elif len(by_area) == 5:
+        # Expansion presets (flamesandfrost/shadowvale/crimsonseas) filter the
+        # monster pool down to exactly 5 areas, so `random.sample(areas, 5)`
+        # always returns all of them — the deal is deterministic.
+        ordered_areas = sorted(by_area.keys())
+        selection = "fixed"
+        note = "These 5 monster areas are always dealt to the board."
     else:
         ordered_areas = sorted(by_area.keys())
         selection = "random"
@@ -263,6 +270,11 @@ def _preview_citizens(cur, cfg, players):
     if cfg["draft"]:
         selection = "draft"
         note = "Players vote on which citizen fills each of the 10 dice slots."
+    elif by_roll and all(len(group) == 1 for group in by_roll.values()):
+        # Expansion presets filter citizens to exactly one per roll slot, so the
+        # per-slot pick has no choice to make — the deal is deterministic.
+        selection = "fixed"
+        note = "These citizen stacks are always dealt to the board."
     else:
         selection = "random"
         note = "One citizen is dealt at random for each of the 10 dice slots."
