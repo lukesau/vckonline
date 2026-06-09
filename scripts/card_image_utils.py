@@ -68,7 +68,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) != 3:
         sys.stderr.write(
-            "Usage: python card_image_utils.py <source_image> <dest_jpeg>\n"
+            "Usage: python scripts/card_image_utils.py <source_image> <dest_jpeg>\n"
             "       Output is center-cropped to 400:570 if needed, then resized.\n"
         )
         sys.exit(2)

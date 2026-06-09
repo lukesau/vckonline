@@ -185,7 +185,7 @@ class FrostOgreImmediateSlayTests(unittest.TestCase):
         self.assertEqual(cont.get("player_id"), "p1")
 
     def test_canonical_choose_citizens_also_works(self):
-        # Once the DB is fixed (sql/fix_grant_citizen_choose_prefix.sql), Frost
+        # Once the DB row is corrected, Frost
         # Ogre's special_reward is `choose <citizens>`. Same expectations.
         player, _, game = self._run("choose <citizens>")
         self.assertEqual(player.gold_score, 9)

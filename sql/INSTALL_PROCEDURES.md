@@ -103,7 +103,7 @@ SHOW PROCEDURE STATUS WHERE Db = 'vckonline';
 Or run the test script:
 
 ```bash
-python3 test_database.py
+python3 tests/test_database.py
 ```
 
 ## What Each Procedure Does

@@ -4,7 +4,7 @@ Reachability probe for the MariaDB tunnel.
 
 This script does NOT import `mariadb` — that way it works before the venv is
 set up and it isolates "is the tunnel up?" from any Python connector issue.
-For the full end-to-end check use `test_database.py` instead.
+For the full end-to-end check use `tests/test_database.py` instead.
 
 The canonical connection parameters for this repo are:
     host=127.0.0.1, port=3306, database=vckonline, user=vckonline, password=vckonline
@@ -34,7 +34,7 @@ def check_database_server():
             print("==> Tunnel is already up. DO NOT start another `ssh -L 3306:...` —")
             print("    the repo owner usually runs it manually and it's persistent.")
             print("Next: activate the venv (source ./activate_with_env.sh) and run")
-            print("      python3 test_database.py for a full DB validation.")
+            print("      python3 tests/test_database.py for a full DB validation.")
             return True
         else:
             print(f"\nFAIL: cannot reach {host}:{port}.")

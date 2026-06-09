@@ -1,6 +1,6 @@
 """
-Dump all card tables to dated SQL INSERT files in the sql/ directory.
-Usage: python dump_tables.py
+Dump all card tables to dated SQL INSERT files in sql/dumps/.
+Usage: python scripts/dump_tables.py
 """
 
 import mariadb
@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 DB = dict(user="vckonline", password="vckonline", host="127.0.0.1", database="vckonline", port=3306)
-SQL_DIR = Path(__file__).parent / "sql"
+SQL_DIR = Path(__file__).resolve().parent.parent / "sql" / "dumps"
 
 TABLES = [
     # (table_name, id_column, columns_to_backtick_quote)
@@ -62,7 +62,8 @@ def dump_table(cur, table, id_col, backtick_cols, stamp):
 
 def main():
     stamp = datetime.now().strftime("%Y%m%d%H%M")
-    print(f"Dumping to sql/*_{stamp}.sql ...")
+    SQL_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Dumping to sql/dumps/*_{stamp}.sql ...")
     conn = mariadb.connect(**DB)
     cur = conn.cursor()
     for table, id_col, backtick_cols in TABLES:

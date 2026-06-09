@@ -28,7 +28,7 @@ Mnemonic: **db == user == pass == `vckonline`**.
 The repo owner usually starts the tunnel by hand in another terminal and leaves it running across sessions. **Always probe first; only start a tunnel if the probe fails.**
 
 ```bash
-python3 check_db_server.py
+python3 scripts/check_db_server.py
 ```
 
 It only does a `connect_ex` on `127.0.0.1:3306` (no Python deps) so it tells you "tunnel up?" without dragging in the venv.
@@ -113,7 +113,7 @@ Run it via `python3 your_script.py` after `source ./activate_with_env.sh`.
 ### Step 5 — the canonical end-to-end check
 
 ```bash
-python3 test_database.py
+python3 tests/test_database.py
 ```
 
 Reads the same credentials, connects, lists tables, calls the stored procedures, and prints contents. If this passes, your DB setup is correct. If it fails, the failure message tells you which step is broken (tunnel / module / creds / procedures).
@@ -142,6 +142,15 @@ The Python card classes (`cards.py`) expose them as `citizen_id`, `monster_id`, 
 
 ## Test conventions
 
-- Tests live next to the source as `test_<area>.py`. Run with `python3 -m unittest <module>` or `python3 -m unittest discover -p "test_*.py"`.
-- Most engine tests build minimal in-memory `Game` objects without touching the DB. A few interaction tests (e.g. `test_game_dragoon_slay_chain.py`) load canonical card data from the live DB and skip when the tunnel is down.
+- All tests live in the `tests/` directory as `tests/test_<area>.py` (Python `unittest`; there are no JavaScript tests). Run them from the repo root: a single file with `python3 -m unittest tests.<module>` (e.g. `python3 -m unittest tests.test_game_resting`), or the whole suite with `python3 -m unittest discover -s tests -t . -p "test_*.py"`.
+- `tests/__init__.py` puts the repo root on `sys.path` so the test modules can import top-level modules (`game`, `cards`, `game_setup`, ...). New tests just `from game import Game` as before.
+- Most engine tests build minimal in-memory `Game` objects without touching the DB. A few interaction tests (e.g. `tests/test_game_dragoon_slay_chain.py`) load canonical card data from the live DB and skip when the tunnel is down.
 - Tests that need the DB hard-code the credentials dict above. Do not parameterize it.
+
+## Utility scripts (`scripts/`)
+
+Standalone CLI tools (not imported by the app):
+
+- `scripts/check_db_server.py` — tunnel reachability probe (no venv required)
+- `scripts/dump_tables.py` — dump all card tables to dated INSERT files in `sql/dumps/` (requires venv + tunnel)
+- `scripts/card_image_utils.py` — normalize card artwork to 400×570 JPEG

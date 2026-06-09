@@ -132,7 +132,10 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# Generated table dumps (scripts/dump_tables.py)
+sql/dumps/
+
 # Generated client bundle (built from static/game/src/*.js by build_game_js.py)
 static/game/game.js
-
+.claude/
 .DS_Store

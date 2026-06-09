@@ -2,7 +2,7 @@
 
 Run with:
 
-    python3 -m unittest test_game_setup_shuffle_spotcheck -v
+    python3 -m unittest tests.test_game_setup_shuffle_spotcheck -v
 
 This intentionally prints a small set of real `load_game_data` deals so the
 duke/domain mix can be inspected without opening the GUI.

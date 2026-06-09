@@ -21,7 +21,7 @@ The right flow is *probe first, only start if needed*:
 1. **Always** check reachability first:
 
    ```bash
-   python3 check_db_server.py
+   python3 scripts/check_db_server.py
    ```
 
    - If it reports `OK: 127.0.0.1:3306 accepts TCP connections`, the tunnel is already live — stop here. Do not run `ssh -L`.
@@ -35,7 +35,7 @@ The right flow is *probe first, only start if needed*:
 
 If a tunnel already exists and you run `ssh -L 3306:localhost:3306 lukesau.com` anyway, ssh will print `bind [::1]:3306: Address already in use` and `channel_setup_fwd_listener_tcpip: cannot listen to port: 3306`. That is **not a real error** — it just confirms the live tunnel is healthy. Ignore it and proceed with the connect.
 
-All callers — `check_db_server.py` (port reachability), `test_database.py` (full validation), `game.py`, `game_setup.py`, `server.py`, and every test that opens a `mariadb.connect(...)` — talk to the same `127.0.0.1:3306` endpoint. If a test you're writing needs the DB, copy the credentials dict above verbatim; do not parameterize.
+All callers — `scripts/check_db_server.py` (port reachability), `tests/test_database.py` (full validation), `game.py`, `game_setup.py`, `server.py`, and every test that opens a `mariadb.connect(...)` — talk to the same `127.0.0.1:3306` endpoint. If a test you're writing needs the DB, copy the credentials dict above verbatim; do not parameterize.
 
 ## First-try connect script
 
@@ -84,7 +84,7 @@ If `import mariadb` raises `ModuleNotFoundError`, you are not in the venv. Run `
 | symptom                                                   | actual cause                              | fix                                                 |
 | --------------------------------------------------------- | ----------------------------------------- | --------------------------------------------------- |
 | `ModuleNotFoundError: No module named 'mariadb'`          | venv not activated                        | `source ./activate_with_env.sh`                     |
-| `Can't connect to MySQL server on '127.0.0.1'` / refused  | SSH tunnel not running                    | probe with `python3 check_db_server.py`; if it fails, `ssh -L 3306:localhost:3306 lukesau.com` |
+| `Can't connect to MySQL server on '127.0.0.1'` / refused  | SSH tunnel not running                    | probe with `python3 scripts/check_db_server.py`; if it fails, `ssh -L 3306:localhost:3306 lukesau.com` |
 | `bind [::1]:3306: Address already in use` (from `ssh`)    | tunnel already running (probably user-started) | not a real error — stop, do nothing, the tunnel is fine |
 | `Access denied for user '...'@'localhost'`                | tried to use creds other than `vckonline` | use the table above; no other accounts exist        |
 | `Unknown column 'citizen_id' in ...`                      | wrong PK name (see schema gotcha below)   | use `id_citizens` (similarly `id_monsters`, etc.)   |
@@ -161,6 +161,18 @@ To install all procedures:
 
 See `sql/INSTALL_PROCEDURES.md` for additional options (mysql client, interactive MariaDB session, installing individually).
 
+## SQL directory layout
+
+| Path | Purpose |
+| ---- | ------- |
+| `sql/create_all_stored_procedures.sql`, `sql/select_*_sp.sql` | Stored procedure definitions the app calls at runtime |
+| `sql/create_starters_table.sql`, `sql/fix_user_setup.sql` | Schema and MariaDB user/grants setup |
+| `sql/insert_*.sql` | INSERT templates for adding new card rows |
+| `sql/run_sql.sh` | Apply a `.sql` file through the SSH tunnel |
+| `sql/dumps/` | Generated full-table INSERT dumps from `scripts/dump_tables.py` (gitignored) |
+
+One-off data migration scripts (`fix_*.sql`, `add_*.sql`) were removed after being applied to the live DB. To snapshot current card data, run `scripts/dump_tables.py` instead.
+
 ## User / grants setup
 
 If you have authentication or permissions problems, use:
@@ -173,12 +185,12 @@ If you have authentication or permissions problems, use:
 Quick port-level check (no Python deps):
 
 ```bash
-python3 check_db_server.py
+python3 scripts/check_db_server.py
 ```
 
 Full end-to-end check (Python + DB + tables + stored procs):
 
 ```bash
-python3 test_database.py
+python3 tests/test_database.py
 ```
 
