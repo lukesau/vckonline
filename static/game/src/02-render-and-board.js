@@ -1352,6 +1352,12 @@ function cardArtVariantsFor(type, id) {
 // localStorage and are never sent to the server (purely cosmetic, per-viewer).
 const MARGRAVE_PINS_LS_KEY = 'vck_margrave_pins';
 
+// Sentinel pin meaning "this owner explicitly uses the default (canonical) art".
+// Distinct from "no pin at all": an unpinned owner is eligible for random
+// auto-fill once any real alt is picked, whereas a NO_ALT-pinned owner is held
+// at the canonical art and excluded from the fill.
+const MARGRAVE_NO_ALT = '__none__';
+
 function _readMargravePinsAll() {
   try {
     const o = JSON.parse(localStorage.getItem(MARGRAVE_PINS_LS_KEY) || '{}');
@@ -1371,7 +1377,9 @@ function setMargravePin(gid, playerId, token) {
   const all = _readMargravePinsAll();
   const g = (all[gid] && typeof all[gid] === 'object') ? all[gid] : {};
   const pid = String(playerId);
-  if (token) {
+  if (token === MARGRAVE_NO_ALT) {
+    g[pid] = MARGRAVE_NO_ALT;  // explicit default — kept out of the random fill
+  } else if (token) {
     // Keep arts unique: drop this token from any other owner's pin so the
     // newly-picked art is exclusive to this player.
     for (const k of Object.keys(g)) {
@@ -1398,30 +1406,52 @@ function margraveOwnerIds(state) {
 }
 
 // Resolve every Margrave-owning player to a distinct variant: honor the
-// viewer's pins first, then fill the rest with the remaining variants in seat
-// order so no two Margraves display the same art. Until the viewer picks at
-// least one Margrave art, everyone keeps the canonical art (returns {}).
+// viewer's pins first (a real variant, or MARGRAVE_NO_ALT to force canonical),
+// then randomly deal the remaining variants to the still-unpinned owners so no
+// two Margraves display the same art. Until the viewer picks at least one real
+// alt, everyone keeps the canonical art (returns {}).
+//
+// The random fill is cached by (game, owners, pool, pins) so it stays stable
+// across the many renders/lookups within a single pin state, and only
+// re-randomizes when one of those inputs actually changes.
+let _margraveAssignCache = { key: null, out: {} };
+
 function computeMargraveAssignment(state) {
-  const out = {};
-  if (!state) return out;
+  if (!state) return {};
   const pool = cardArtVariantsFor('starter', MARGRAVE_STARTER_ID);
   const owners = margraveOwnerIds(state);
-  if (!pool.length || !owners.length) return out;
+  if (!pool.length || !owners.length) return {};
   const gid = state.game_id ? String(state.game_id) : '';
   const pins = getMargravePins(gid);
+
+  const key = JSON.stringify([gid, owners, pool, pins]);
+  if (_margraveAssignCache.key === key) return _margraveAssignCache.out;
+
+  const out = {};
   const used = new Set();
   owners.forEach(oid => {
     const t = pins[oid];
-    if (t && pool.includes(t) && !used.has(t)) { out[oid] = t; used.add(t); }
+    if (t === MARGRAVE_NO_ALT) { out[oid] = ''; }            // explicit default
+    else if (t && pool.includes(t) && !used.has(t)) { out[oid] = t; used.add(t); }
   });
-  if (!used.size) return out;  // no pick yet → canonical art for every Margrave
+  if (!used.size) {  // no real alt picked yet → canonical art for every Margrave
+    _margraveAssignCache = { key, out: {} };
+    return {};
+  }
+
+  // Fisher-Yates shuffle of the leftover variants, then deal to unpinned owners.
+  const remaining = pool.filter(t => !used.has(t));
+  for (let i = remaining.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
+  }
   let i = 0;
   owners.forEach(oid => {
-    if (out[oid] != null) return;
-    while (i < pool.length && used.has(pool[i])) i++;
-    if (i < pool.length) { out[oid] = pool[i]; used.add(pool[i]); i++; }
-    else out[oid] = '';  // more Margraves than variants → canonical art
+    if (out[oid] != null) return;  // already pinned (real variant or default)
+    out[oid] = i < remaining.length ? remaining[i++] : '';  // run out → canonical
   });
+
+  _margraveAssignCache = { key, out };
   return out;
 }
 

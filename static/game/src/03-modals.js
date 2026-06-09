@@ -625,7 +625,67 @@ function makeInspectModalImageEl(card) {
   img.className = 'card-modal-img';
   installImgVariantFallback(img);
   img.src = url;
+
+  // Face-up cards with alternate artwork get an Alt control here too, so art
+  // can be changed for cards only reachable through a modal (e.g. a monster
+  // buried deep in a stack). The control updates the modal image in place in
+  // addition to triggering the usual board re-render.
+  if (!cardObscuredFromViewer(card)) {
+    const ti = cardTypeAndId(card);
+    const variants = ti ? cardArtVariantsFor(ti.type, ti.id) : [];
+    if (ti && variants.length) {
+      const wrap = mk('card-modal-img-wrap');
+      wrap.appendChild(img);
+      wrap.appendChild(makeModalAltButton(card, ti, variants, img));
+      return wrap;
+    }
+  }
   return img;
+}
+
+// Alt button used inside inspect modals. Mirrors makeCardAltButton but also
+// refreshes the modal image element directly after a change, since the modal
+// is not rebuilt by the board re-render.
+function makeModalAltButton(card, ti, variants, img) {
+  const { type, id } = ti;
+  const isMargrave = type === 'starter' && Number(id) === MARGRAVE_STARTER_ID;
+  const ownerId = card.__ownerId;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'card-alt-toggle card-alt-toggle--modal';
+  btn.textContent = 'Alt';
+  const refresh = () => {
+    const on = isMargrave ? !!margraveVariantForOwner(ownerId) : !!getCardArtVariant(type, id);
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = on ? 'Change alternate artwork' : 'Show alternate artwork';
+  };
+  refresh();
+  btn.setAttribute('aria-label', 'Choose alternate artwork');
+  const applyToImg = () => {
+    const next = cardImageUrl(card);
+    if (next) img.src = next;
+    refresh();
+  };
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!isMargrave && variants.length === 1) {
+      setCardArtVariant(type, id, getCardArtVariant(type, id) ? '' : variants[0]);
+      applyToImg();
+      rerenderForArtChange();
+    } else {
+      openCardArtChooser({
+        type,
+        id,
+        variants,
+        ownerId,
+        title: card.name ? `${card.name} — artwork` : 'Choose artwork',
+        onApply: applyToImg,
+      });
+    }
+  });
+  return btn;
 }
 
 // ── Card artwork chooser ──────────────────────────────────────────────────
@@ -648,7 +708,7 @@ function closeCardArtChooser() {
 }
 
 function openCardArtChooser(opts) {
-  const { type, id, variants, title, subtitle, ownerId } = opts || {};
+  const { type, id, variants, title, subtitle, ownerId, onApply } = opts || {};
   const list = Array.isArray(variants) ? variants : [];
   if (!type || id == null || !list.length) return;
   closeCardArtChooser();
@@ -691,6 +751,7 @@ function openCardArtChooser(opts) {
     if (isMargrave) setMargravePin(gid, ownerId, token);
     else setCardArtVariant(type, id, token);
     closeCardArtChooser();
+    if (typeof onApply === 'function') onApply();
     rerenderForArtChange();
   };
 
@@ -718,7 +779,25 @@ function openCardArtChooser(opts) {
 
   // Margrave's alt_02 is a byte-for-byte duplicate of the canonical art, so a
   // separate "Original" tile would be redundant; every other card keeps it.
-  if (!isMargrave) addTile('', 'Original');
+  if (isMargrave) {
+    // Blank "default" tile (X): pins this owner to the canonical art and keeps
+    // it out of the random alt deal.
+    const tile = document.createElement('div');
+    tile.className = 'draft-card card-art-none-tile';
+    if (current === '') tile.classList.add('draft-card--selected');
+    const mark = document.createElement('div');
+    mark.className = 'card-art-none-mark';
+    mark.textContent = '\u00d7';
+    tile.appendChild(mark);
+    const lbl = document.createElement('div');
+    lbl.className = 'draft-card-label';
+    lbl.textContent = 'Default';
+    tile.appendChild(lbl);
+    tile.addEventListener('click', () => pick(MARGRAVE_NO_ALT));
+    grid.appendChild(tile);
+  } else {
+    addTile('', 'Original');
+  }
   list.forEach(v => addTile(v, cardArtVariantLabel(v)));
 
   const closeBtn = document.createElement('button');

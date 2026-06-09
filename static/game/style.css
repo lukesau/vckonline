@@ -2961,6 +2961,24 @@ select.lobby-input:disabled {
   box-shadow: 0 4px 16px rgba(0,0,0,0.6);
 }
 
+/* Wrapper that shrink-wraps the modal image so the Alt control can anchor to
+   the image's corner rather than the whole modal. */
+.card-modal-img-wrap {
+  position: relative;
+  display: inline-flex;
+  align-self: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Anchor the modal Alt button to the image's top-left so it never collides
+   with the modal's top-right close button. */
+.card-modal-img-wrap .card-alt-toggle--modal {
+  top: 8px;
+  left: 8px;
+  right: auto;
+}
+
 .card-modal-info {
   display: flex;
   flex-direction: column;
@@ -3788,6 +3806,21 @@ body.is-virtual-keyboard-open .card-modal {
 
 .card-art-grid {
   margin-bottom: 0;
+}
+
+/* Blank "default" tile (no alt art) in the Margrave chooser: a big X on an
+   empty card-shaped surface, matching the variant tiles' footprint. */
+.card-art-none-mark {
+  width: 100%;
+  aspect-ratio: 5 / 7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 /* Small "Alt" pill layered over the top-right of cards that have alternate
