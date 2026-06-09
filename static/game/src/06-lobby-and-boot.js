@@ -360,7 +360,12 @@ function startLobbyBackgroundBounce(canvas) {
   }
 
   function seedMotion() {
-    const theta = Math.random() * Math.PI * 2;
+    // Start on a diagonal-ish heading so the card doesn't crawl near-vertically
+    // or near-horizontally. Pick one of four 30°-wide arcs centered on the
+    // diagonals (30–60, 120–150, 210–240, 300–330) then jitter within it.
+    const baseDeg = [30, 120, 210, 300][(Math.random() * 4) | 0];
+    const deg = baseDeg + Math.random() * 30;
+    const theta = (deg * Math.PI) / 180;
     vx = Math.cos(theta) * SPEED_PX;
     vy = Math.sin(theta) * SPEED_PX;
   }

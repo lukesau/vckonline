@@ -648,10 +648,17 @@ function closeCardArtChooser() {
 }
 
 function openCardArtChooser(opts) {
-  const { type, id, variants, title, subtitle } = opts || {};
+  const { type, id, variants, title, subtitle, ownerId } = opts || {};
   const list = Array.isArray(variants) ? variants : [];
   if (!type || id == null || !list.length) return;
   closeCardArtChooser();
+
+  // Margrave is per-owning-player: the selection is a "pin" for this owner and
+  // every other player's Margrave is auto-assigned a different art. Other cards
+  // use the single global per-type/id preference.
+  const isMargrave = type === 'starter' && Number(id) === MARGRAVE_STARTER_ID;
+  const gid = (typeof latestGameState !== 'undefined' && latestGameState && latestGameState.game_id)
+    ? String(latestGameState.game_id) : '';
 
   const overlay = document.createElement('div');
   overlay.id = 'card-art-chooser-overlay';
@@ -676,10 +683,13 @@ function openCardArtChooser(opts) {
   grid.className = 'draft-grid card-art-grid';
   modal.appendChild(grid);
 
-  const current = getCardArtVariant(type, id) || '';
+  const current = isMargrave
+    ? (margraveVariantForOwner(ownerId) || '')
+    : (getCardArtVariant(type, id) || '');
 
   const pick = token => {
-    setCardArtVariant(type, id, token);
+    if (isMargrave) setMargravePin(gid, ownerId, token);
+    else setCardArtVariant(type, id, token);
     closeCardArtChooser();
     rerenderForArtChange();
   };
@@ -708,7 +718,6 @@ function openCardArtChooser(opts) {
 
   // Margrave's alt_02 is a byte-for-byte duplicate of the canonical art, so a
   // separate "Original" tile would be redundant; every other card keeps it.
-  const isMargrave = type === 'starter' && Number(id) === MARGRAVE_STARTER_ID;
   if (!isMargrave) addTile('', 'Original');
   list.forEach(v => addTile(v, cardArtVariantLabel(v)));
 
@@ -726,69 +735,6 @@ function openCardArtChooser(opts) {
   overlay._escHandler = onKey;
   document.addEventListener('keydown', onKey);
   document.body.appendChild(overlay);
-}
-
-// ── Margrave start-of-game onboarding prompt ──────────────────────────────
-// When a Margrave is in play, surface the artwork chooser once per game so
-// players discover the feature; thereafter they use the per-card "Alt" button.
-let _margraveArtworkPromptGame = null;
-
-function _margravePromptedKey(gid) {
-  return 'vck_margrave_prompted_' + gid;
-}
-
-function _markMargravePrompted(gid) {
-  try { localStorage.setItem(_margravePromptedKey(gid), '1'); } catch (_) {}
-}
-
-function maybePromptMargraveArtwork(state) {
-  if (!state || !state.game_id) return;
-  if (state.phase === 'game_over') return;
-  if (!gameIncludesMargrave(state)) return;
-
-  const gid = String(state.game_id);
-  if (_margraveArtworkPromptGame === gid) return;
-
-  let prompted = false;
-  try { prompted = localStorage.getItem(_margravePromptedKey(gid)) === '1'; } catch (_) {}
-  if (prompted) { _margraveArtworkPromptGame = gid; return; }
-
-  // Never stack on top of an open modal/prompt; retry on a later render tick.
-  if (document.getElementById('card-art-chooser-overlay')) return;
-  if (document.getElementById('card-modal-overlay')) return;
-  if (getVisiblePromptOverlay()) return;
-
-  _margraveArtworkPromptGame = gid;
-  openMargraveArtworkPrompt(gid);
-}
-
-async function openMargraveArtworkPrompt(gid) {
-  let variants = [];
-  try {
-    const resp = await fetch(`/card-image-variants/starter/${MARGRAVE_STARTER_ID}`);
-    if (resp.ok) {
-      const data = await resp.json();
-      if (data && Array.isArray(data.variants)) variants = data.variants;
-    }
-  } catch (_) {}
-
-  if (!variants.length) { _markMargravePrompted(gid); return; }
-
-  // Something may have grabbed the screen while we were fetching. If a blocking
-  // prompt appeared, defer (clear the session guard so we retry); otherwise
-  // bail if a chooser/modal is already up.
-  if (getVisiblePromptOverlay()) { _margraveArtworkPromptGame = null; return; }
-  if (document.getElementById('card-art-chooser-overlay')) return;
-  if (document.getElementById('card-modal-overlay')) return;
-
-  _markMargravePrompted(gid);
-  openCardArtChooser({
-    type: 'starter',
-    id: MARGRAVE_STARTER_ID,
-    variants,
-    title: 'Choose your Margrave artwork',
-    subtitle: 'This game includes Margraves. Pick the artwork you’d like to see — it’s cosmetic and only changes your view. You can change it anytime with the “Alt” button on the card.',
-  });
 }
 
 function fillCardModalInspectInfo(infoEl, card, ownerPlayerId) {

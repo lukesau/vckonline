@@ -67,12 +67,19 @@ function tableauGroupsForPlayer(player) {
     ['Monsters', ['owned_monsters']],
     ['Starters', ['owned_starters', 'owned_dukes']],
   ];
-  return defs
+  const groups = defs
     .map(([label, keys]) => ({
       label,
       cards: keys.reduce((acc, k) => acc.concat(player[k] || []), []),
     }))
     .filter(g => g.cards.length > 0);
+  // Tag Margrave cards with their owner so per-player artwork resolves
+  // correctly here and (via dataset.card) in the inspect modal.
+  const ownerId = player && player.player_id;
+  groups.forEach(g => g.cards.forEach(c => {
+    if (c && Number(c.starter_id) === MARGRAVE_STARTER_ID) c.__ownerId = ownerId;
+  }));
+  return groups;
 }
 
 // ── Main render ───────────────────────────────────────────────────────────
@@ -169,7 +176,6 @@ function render(state) {
   syncConcurrentPolling(state);
   maybeAutoFinalizeRoll(state);
   renderPromptModal(state);
-  maybePromptMargraveArtwork(state);
   tickHurryUpTimerElements();
   ensureHurryUpTicking();
 }
@@ -1319,21 +1325,6 @@ function setCardArtVariant(type, id, token) {
   } catch (_) {}
 }
 
-// Margrave start-of-game prompt shims kept for the dedicated onboarding flow.
-function getMargraveArtworkVariant() {
-  return getCardArtVariant('starter', MARGRAVE_STARTER_ID);
-}
-function setMargraveArtworkVariant(variant) {
-  setCardArtVariant('starter', MARGRAVE_STARTER_ID, variant);
-}
-
-function gameIncludesMargrave(state) {
-  const players = (state && state.player_list) || [];
-  return players.some(p =>
-    (p && p.owned_starters || []).some(s => s && Number(s.starter_id) === MARGRAVE_STARTER_ID)
-  );
-}
-
 function cardTypeAndId(card) {
   if (!card || typeof card !== 'object') return null;
   if (card.monster_id != null) return { type: 'monster', id: card.monster_id };
@@ -1351,6 +1342,92 @@ function cardArtVariantsFor(type, id) {
   if (!byId) return [];
   const list = byId[id] != null ? byId[id] : byId[String(id)];
   return Array.isArray(list) ? list : [];
+}
+
+// ── Margrave per-owner artwork (each player's Margrave shows a unique art) ──
+// Unlike other cards, the Margrave starter is keyed by *owning player* rather
+// than a single global preference, so two players' Margraves never share art on
+// this client. Choices are "pins" the viewer makes; everyone else's Margrave is
+// auto-filled with the remaining variants. Pins persist per game in
+// localStorage and are never sent to the server (purely cosmetic, per-viewer).
+const MARGRAVE_PINS_LS_KEY = 'vck_margrave_pins';
+
+function _readMargravePinsAll() {
+  try {
+    const o = JSON.parse(localStorage.getItem(MARGRAVE_PINS_LS_KEY) || '{}');
+    return (o && typeof o === 'object') ? o : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function getMargravePins(gid) {
+  const g = _readMargravePinsAll()[gid];
+  return (g && typeof g === 'object') ? g : {};
+}
+
+function setMargravePin(gid, playerId, token) {
+  if (!gid || playerId == null) return;
+  const all = _readMargravePinsAll();
+  const g = (all[gid] && typeof all[gid] === 'object') ? all[gid] : {};
+  const pid = String(playerId);
+  if (token) {
+    // Keep arts unique: drop this token from any other owner's pin so the
+    // newly-picked art is exclusive to this player.
+    for (const k of Object.keys(g)) {
+      if (k !== pid && g[k] === token) delete g[k];
+    }
+    g[pid] = token;
+  } else {
+    delete g[pid];
+  }
+  all[gid] = g;
+  try {
+    localStorage.setItem(MARGRAVE_PINS_LS_KEY, JSON.stringify(all));
+  } catch (_) {}
+}
+
+function margraveOwnerIds(state) {
+  const ids = [];
+  for (const p of (state && state.player_list) || []) {
+    if (p && (p.owned_starters || []).some(s => s && Number(s.starter_id) === MARGRAVE_STARTER_ID)) {
+      ids.push(String(p.player_id));
+    }
+  }
+  return ids;
+}
+
+// Resolve every Margrave-owning player to a distinct variant: honor the
+// viewer's pins first, then fill the rest with the remaining variants in seat
+// order so no two Margraves display the same art. Until the viewer picks at
+// least one Margrave art, everyone keeps the canonical art (returns {}).
+function computeMargraveAssignment(state) {
+  const out = {};
+  if (!state) return out;
+  const pool = cardArtVariantsFor('starter', MARGRAVE_STARTER_ID);
+  const owners = margraveOwnerIds(state);
+  if (!pool.length || !owners.length) return out;
+  const gid = state.game_id ? String(state.game_id) : '';
+  const pins = getMargravePins(gid);
+  const used = new Set();
+  owners.forEach(oid => {
+    const t = pins[oid];
+    if (t && pool.includes(t) && !used.has(t)) { out[oid] = t; used.add(t); }
+  });
+  if (!used.size) return out;  // no pick yet → canonical art for every Margrave
+  let i = 0;
+  owners.forEach(oid => {
+    if (out[oid] != null) return;
+    while (i < pool.length && used.has(pool[i])) i++;
+    if (i < pool.length) { out[oid] = pool[i]; used.add(pool[i]); i++; }
+    else out[oid] = '';  // more Margraves than variants → canonical art
+  });
+  return out;
+}
+
+function margraveVariantForOwner(ownerId) {
+  if (ownerId == null || typeof latestGameState === 'undefined' || !latestGameState) return '';
+  return computeMargraveAssignment(latestGameState)[String(ownerId)] || '';
 }
 
 // Fetch the catalog of which cards have alternate art (once per page load).
@@ -1399,7 +1476,12 @@ function cardImageUrl(card) {
   if (cardObscuredFromViewer(card)) return base;  // card backs never get variants
   const ti = cardTypeAndId(card);
   if (ti) {
-    const variant = getCardArtVariant(ti.type, ti.id);
+    // Margrave is resolved per owning player (see computeMargraveAssignment) so
+    // each player's Margrave shows a different art; every other card uses the
+    // single global per-type/id preference.
+    const variant = (ti.type === 'starter' && Number(ti.id) === MARGRAVE_STARTER_ID)
+      ? margraveVariantForOwner(card.__ownerId)
+      : getCardArtVariant(ti.type, ti.id);
     if (variant) return `${base}?variant=${encodeURIComponent(variant)}`;
   }
   return base;
@@ -1521,7 +1603,7 @@ function makeCard(card, mode) {
       const ti = cardTypeAndId(card);
       const variants = ti ? cardArtVariantsFor(ti.type, ti.id) : [];
       if (ti && variants.length) {
-        el.appendChild(makeCardAltButton(ti.type, ti.id, variants, card.name));
+        el.appendChild(makeCardAltButton(ti.type, ti.id, variants, card.name, card.__ownerId));
       }
     }
   } else {
@@ -1533,14 +1615,16 @@ function makeCard(card, mode) {
 
 // Small top-right "Alt" button mirroring the wiki: a single alternate toggles
 // in place, multiple alternates open the artwork chooser. Selection persists in
-// localStorage and applies to every copy of the card via `cardImageUrl`.
-function makeCardAltButton(type, id, variants, name) {
+// localStorage and applies via `cardImageUrl`. Margrave is special-cased to a
+// per-owner assignment so each player's Margrave shows a distinct art.
+function makeCardAltButton(type, id, variants, name, ownerId) {
+  const isMargrave = type === 'starter' && Number(id) === MARGRAVE_STARTER_ID;
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'card-alt-toggle';
   btn.textContent = 'Alt';
   const refresh = () => {
-    const on = !!getCardArtVariant(type, id);
+    const on = isMargrave ? !!margraveVariantForOwner(ownerId) : !!getCardArtVariant(type, id);
     btn.classList.toggle('active', on);
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     btn.title = on ? 'Change alternate artwork' : 'Show alternate artwork';
@@ -1550,7 +1634,7 @@ function makeCardAltButton(type, id, variants, name) {
   btn.addEventListener('click', e => {
     e.stopPropagation();
     e.preventDefault();
-    if (variants.length === 1) {
+    if (!isMargrave && variants.length === 1) {
       setCardArtVariant(type, id, getCardArtVariant(type, id) ? '' : variants[0]);
       rerenderForArtChange();
     } else {
@@ -1558,6 +1642,7 @@ function makeCardAltButton(type, id, variants, name) {
         type,
         id,
         variants,
+        ownerId,
         title: name ? `${name} — artwork` : 'Choose artwork',
       });
     }
