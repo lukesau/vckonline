@@ -2150,6 +2150,46 @@ async def wiki_cards(refresh: bool = False):
     return _wiki_cards_cache
 
 
+# In-memory cache of preset previews. Card data is static between server
+# restarts, so each (preset, expansion_only, players, duke_select_count)
+# combination is computed once and reused.
+_preset_preview_cache: Dict[tuple, dict] = {}
+
+
+@app.get("/api/lobby/preset-preview")
+async def lobby_preset_preview(
+    preset: str,
+    expansion_only: bool = False,
+    players: int = 4,
+    duke_select_count: int = 2,
+):
+    """Return every card a preset can put in play (deterministic + random pool).
+
+    Powers the lobby's "preview this set" modal. Read-only; does not touch any
+    lobby or game state.
+    """
+    p = _validate_preset(preset)
+    eo = bool(expansion_only) and p in _PRESETS_WITH_EXPANSION_ONLY
+    try:
+        players = max(_MIN_PLAYERS_FLOOR, min(_MIN_PLAYERS_CEIL, int(players)))
+    except (TypeError, ValueError):
+        players = 4
+    dsc = duke_select_count if duke_select_count in (2, 3) else 2
+    cache_key = (p, eo, players, dsc)
+    if cache_key not in _preset_preview_cache:
+        try:
+            from preset_preview import load_preset_preview
+            _preset_preview_cache[cache_key] = load_preset_preview(
+                p, expansion_only=eo, players=players, duke_select_count=dsc
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Failed to build preset preview from database: {exc}",
+            )
+    return _preset_preview_cache[cache_key]
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

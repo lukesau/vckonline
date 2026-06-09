@@ -4265,3 +4265,212 @@ body.is-virtual-keyboard-open .card-modal {
   font-size: 14px;
   line-height: 1.4;
 }
+
+/* ── Preset card-preview link + modal ─────────────────────────────────────── */
+.lobby-preset-link {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--gold);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.lobby-preset-link:hover,
+.lobby-preset-link:focus-visible {
+  color: #f1cd72;
+  outline: none;
+}
+
+.preset-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2vh 2vw;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(6px);
+}
+
+.preset-preview-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(1200px, 96vw);
+  height: 96dvh;
+  background: rgba(16, 20, 26, 0.99);
+  border: 1px solid rgba(240, 192, 64, 0.3);
+  border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.75);
+  overflow: hidden;
+}
+
+.preset-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.preset-preview-heading {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.preset-preview-close {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.preset-preview-close:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.preset-preview-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 18px 20px 24px;
+}
+
+.preset-preview-status {
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  padding: 24px 0;
+}
+
+.preset-preview-status--error {
+  color: #e8a0a0;
+}
+
+.preset-preview-section {
+  margin-bottom: 26px;
+}
+
+.preset-preview-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.preset-preview-section-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.preset-preview-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.preset-preview-badge--fixed {
+  color: #8fe6a0;
+  border-color: rgba(83, 211, 55, 0.5);
+  background: rgba(83, 211, 55, 0.12);
+}
+
+.preset-preview-badge--draft {
+  color: #8bb8e6;
+  border-color: rgba(139, 184, 230, 0.5);
+  background: rgba(139, 184, 230, 0.12);
+}
+
+.preset-preview-badge--mixed {
+  color: #f1cd72;
+  border-color: rgba(240, 192, 64, 0.5);
+  background: rgba(240, 192, 64, 0.12);
+}
+
+.preset-preview-section-note {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.preset-preview-group {
+  margin-bottom: 14px;
+}
+
+.preset-preview-group-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.preset-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.preset-preview-card {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.preset-preview-card img {
+  width: 100%;
+  aspect-ratio: 128 / 188;
+  object-fit: cover;
+  display: block;
+}
+
+.preset-preview-card-label {
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: center;
+  background: rgba(0, 0, 0, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 640px) {
+  .preset-preview-panel {
+    width: 100vw;
+    height: 100dvh;
+    border-radius: 0;
+    border: none;
+  }
+  .preset-preview-grid {
+    grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+    gap: 8px;
+  }
+}

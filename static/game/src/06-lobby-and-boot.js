@@ -610,6 +610,165 @@ function lobbyPresetShortLabel(preset) {
   return LOBBY_PRESET_SHORT_LABELS[preset] || preset || 'Custom';
 }
 
+// ── Preset card-preview modal ────────────────────────────────────────────────
+// Clicking the preset label in a lobby opens a near-fullscreen overlay that
+// lists every card the chosen preset can put in play: the deterministic
+// selections plus the full candidate pools that are dealt at random. Data
+// comes from GET /api/lobby/preset-preview (see preset_preview.py).
+
+const PRESET_PREVIEW_SELECTION_LABELS = {
+  fixed: 'Always dealt',
+  random: 'Random pool',
+  draft: 'Drafted',
+  mixed: 'Mixed',
+};
+
+let _presetPreviewReqToken = 0;
+
+function _closePresetPreview() {
+  const existing = document.getElementById('preset-preview-overlay');
+  if (existing) existing.remove();
+  document.removeEventListener('keydown', _presetPreviewKeydown);
+}
+
+function _presetPreviewKeydown(e) {
+  if (e.key === 'Escape') _closePresetPreview();
+}
+
+function _presetPreviewCardTile(card) {
+  const tile = document.createElement('div');
+  tile.className = 'preset-preview-card';
+  const img = document.createElement('img');
+  img.src = `/card-image/${card.kind}/${card.id}`;
+  img.alt = card.name || '';
+  img.loading = 'lazy';
+  tile.appendChild(img);
+  const label = document.createElement('div');
+  label.className = 'preset-preview-card-label';
+  label.textContent = card.name || '';
+  label.title = card.name || '';
+  tile.appendChild(label);
+  return tile;
+}
+
+function _presetPreviewRenderSection(section) {
+  const wrap = document.createElement('section');
+  wrap.className = 'preset-preview-section';
+
+  const head = document.createElement('div');
+  head.className = 'preset-preview-section-head';
+  const title = document.createElement('h3');
+  title.className = 'preset-preview-section-title';
+  title.textContent = section.title;
+  head.appendChild(title);
+  const badge = document.createElement('span');
+  badge.className = `preset-preview-badge preset-preview-badge--${section.selection || 'random'}`;
+  badge.textContent = PRESET_PREVIEW_SELECTION_LABELS[section.selection] || 'Pool';
+  head.appendChild(badge);
+  wrap.appendChild(head);
+
+  if (section.note) {
+    const note = document.createElement('p');
+    note.className = 'preset-preview-section-note';
+    note.textContent = section.note;
+    wrap.appendChild(note);
+  }
+
+  if (Array.isArray(section.groups)) {
+    section.groups.forEach(group => {
+      const groupEl = document.createElement('div');
+      groupEl.className = 'preset-preview-group';
+      const gLabel = document.createElement('div');
+      gLabel.className = 'preset-preview-group-label';
+      gLabel.textContent = group.label;
+      groupEl.appendChild(gLabel);
+      const grid = document.createElement('div');
+      grid.className = 'preset-preview-grid';
+      (group.cards || []).forEach(c => grid.appendChild(_presetPreviewCardTile(c)));
+      groupEl.appendChild(grid);
+      wrap.appendChild(groupEl);
+    });
+  } else {
+    const grid = document.createElement('div');
+    grid.className = 'preset-preview-grid';
+    (section.cards || []).forEach(c => grid.appendChild(_presetPreviewCardTile(c)));
+    wrap.appendChild(grid);
+  }
+
+  return wrap;
+}
+
+async function openPresetPreview(preset, opts = {}) {
+  _closePresetPreview();
+  const token = ++_presetPreviewReqToken;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'preset-preview-overlay';
+  overlay.className = 'preset-preview-overlay';
+  overlay.addEventListener('click', e => { if (e.target === overlay) _closePresetPreview(); });
+
+  const panel = document.createElement('div');
+  panel.className = 'preset-preview-panel';
+
+  const header = document.createElement('div');
+  header.className = 'preset-preview-header';
+  const heading = document.createElement('h2');
+  heading.className = 'preset-preview-heading';
+  heading.textContent = `${lobbyPresetShortLabel(preset)} — card preview`;
+  header.appendChild(heading);
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'preset-preview-close';
+  closeBtn.setAttribute('aria-label', 'Close');
+  closeBtn.textContent = '×';
+  closeBtn.addEventListener('click', _closePresetPreview);
+  header.appendChild(closeBtn);
+  panel.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'preset-preview-body';
+  const loading = document.createElement('p');
+  loading.className = 'preset-preview-status';
+  loading.textContent = 'Loading cards…';
+  body.appendChild(loading);
+  panel.appendChild(body);
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  document.addEventListener('keydown', _presetPreviewKeydown);
+
+  const params = new URLSearchParams({ preset });
+  if (opts.expansionOnly) params.set('expansion_only', 'true');
+  if (opts.players) params.set('players', String(opts.players));
+  if (opts.dukeSelectCount) params.set('duke_select_count', String(opts.dukeSelectCount));
+
+  try {
+    const res = await fetch(`/api/lobby/preset-preview?${params.toString()}`);
+    const data = await res.json().catch(() => ({}));
+    if (token !== _presetPreviewReqToken) return;
+    if (!res.ok) {
+      const detail = data.detail != null ? String(data.detail) : res.statusText;
+      throw new Error(detail || 'Preview request failed');
+    }
+    heading.textContent = `${data.label || lobbyPresetShortLabel(preset)} — card preview`;
+    body.innerHTML = '';
+    (data.sections || []).forEach(section => body.appendChild(_presetPreviewRenderSection(section)));
+    if (!(data.sections || []).length) {
+      const empty = document.createElement('p');
+      empty.className = 'preset-preview-status';
+      empty.textContent = 'No cards found for this preset.';
+      body.appendChild(empty);
+    }
+  } catch (err) {
+    if (token !== _presetPreviewReqToken) return;
+    body.innerHTML = '';
+    const errEl = document.createElement('p');
+    errEl.className = 'preset-preview-status preset-preview-status--error';
+    errEl.textContent = `Could not load preview: ${err.message || err}`;
+    body.appendChild(errEl);
+  }
+}
+
 // Some players pick very long display names. In compact "meta" surfaces
 // inside the lobby modal (the comma-separated roster on each lobby
 // card, the owner name embedded in the in-lobby meta line, etc.) those
@@ -1387,7 +1546,20 @@ function initLobbyModal() {
       const owner = (lobby.members || []).find(m => idsMatch(m.player_id, lobby.owner_id));
       const ownerName = truncateLobbyName(owner ? (owner.name || 'Owner') : 'Owner');
       const role = isOwner ? 'You are the owner' : `Owner: ${ownerName}`;
-      waitMetaEl.textContent = `${role} • ${lobbyPresetShortLabel(lobby.preset)} • ${floorLabel}${lobbyOptionsShortLabel(lobby)}`;
+      waitMetaEl.innerHTML = '';
+      waitMetaEl.appendChild(document.createTextNode(`${role} • `));
+      const presetLink = document.createElement('button');
+      presetLink.type = 'button';
+      presetLink.className = 'lobby-preset-link';
+      presetLink.textContent = lobbyPresetShortLabel(lobby.preset);
+      presetLink.title = 'Preview every card in this set';
+      presetLink.addEventListener('click', () => openPresetPreview(lobby.preset, {
+        expansionOnly: !!lobby.expansion_only,
+        players: (lobby.members || []).length || 4,
+        dukeSelectCount: Number(lobby.duke_select_count) || 2,
+      }));
+      waitMetaEl.appendChild(presetLink);
+      waitMetaEl.appendChild(document.createTextNode(` • ${floorLabel}${lobbyOptionsShortLabel(lobby)}`));
     }
     if (presetSelect) {
       presetSelect.value = lobby.preset || 'current';
