@@ -259,6 +259,10 @@ def _load_nobles(cur):
             row["expansion"],
         )
         entry = n.to_dict()
+        # Nobles only exist in Crimson Seas; the DB column defaults to "base"
+        # because it was never set. Report the real expansion so the wiki badge
+        # is consistent with other crimsonseas cards.
+        entry["expansion"] = "crimsonseas"
         entry["alt_variants"] = list_card_image_variants("noble", row["id_nobles"])
         entry["has_alt_image"] = bool(entry["alt_variants"])
         out.append(entry)

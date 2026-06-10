@@ -134,8 +134,12 @@
     let current = getAltVariant(type, id);
     if (current && !variants.includes(current)) current = "";
 
-    const imgClass = modal ? "wiki-modal-image" : "wiki-card-image";
-    const wrap = h("div", { class: "wiki-art-wrap" });
+    // Nobles are physically smaller cards (narrower, taller proportion than a
+    // standard card). Tag their art so the CSS can use the true aspect ratio
+    // and shrink the frame instead of cropping the taller image.
+    const isNoble = type === "nobles";
+    const imgClass = (modal ? "wiki-modal-image" : "wiki-card-image") + (isNoble ? " is-noble" : "");
+    const wrap = h("div", { class: "wiki-art-wrap" + (isNoble ? " is-noble" : "") });
     const img = h("img", {
       class: imgClass,
       src: cardImageUrl(type, id, current),
@@ -185,7 +189,7 @@
           class: "wiki-alt-option" + (current === token ? " active" : ""),
         });
         const thumb = h("img", {
-          class: "wiki-alt-option-thumb", src: cardImageUrl(type, id, token), alt: "", loading: "lazy",
+          class: "wiki-alt-option-thumb" + (isNoble ? " is-noble" : ""), src: cardImageUrl(type, id, token), alt: "", loading: "lazy",
         });
         thumb.addEventListener("error", () => {
           const s = thumb.getAttribute("src") || "";

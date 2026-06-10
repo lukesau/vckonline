@@ -319,6 +319,19 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   background: #1a1a1a;
 }
 
+/* Crimson Seas Nobles are smaller cards: narrower (~70% of a standard card)
+   and a taller proportion. Use their true aspect ratio so the art is shown
+   uncropped, and center the narrower frame within the card/column. */
+.wiki-art-wrap.is-noble {
+  width: 70%;
+  margin-inline: auto;
+}
+.wiki-card-image.is-noble,
+.wiki-modal-image.is-noble,
+.wiki-alt-option-thumb.is-noble {
+  aspect-ratio: 280 / 438;
+}
+
 .wiki-card-meta {
   padding: 8px 10px 10px;
 }
