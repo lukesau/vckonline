@@ -1206,19 +1206,32 @@ html, body {
   margin-bottom: 2px;
 }
 
-/* Crimson Seas island board (Sail tab): show the artwork scaled to the viewport. */
-.board-sail .sail-board {
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  width: 100%;
+/* Crimson Seas island board (Sail tab): the mat is much wider than it is tall,
+   so fit it to the single-card section height and let it overflow horizontally
+   (wheel-to-horizontal scroll is wired up in JS, matching the tableaus). */
+.board-sail {
+  height: 100%;
+  box-sizing: border-box;
+  min-height: 0;
 }
+
+.board-sail .sail-board {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.board-sail .sail-board::-webkit-scrollbar { display: none; }
 
 .board-sail .sail-board-img {
   display: block;
-  width: 100%;
-  max-width: 100%;
-  height: auto;
+  height: 100%;
+  width: auto;
+  max-width: none;
   border-radius: 6px;
 }
 

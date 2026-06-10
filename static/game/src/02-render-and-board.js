@@ -933,6 +933,14 @@ function makeSailSection() {
   img.src = '/images/crimson_seas_mat.jpg';
   img.alt = 'Crimson Seas island board';
   wrap.appendChild(img);
+  // Vertical wheel scrolls the wide mat horizontally (same feel as the tableaus).
+  wrap.addEventListener('wheel', e => {
+    if (wrap.scrollWidth <= wrap.clientWidth + 1) return;
+    const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+    if (!delta) return;
+    e.preventDefault();
+    wrap.scrollLeft += delta;
+  }, { passive: false });
   sec.appendChild(wrap);
   return sec;
 }
