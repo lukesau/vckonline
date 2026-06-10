@@ -8,9 +8,10 @@ Two behaviors are covered:
    prompt is optional and reuses the monster reward's targeted-flip flow.
 
 2. Special reward (`choose g 4 t 1`, i.e. "Gain 4 Gold or 1 Tome"): tomes are a
-   Crimson Seas mechanic that isn't implemented yet. Outside Crimson Seas the
-   tome leg is dropped so the player simply takes the gold; inside Crimson Seas
-   the tome option is offered but selecting it raises an explicit error.
+   Crimson Seas mechanic. Outside Crimson Seas the tome leg is dropped so the
+   player simply takes the gold; inside Crimson Seas the tome leg expands into
+   one pick per face-up Nae Aerie tome, and choosing one takes it for free
+   (no gold, no map) and refreshes the Nae Aerie row.
 """
 
 import unittest
@@ -174,8 +175,9 @@ class SkeletonArmyTomeRewardTests(unittest.TestCase):
         self.assertIsNone(game.pending_required_choice)
         self.assertEqual(int(players[0].gold_score), before + 4)
 
-    def test_crimson_seas_offers_both_options(self):
+    def test_crimson_seas_expands_tome_leg_per_face_up_tome(self):
         game, players = make_game(preset="crimsonseas")
+        game.tome_slots = ["gold", "strength", "magic"]
 
         game.payouts.execute_special_payout(
             "choose g 4 t 1", players[0].player_id, auto_apply_single_choice=True
@@ -183,11 +185,16 @@ class SkeletonArmyTomeRewardTests(unittest.TestCase):
 
         prc = game.pending_required_choice
         self.assertEqual(prc.get("kind"), "special_payout_choose")
-        tokens = [o.get("token") for o in prc.get("options") or []]
-        self.assertEqual(tokens, ["g", "t"])
+        options = prc.get("options") or []
+        # The gold "out" plus one pick per face-up tome.
+        self.assertEqual([o.get("token") for o in options],
+                         ["g", "tome.choice", "tome.choice", "tome.choice"])
+        self.assertEqual([o.get("tome_type") for o in options if o.get("token") == "tome.choice"],
+                         ["gold", "strength", "magic"])
 
     def test_crimson_seas_taking_gold_works(self):
         game, players = make_game(preset="crimsonseas")
+        game.tome_slots = ["gold", "strength", "magic"]
         before = int(players[0].gold_score)
 
         game.payouts.execute_special_payout(
@@ -198,15 +205,26 @@ class SkeletonArmyTomeRewardTests(unittest.TestCase):
         self.assertEqual(int(players[0].gold_score), before + 4)
         self.assertIsNone(game.pending_required_choice)
 
-    def test_crimson_seas_taking_tome_raises(self):
+    def test_crimson_seas_taking_tome_grants_free_tome_and_refreshes(self):
         game, players = make_game(preset="crimsonseas")
+        game.tome_slots = ["gold", "strength", "magic"]
+        game.tome_supply = ["gold", "magic"]
+        gold_before = int(players[0].gold_score)
+        map_before = int(getattr(players[0], "map_score", 0))
 
         game.payouts.execute_special_payout(
             "choose g 4 t 1", players[0].player_id, auto_apply_single_choice=True
         )
+        # Option 2 is the first tome.choice (the Gold tome in slot 0).
+        game.act_on_required_action(players[0].player_id, "choose 2")
 
-        with self.assertRaises(ValueError):
-            game.act_on_required_action(players[0].player_id, "choose 2")
+        self.assertEqual(players[0].owned_tomes, ["gold"])
+        # Free: no gold spent and no map consumed.
+        self.assertEqual(int(players[0].gold_score), gold_before)
+        self.assertEqual(int(getattr(players[0], "map_score", 0)), map_before)
+        self.assertIsNone(game.pending_required_choice)
+        # Nae Aerie refreshed: kept tomes packed to the bottom, fresh draw on top.
+        self.assertEqual(game.tome_slots, ["magic", "strength", "magic"])
 
 
 class SkeletonArmyDatabaseTests(unittest.TestCase):

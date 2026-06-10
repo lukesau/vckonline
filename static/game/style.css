@@ -1301,6 +1301,149 @@ html, body {
   border-radius: 12%;
 }
 
+.board-sail .sail-clickable { cursor: pointer; }
+.board-sail .sail-clickable:hover { filter: brightness(1.08); }
+
+/* ── Sail-to-Araby goods shop modal ─────────────────────────────────── */
+.sail-shop-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  max-width: 420px;
+  width: min(92vw, 420px);
+}
+.sail-shop-sub {
+  font-size: 13px;
+  color: var(--muted);
+}
+.sail-shop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sail-shop-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+.sail-shop-item:hover { border-color: rgba(255, 255, 255, 0.3); }
+.sail-shop-item.is-selected {
+  border-color: var(--gold);
+  background: rgba(212, 175, 55, 0.14);
+}
+.sail-shop-item.is-disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sail-shop-item.is-disabled:hover { border-color: rgba(255, 255, 255, 0.14); }
+.sail-shop-item-img {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.sail-shop-item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.sail-shop-item-name { font-weight: 700; }
+.sail-shop-item-cost { font-size: 13px; color: var(--gold); }
+.sail-shop-item-check {
+  width: 1.4em;
+  text-align: center;
+  color: var(--gold);
+  font-weight: 800;
+}
+.sail-shop-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 10px;
+}
+.sail-shop-total { font-weight: 700; }
+.sail-shop-actions { display: flex; gap: 8px; }
+.sail-shop-note { font-size: 12px; color: var(--muted); }
+.sail-noble-modal-img {
+  display: block;
+  margin: 0 auto;
+  max-height: 320px;
+  width: auto;
+  border-radius: 8px;
+}
+
+/* ── Crimson Seas tableau section (Nobles / Tomes / Goods stacked) ───── */
+.seat-carousel .cs-group {
+  display: block;
+  align-self: stretch;
+  flex-shrink: 0;
+  height: min(100cqh, var(--tableau-strip-max-h));
+  padding-right: 6px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+.cs-column {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 2px;
+}
+.cs-cell {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.cs-cell:last-child { border-bottom: none; }
+.cs-cell-label {
+  writing-mode: vertical-rl;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  flex-shrink: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+.cs-cell-items {
+  display: flex;
+  flex-direction: row;
+  gap: 3px;
+  height: 100%;
+  align-items: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-width: 0;
+}
+.cs-cell-items::-webkit-scrollbar { height: 3px; }
+.cs-cell-items::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
+.cs-item {
+  height: 100%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+.cs-item-img {
+  height: 92%;
+  width: auto;
+  object-fit: contain;
+}
+.cs-item-goods .cs-item-img,
+.cs-item-tomes .cs-item-img { border-radius: 8%; }
+.cs-item-nobles .cs-item-img { border-radius: 4%; }
+
 /* Noble card back filling its slot, outlined in the noble border color. */
 .board-sail .sail-noble {
   padding: 0;

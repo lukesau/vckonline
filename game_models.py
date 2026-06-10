@@ -1,4 +1,4 @@
-from cards import Citizen, Domain, Duke, Event, Monster, Starter
+from cards import Citizen, Domain, Duke, Event, Monster, Noble, Starter
 
 _MONSTER_TYPE_COUNT_KEYS = {
     "Minion": "minion_count",
@@ -18,6 +18,12 @@ class Player:
         self.owned_domains = []
         self.owned_dukes = []
         self.owned_monsters = []
+        # Crimson Seas tableau pieces. Goods/Tomes are plain type strings (see
+        # game_setup.GOODS_TYPES / TOME_TYPES); Nobles are Noble card objects.
+        # Only Goods acquisition is wired up so far; the other two are reserved.
+        self.owned_goods = []
+        self.owned_tomes = []
+        self.owned_nobles = []
         self.gold_score = 2
         self.strength_score = 0
         self.magic_score = 1
@@ -62,6 +68,9 @@ class Player:
             Event.from_dict(m) if m.get("card_class") == "event" else Monster.from_dict(m)
             for m in data["owned_monsters"]
         ]
+        player.owned_goods = list(data.get("owned_goods") or [])
+        player.owned_tomes = list(data.get("owned_tomes") or [])
+        player.owned_nobles = [Noble.from_dict(n) for n in (data.get("owned_nobles") or [])]
         player.gold_score = data["gold_score"]
         player.strength_score = data["strength_score"]
         player.magic_score = data["magic_score"]

@@ -102,6 +102,10 @@ class ChooseEngine:
                 norm_parts.append(
                     f"<count type {type_tok} {o.get('resource')} {o.get('mult')}>"
                 )
+            elif o["token"] == "citizens_chain":
+                norm_parts.append(f"<citizens {int(o.get('amount', 1) or 1)}>")
+            elif o["token"] == "noble":
+                norm_parts.append("<noble>")
             elif o["token"] == "citizens_where":
                 spec = o.get("spec", {})
                 extras = o.get("extras") or []
@@ -130,6 +134,10 @@ class ChooseEngine:
         s = (inner or "").strip()
         if not s:
             return None
+        # "<noble>": gain any 1 of the face-up Amarynth nobles (Crimson Seas).
+        # Expanded into one pick per face-up slot, like the tome reward.
+        if s.lower() in ("noble", "nobles"):
+            return {"token": "noble", "amount": 1}
         parts = self.game.payouts._tokenize_payout(s)
         if len(parts) >= 5 and parts[0].lower() == "count" and parts[1].lower() == "owned_monster_name":
             name = parts[2]
@@ -172,6 +180,18 @@ class ChooseEngine:
         return self._parse_citizens_inner_option(s)
 
     def _parse_citizens_inner_option(self, inner):
+        # "<citizens N>": gain N citizens of the player's choice. Resolved as a
+        # single prompt option that, once picked, chains N separate `<citizens>`
+        # picks via the payout-continuation machinery (no new multi-citizen
+        # mechanic). Detected before the "+" extras split since it has no "+".
+        head = (inner or "").strip().split()
+        if len(head) == 2 and head[0].lower() == "citizens":
+            try:
+                cnt = int(head[1])
+            except (TypeError, ValueError):
+                cnt = None
+            if cnt and cnt > 0:
+                return {"token": "citizens_chain", "amount": cnt}
         clauses = [c.strip() for c in (inner or "").split("+")]
         if not clauses:
             return None
@@ -385,18 +405,33 @@ class ChooseEngine:
             # non-map "out". (Crimson Seas cards always provide one.)
             if token == "p" and not crimson_seas:
                 continue
-            # Tomes are likewise a Crimson Seas mechanic, and not implemented
-            # yet. Outside Crimson Seas the card always offers a non-tome "out",
-            # so drop the leg and let the rest of the choose stand. Inside
-            # Crimson Seas the option is kept; picking it surfaces an explicit
-            # "not implemented" error to the slaying player (see
-            # _apply_choose_option) rather than silently doing nothing.
-            if token == "t" and not crimson_seas:
-                continue
+            # Tomes are a Crimson Seas mechanic. Outside that preset the card
+            # always offers a non-tome "out", so drop the leg. Inside Crimson
+            # Seas a "gain Tome" lets the player take any 1 face-up Nae Aerie
+            # tome for free, so the leg is only meaningful when at least one
+            # tome slot is filled; otherwise drop it too.
+            if token == "t":
+                if not crimson_seas:
+                    continue
+                if not any(getattr(self.game, "tome_slots", []) or []):
+                    continue
             if token == "citizens_where":
                 spec = opt.get("spec") or {}
                 count = int(opt.get("amount", 1) or 1)
                 if len(self._board_citizen_candidates(spec)) < count:
+                    continue
+            # "Gain N citizens" (chained): only meaningful when at least one
+            # citizen is claimable. The chain stops early if the board empties.
+            if token == "citizens_chain":
+                any_spec = {"pool": "citizens", "field": "gold_cost", "op": ">=", "value": "0", "is_any": True}
+                if not self._board_citizen_candidates(any_spec):
+                    continue
+            # Nobles are a Crimson Seas mechanic. Drop the leg outside the preset
+            # or when no noble is face-up in Amarynth to take.
+            if token == "noble":
+                if not crimson_seas:
+                    continue
+                if not any(getattr(self.game, "noble_slots", []) or []):
                     continue
             out.append(opt)
         return out
@@ -405,7 +440,46 @@ class ChooseEngine:
         expanded = []
         for opt in options or []:
             token = (opt.get("token") or "").strip().lower()
-            if token in ("g", "s", "m", "v", "p", "t"):
+            if token == "t":
+                # "Gain a Tome": expand into one pickable option per face-up Nae
+                # Aerie tome. The player takes the chosen one for free (no gold,
+                # no map). Only single-tome gains (amount 1) are supported.
+                if int(opt.get("amount", 1) or 1) != 1:
+                    continue
+                slots = getattr(self.game, "tome_slots", []) or []
+                for i, ttype in enumerate(slots):
+                    if not ttype:
+                        continue
+                    expanded.append({
+                        "token": "tome.choice",
+                        "amount": 1,
+                        "tome_type": ttype,
+                        "slot_index": i,
+                    })
+                continue
+            if token == "noble":
+                # "Gain a Noble": expand into one pickable option per face-up
+                # Amarynth noble. The player takes the chosen one for free (no
+                # gold, no map); the emptied slot refills directly from the deck.
+                if int(opt.get("amount", 1) or 1) != 1:
+                    continue
+                slots = getattr(self.game, "noble_slots", []) or []
+                for i, noble in enumerate(slots):
+                    if not noble:
+                        continue
+                    expanded.append({
+                        "token": "noble.choice",
+                        "amount": 1,
+                        "noble_id": getattr(noble, "noble_id", None),
+                        "name": getattr(noble, "name", ""),
+                        "slot_index": i,
+                    })
+                continue
+            if token == "citizens_chain":
+                # Single button; once picked it chains N `<citizens>` picks.
+                expanded.append({"token": "citizens_chain", "amount": int(opt.get("amount", 1) or 1)})
+                continue
+            if token in ("g", "s", "m", "v", "p"):
                 expanded.append({"token": token, "amount": int(opt.get("amount", 0) or 0)})
                 continue
             if token == "count_area":
@@ -481,6 +555,22 @@ class ChooseEngine:
         amount = int(opt.get("amount", 0))
         if amount <= 0 and token not in ("count_area", "count_monster_name", "count_type"):
             return False
+        if token == "tome.choice":
+            # Take the chosen face-up tome for free; Nae Aerie then refreshes.
+            return self.game.player_actions.take_tome_from_slot(player_id, opt.get("slot_index"))
+        if token == "noble.choice":
+            # Take the chosen face-up noble for free; Amarynth refills from deck.
+            return self.game.player_actions.take_noble_from_slot(player_id, opt.get("slot_index"))
+        if token == "citizens_chain":
+            # Defer to the payout-continuation machinery: queue N `<citizens>`
+            # picks, each of which opens (and resolves) its own citizen prompt.
+            # The choose resolver calls `_resume_payout_continuation` right after
+            # this returns, which drains the first leg and re-stashes the rest.
+            n = int(opt.get("amount", 0) or 0)
+            if n <= 0:
+                return False
+            self.game.payouts._set_payout_continuation(player_id, ["<citizens>"] * n)
+            return True
         if token == "citizens.choice":
             if not self._claim_specific_board_citizen(player_id, opt.get("citizen_id")):
                 return False
@@ -575,12 +665,6 @@ class ChooseEngine:
             else:
                 return False
             return True
-        if token == "t":
-            # Tomes are not implemented yet. This branch is only reachable in a
-            # Crimson Seas game (the option is filtered out elsewhere), where we
-            # surface an explicit error to the slaying player instead of
-            # silently dropping their choice.
-            raise ValueError("Tome payouts are not implemented yet.")
         dg = ds = dm = dv = dp = 0
         if token == "g":
             dg = amount
@@ -627,6 +711,15 @@ class ChooseEngine:
             mult = int(opt.get("mult", 0) or 0)
             label = {"g": "gold", "s": "strength", "m": "magic", "v": "victory", "p": "map"}.get(resource, resource)
             return f"+({mult} x {monster_type}) {label}"
+        if token == "tome.choice":
+            ttype = (opt.get("tome_type") or "").strip().lower()
+            label = {"gold": "Gold", "strength": "Strength", "magic": "Magic"}.get(ttype, ttype or "Tome")
+            return f"gain 1 {label} Tome"
+        if token == "noble.choice":
+            name = (opt.get("name") or "Noble").strip()
+            return f"gain Noble {name}"
+        if token == "citizens_chain":
+            return f"gain {int(opt.get('amount', 0) or 0)} citizens"
         if token == "citizens.choice":
             name = (opt.get("name") or "Citizen").strip()
             extras = list(opt.get("extras") or [])

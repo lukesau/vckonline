@@ -2693,6 +2693,18 @@ function chooseOptionButtonLabel(opt, idx, state) {
     const mText = Number.isFinite(mult) ? mult : opt?.mult;
     return `+(${mText} × ${monsterType}) ${rLabel}`;
   }
+  if (tl === 'tome.choice') {
+    const ttype = (opt?.tome_type ?? '').toString().toLowerCase();
+    const tLabel = ttype ? ttype.charAt(0).toUpperCase() + ttype.slice(1) : 'Tome';
+    return `Gain 1 ${tLabel} Tome (free)`;
+  }
+  if (tl === 'noble.choice') {
+    const name = (opt?.name ?? '').toString().trim();
+    return name ? `Gain Noble ${name} (free)` : 'Gain 1 Noble (free)';
+  }
+  if (tl === 'citizens_chain') {
+    return `Gain ${prettyAmt} citizens`;
+  }
   if (tl.startsWith('citizens.')) {
     const name = (opt?.name ?? '').toString().trim();
     const extras = Array.isArray(opt?.extras) ? opt.extras : [];
@@ -2842,6 +2854,50 @@ function renderManualHarvestPrompt(state) {
     dismissible: false,
     bodyEl: body,
     footerEl: foot,
+  });
+}
+
+// Crimson Seas: rolling a 6 forces the active player to place 1 of their
+// resources into the Exekratys pool (one prompt per 6 owed).
+function renderExekratysOfferingPrompt(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const options = Array.isArray(prc?.options) ? prc.options : [];
+  const remaining = Number(prc?.remaining || 0);
+
+  const body = mk('prompt-modal-body');
+  const note = mk('prompt-modal-note');
+  if (!isYou) {
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — placing a resource on Exekratys (rolled a 6).`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({ title: 'Exekratys', dismissible: true, bodyEl: body, footerEl: null });
+    return;
+  }
+
+  note.textContent = remaining > 1
+    ? `You rolled a 6 — place 1 of your resources on Exekratys (${remaining} to place).`
+    : 'You rolled a 6 — place 1 of your resources on Exekratys.';
+  body.appendChild(note);
+  appendPromptResourcesPanel(body, state);
+
+  const labels = { gold: 'Gold', strength: 'Strength', magic: 'Magic' };
+  const buttons = options.map(opt => {
+    const res = (opt?.resource || '').toString();
+    const lbl = labels[res] || res;
+    return promptButton(`Place ${lbl}`, () => confirmAndPostGameAction(
+      { player_id: PLAYER_ID, action_type: 'act_on_required_action', action: `exekratys_offering ${res}` },
+      { title: 'Place on Exekratys', message: `Move 1 ${lbl} from your supply onto Exekratys.`, confirmLabel: `Place ${lbl}` },
+    ));
+  });
+
+  openPromptOverlayShell({
+    title: 'Exekratys offering',
+    dismissible: false,
+    bodyEl: body,
+    footerEl: promptActionsRow(buttons),
   });
 }
 
@@ -3208,6 +3264,11 @@ function renderPromptModal(state) {
 
   if (reqAction === 'manual_harvest') {
     renderManualHarvestPrompt(state);
+    return;
+  }
+
+  if (reqAction === 'exekratys_offering') {
+    renderExekratysOfferingPrompt(state);
     return;
   }
 

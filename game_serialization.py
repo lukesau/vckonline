@@ -52,6 +52,10 @@ class GameObjectEncoder(JSONEncoder):
                 "owned_domains": [domain.to_dict() for domain in obj.owned_domains],
                 "owned_dukes": [duke.to_dict() for duke in obj.owned_dukes],
                 "owned_monsters": [monster.to_dict() for monster in obj.owned_monsters],
+                # Crimson Seas tableau pieces (Goods/Tomes are type strings; Nobles are cards).
+                "owned_goods": list(getattr(obj, "owned_goods", None) or []),
+                "owned_tomes": list(getattr(obj, "owned_tomes", None) or []),
+                "owned_nobles": [n.to_dict() for n in (getattr(obj, "owned_nobles", None) or [])],
                 "gold_score": obj.gold_score,
                 "strength_score": obj.strength_score,
                 "magic_score": obj.magic_score,
@@ -153,10 +157,13 @@ class GameObjectEncoder(JSONEncoder):
                 "tome_supply_size": len(getattr(obj, "tome_supply", None) or []),
                 # Crimson Seas Nobles: the face-up Amarynth slots are public; the
                 # face-down deck is hidden, so only its size goes out.
-                "noble_slots": [n.to_dict() for n in (getattr(obj, "noble_slots", None) or [])],
+                "noble_slots": [(n.to_dict() if n else None) for n in (getattr(obj, "noble_slots", None) or [])],
                 "noble_supply_size": len(getattr(obj, "noble_supply", None) or []),
                 # Exekratys resource pool (public: resource -> count).
                 "exekratys_resources": dict(getattr(obj, "exekratys_resources", None) or {}),
+                # Crimson Seas 6-roll obligation: placements still owed + who owes them.
+                "pending_exekratys_offerings": int(getattr(obj, "pending_exekratys_offerings", 0) or 0),
+                "pending_exekratys_offering_player": getattr(obj, "pending_exekratys_offering_player", None),
                 "pending_reroll_twilight_used": bool(getattr(obj, "_pending_reroll_twilight_used", False)),
                 "pending_reroll_blood_moon_used": bool(getattr(obj, "_pending_reroll_blood_moon_used", False)),
             }
@@ -246,7 +253,7 @@ def serialize_game_to_save_dict(game):
     # Noble slots are already in the wire dict as card dicts; the hidden deck
     # (full contents, not just size) must be persisted so a reload can keep
     # dealing. Both rehydrate back into Noble objects on load.
-    base["noble_slots"] = [n.to_dict() for n in (getattr(game, "noble_slots", []) or [])]
+    base["noble_slots"] = [(n.to_dict() if n else None) for n in (getattr(game, "noble_slots", []) or [])]
     base["noble_supply"] = [n.to_dict() for n in (getattr(game, "noble_supply", []) or [])]
 
     return base

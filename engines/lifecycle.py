@@ -74,6 +74,7 @@ class LifecycleEngine:
                 or aa == "choose_domain_reward"
                 or aa == "choose_monster_slay"
                 or aa == "slay_monster_payment"
+                or aa == "exekratys_offering"
                 or aa.startswith("choose ")
                 or aa.startswith("choose_player")
                 or aa.startswith("choose_monster")
@@ -167,6 +168,16 @@ class LifecycleEngine:
             return True or progressed
 
         if self.game.phase == 'harvest':
+            # Crimson Seas: drain any owed Exekratys 6-roll placements before
+            # harvest automation kicks off. Opening a prompt blocks this tick.
+            if (
+                not getattr(self.game, "harvest_processed", False)
+                and int(getattr(self.game, "pending_exekratys_offerings", 0) or 0) > 0
+            ):
+                if self.game.dice._maybe_open_exekratys_offering_prompt(
+                    getattr(self.game, "pending_exekratys_offering_player", None)
+                ):
+                    return False
             # Manual harvest: players resolve matching starters/citizens in turn order (active player first).
             if not getattr(self.game, "harvest_processed", False):
                 if getattr(self.game, "harvest_player_order", None) is None:
@@ -469,6 +480,15 @@ class LifecycleEngine:
         # Fire Northern Wall optional Minion-banish (only if nothing else is pending).
         if not (self.game.action_required.get("action") or ""):
             self.game.payouts._maybe_fire_northern_wall_banish(player_id)
+        # Crimson Seas: each 6 rolled (each die plus the dice sum, counted
+        # separately) obliges the active player to place 1 resource into the
+        # Exekratys pool. Record the obligation; the prompt is opened lazily in
+        # advance_tick so it sequences after any other roll-phase prompt.
+        if self.game.crimson_seas_enabled():
+            sixes = sum(1 for v in (fd1, fd2, fd1 + fd2) if v == 6)
+            if sixes:
+                self.game.pending_exekratys_offerings = sixes
+                self.game.pending_exekratys_offering_player = player_id
         self.game.tick_id += 1
         who = self.game._player_label(self.current_player_id())
         if fd1 == rd1 and fd2 == rd2:

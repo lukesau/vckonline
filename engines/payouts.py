@@ -1206,6 +1206,13 @@ class PayoutsEngine:
                     ok = self.game.choose._apply_choose_option(player_id, prompt_options[0])
                     if not ok:
                         payout[0] = -9999
+                        return payout
+                    # An auto-applied option may itself stash a payout
+                    # continuation (e.g. "gain N citizens" queues N `<citizens>`
+                    # picks). Nothing downstream resumes it on this path, so
+                    # drain it here. The guard keeps every other option inert.
+                    if getattr(self.game, "pending_payout_continuation", None):
+                        self._resume_payout_continuation()
                     return payout
                 self.game.action_required["id"] = player_id
                 self.game.action_required["action"] = normalized

@@ -53,6 +53,9 @@ KINGS_GUARD_EXPANSION = "kingsguard"
 GOODS_TYPES = ("artifacts", "jewels", "fabrics", "spices")
 GOODS_COPIES_PER_TYPE = 6
 GOODS_SLOT_COUNT = 3
+# Gold cost to buy the Goods token in each Araby slot, top to bottom (slot index
+# 0/1/2). As tokens cascade down to fill emptied lower slots they get cheaper.
+GOODS_SLOT_COSTS = (6, 4, 2)
 
 # Crimson Seas "Tome" tokens (Nae Aerie). One type per resource, 7 of each (21
 # total). Shuffled face-down into a supply; 3 dealt face-up into the 3 Nae Aerie
@@ -60,6 +63,11 @@ GOODS_SLOT_COUNT = 3
 TOME_TYPES = ("gold", "magic", "strength")
 TOME_COPIES_PER_TYPE = 7
 TOME_SLOT_COUNT = 3
+
+# Gold cost to buy the Tome token in each Nae Aerie slot, top to bottom (slot
+# index 0/1/2). Like Goods, tomes cascade down to fill emptied lower slots and
+# get cheaper as they go.
+TOME_SLOT_COSTS = (7, 5, 3)
 
 # Crimson Seas "Noble" cards (Amarynth). Unlike Goods/Tomes these are real
 # DB-backed Card objects (the `nobles` table). At setup the deck is shuffled

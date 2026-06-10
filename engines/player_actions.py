@@ -79,6 +79,40 @@ class PlayerActionsEngine:
             print("correct player responded to action")
             current_required = self.game.action_required.get("action", "")
 
+            # Crimson Seas: place 1 of your resources into the Exekratys pool
+            # (owed once per 6 rolled). Action form: "exekratys_offering <res>".
+            if current_required == "exekratys_offering":
+                prc_e = getattr(self.game, "pending_required_choice", None) or {}
+                if prc_e.get("kind") != "exekratys_offering" or player_id != prc_e.get("player_id"):
+                    return
+                parts_e = (action or "").strip().lower().split()
+                res_e = parts_e[1] if len(parts_e) > 1 and parts_e[0] == "exekratys_offering" else ""
+                attr_e = {"gold": "gold_score", "strength": "strength_score", "magic": "magic_score"}.get(res_e)
+                if not attr_e:
+                    return
+                target_e = self.game._player_by_id(player_id)
+                if not target_e or int(getattr(target_e, attr_e, 0) or 0) <= 0:
+                    return
+                before_e = self.game._player_scores_line(target_e)
+                setattr(target_e, attr_e, int(getattr(target_e, attr_e)) - 1)
+                self.game.exekratys_resources[res_e] = int(self.game.exekratys_resources.get(res_e, 0)) + 1
+                self.game.pending_exekratys_offerings = max(
+                    0, int(getattr(self.game, "pending_exekratys_offerings", 0) or 0) - 1)
+                after_e = self.game._player_scores_line(target_e)
+                self.game._log_game_event(
+                    f"{self.game._player_label(player_id)} placed 1 {res_e} on Exekratys (6 rolled); "
+                    f"scores {before_e} -> {after_e}"
+                )
+                self.game.action_required["action"] = ""
+                self.game.action_required["id"] = self.game.game_id
+                self.game.pending_required_choice = None
+                if self.game.pending_exekratys_offerings <= 0:
+                    self.game.pending_exekratys_offering_player = None
+                # Re-open for the next owed placement, if any (else advance_tick
+                # will start harvest now that nothing is pending).
+                self.game.dice._maybe_open_exekratys_offering_prompt(player_id)
+                return
+
             # Special: bonus resource choice (imaginary starter on "no payout" harvest)
             if current_required == "bonus_resource_choice":
                 choice = (action or "").strip().lower()
@@ -1730,6 +1764,286 @@ class PlayerActionsEngine:
             return
 
         raise ValueError("Domain not available to purchase.")
+
+    def buy_goods(self, player_id, slot_indices):
+        """Sail to Araby and buy Goods tokens in one Sail action.
+
+        A single Sail (costing 1 Map total) may buy ANY subset of the 3 face-up
+        Goods slots; each costs its printed gold price (GOODS_SLOT_COSTS). After
+        the purchase the board refreshes per the rulebook: the unbought tokens
+        cascade down to the cheapest (bottom) slots preserving order, and new
+        tokens are drawn from the supply to fill the emptied top slots.
+        """
+        from game_setup import GOODS_SLOT_COSTS
+
+        if not self.game.crimson_seas_enabled():
+            raise ValueError("Goods are only available in the Crimson Seas preset.")
+
+        # Normalize + validate the selected slots.
+        try:
+            indices = sorted({int(i) for i in (slot_indices or [])})
+        except (TypeError, ValueError):
+            raise ValueError("Invalid goods selection.")
+        if not indices:
+            raise ValueError("Select at least 1 goods to buy.")
+        slots = self.game.goods_slots
+        for idx in indices:
+            if idx < 0 or idx >= len(slots):
+                raise ValueError("Invalid goods slot.")
+            if not slots[idx]:
+                raise ValueError("That goods slot is empty.")
+
+        player = None
+        for p in self.game.player_list:
+            if p.player_id == player_id:
+                player = p
+                break
+        if not player:
+            raise ValueError("Player not found.")
+
+        gold_cost = sum(int(GOODS_SLOT_COSTS[i]) for i in indices)
+        map_cost = 1
+        if int(getattr(player, "gold_score", 0)) < gold_cost:
+            raise ValueError(f"Need {gold_cost} gold to buy the selected goods.")
+        if int(getattr(player, "map_score", 0)) < map_cost:
+            raise ValueError("Need 1 map to sail.")
+
+        bought = [slots[i] for i in indices]
+        before = self.game._player_scores_line(player)
+        player.gold_score = int(player.gold_score) - gold_cost
+        player.map_score = int(player.map_score) - map_cost
+        player.owned_goods.extend(bought)
+
+        self.game.goods_slots = self._packed_island_slots(
+            self.game.goods_slots, self.game.goods_supply, indices)
+
+        after = self.game._player_scores_line(player)
+        self.game._log_game_event(
+            f"{self.game._player_label(player_id)} sailed to Araby and bought "
+            f"{', '.join(bought)} for {gold_cost} gold + 1 map; scores {before} -> {after}"
+        )
+
+    def buy_tomes(self, player_id, slot_indices):
+        """Sail to Nae Aerie and buy Tome tokens in one Sail action.
+
+        Mirrors `buy_goods`: a single Sail (1 Map total) may buy any subset of
+        the 3 face-up Tome slots, each at its printed gold price
+        (TOME_SLOT_COSTS). Afterwards the board refreshes — unbought tomes
+        cascade down to the cheapest slots and fresh tomes fill the top.
+        """
+        from game_setup import TOME_SLOT_COSTS
+
+        if not self.game.crimson_seas_enabled():
+            raise ValueError("Tomes are only available in the Crimson Seas preset.")
+
+        try:
+            indices = sorted({int(i) for i in (slot_indices or [])})
+        except (TypeError, ValueError):
+            raise ValueError("Invalid tome selection.")
+        if not indices:
+            raise ValueError("Select at least 1 tome to buy.")
+        slots = self.game.tome_slots
+        for idx in indices:
+            if idx < 0 or idx >= len(slots):
+                raise ValueError("Invalid tome slot.")
+            if not slots[idx]:
+                raise ValueError("That tome slot is empty.")
+
+        player = None
+        for p in self.game.player_list:
+            if p.player_id == player_id:
+                player = p
+                break
+        if not player:
+            raise ValueError("Player not found.")
+
+        gold_cost = sum(int(TOME_SLOT_COSTS[i]) for i in indices)
+        map_cost = 1
+        if int(getattr(player, "gold_score", 0)) < gold_cost:
+            raise ValueError(f"Need {gold_cost} gold to buy the selected tomes.")
+        if int(getattr(player, "map_score", 0)) < map_cost:
+            raise ValueError("Need 1 map to sail.")
+
+        bought = [slots[i] for i in indices]
+        before = self.game._player_scores_line(player)
+        player.gold_score = int(player.gold_score) - gold_cost
+        player.map_score = int(player.map_score) - map_cost
+        player.owned_tomes.extend(bought)
+
+        self.game.tome_slots = self._packed_island_slots(
+            self.game.tome_slots, self.game.tome_supply, indices)
+
+        after = self.game._player_scores_line(player)
+        self.game._log_game_event(
+            f"{self.game._player_label(player_id)} sailed to Nae Aerie and bought "
+            f"{', '.join(bought)} for {gold_cost} gold + 1 map; scores {before} -> {after}"
+        )
+
+    def rescue_noble(self, player_id, slot_index, resource):
+        """Sail to Amarynth and rescue 1 Noble from a face-up slot.
+
+        Costs 1 Map plus 9 of a single chosen Resource type (Wild), with an
+        additional 1 of that same resource for each Noble already in the
+        player's tableau. Only one noble may be rescued per visit. The emptied
+        slot is refilled directly from the Noble deck (no cascade).
+        """
+        if not self.game.crimson_seas_enabled():
+            raise ValueError("Nobles are only available in the Crimson Seas preset.")
+
+        res = (resource or "").strip().lower()
+        attr = {"gold": "gold_score", "strength": "strength_score", "magic": "magic_score"}.get(res)
+        if not attr:
+            raise ValueError('resource must be "gold", "strength", or "magic".')
+
+        try:
+            idx = int(slot_index)
+        except (TypeError, ValueError):
+            raise ValueError("Invalid noble slot.")
+        slots = self.game.noble_slots
+        if idx < 0 or idx >= len(slots) or not slots[idx]:
+            raise ValueError("That noble slot is empty.")
+
+        player = self.game._player_by_id(player_id)
+        if not player:
+            raise ValueError("Player not found.")
+
+        owned = len(getattr(player, "owned_nobles", []) or [])
+        cost = 9 + owned
+        if int(getattr(player, attr, 0) or 0) < cost:
+            raise ValueError(f"Need {cost} {res} to rescue this noble.")
+        if int(getattr(player, "map_score", 0)) < 1:
+            raise ValueError("Need 1 map to sail.")
+
+        noble = slots[idx]
+        before = self.game._player_scores_line(player)
+        setattr(player, attr, int(getattr(player, attr)) - cost)
+        player.map_score = int(player.map_score) - 1
+        try:
+            noble.toggle_visibility(True)
+        except AttributeError:
+            pass
+        player.owned_nobles.append(noble)
+
+        # Refill the emptied slot directly from the deck (Nobles don't cascade).
+        new_noble = self.game.noble_supply.pop() if self.game.noble_supply else None
+        if new_noble is not None:
+            try:
+                new_noble.toggle_visibility(True)
+                new_noble.toggle_accessibility(True)
+            except AttributeError:
+                pass
+        self.game.noble_slots[idx] = new_noble
+
+        after = self.game._player_scores_line(player)
+        self.game._log_game_event(
+            f"{self.game._player_label(player_id)} sailed to Amarynth and rescued "
+            f"\"{getattr(noble, 'name', 'Noble')}\" for {cost} {res} + 1 map; scores {before} -> {after}"
+        )
+
+    def sail_exekratys(self, player_id, resource):
+        """Sail to Exekratys and drain ALL of one resource type from the pool.
+
+        Costs 1 Map (every Sail action does). The sailing player chooses one
+        resource type and takes every token of that type currently in the
+        Exekratys pool, emptying it for that resource.
+        """
+        if not self.game.crimson_seas_enabled():
+            raise ValueError("Exekratys is only available in the Crimson Seas preset.")
+
+        res = (resource or "").strip().lower()
+        attr = {"gold": "gold_score", "strength": "strength_score", "magic": "magic_score"}.get(res)
+        if not attr:
+            raise ValueError('resource must be "gold", "strength", or "magic".')
+
+        player = self.game._player_by_id(player_id)
+        if not player:
+            raise ValueError("Player not found.")
+        if int(getattr(player, "map_score", 0)) < 1:
+            raise ValueError("Need 1 map to sail.")
+
+        amount = int(self.game.exekratys_resources.get(res, 0) or 0)
+        before = self.game._player_scores_line(player)
+        player.map_score = int(player.map_score) - 1
+        setattr(player, attr, int(getattr(player, attr, 0) or 0) + amount)
+        self.game.exekratys_resources[res] = 0
+        after = self.game._player_scores_line(player)
+        self.game._log_game_event(
+            f"{self.game._player_label(player_id)} sailed to Exekratys and took {amount} {res} "
+            f"for 1 map; scores {before} -> {after}"
+        )
+
+    @staticmethod
+    def _packed_island_slots(slots, supply, taken_indices):
+        """Refresh an Araby/Nae Aerie slot row after some tokens are taken.
+
+        Unbought tokens keep their top-to-bottom order and pack into the bottom
+        (cheapest) slots; the emptied top slots are filled with fresh draws from
+        `supply` (mutated in place via pop). Returns the new slot list.
+        """
+        taken = set(taken_indices)
+        kept = [slots[i] for i in range(len(slots)) if i not in taken and slots[i]]
+        refilled = [supply.pop() if supply else None
+                    for _ in range(len(slots) - len(kept))]
+        return refilled + kept
+
+    def take_tome_from_slot(self, player_id, slot_index):
+        """Take 1 face-up Tome for free (e.g. a 'gain 1 Tome' reward), then refresh.
+
+        Unlike `buy_tomes` this costs no gold and no map — the player simply
+        takes the chosen face-up tome into their tableau and the Nae Aerie row
+        refreshes (cascade down + redraw) like any other take.
+        """
+        slots = self.game.tome_slots
+        try:
+            idx = int(slot_index)
+        except (TypeError, ValueError):
+            return False
+        if idx < 0 or idx >= len(slots) or not slots[idx]:
+            return False
+        player = self.game._player_by_id(player_id)
+        if not player:
+            return False
+        player.owned_tomes.append(slots[idx])
+        self.game.tome_slots = self._packed_island_slots(
+            self.game.tome_slots, self.game.tome_supply, [idx])
+        return True
+
+    def take_noble_from_slot(self, player_id, slot_index):
+        """Take 1 face-up Noble for free (e.g. a 'gain 1 Noble' reward), then refill.
+
+        Unlike `rescue_noble` this costs no resources and no map — the player
+        takes the chosen face-up noble into their tableau and the emptied
+        Amarynth slot refills directly from the Noble deck (no cascade).
+        """
+        slots = self.game.noble_slots
+        try:
+            idx = int(slot_index)
+        except (TypeError, ValueError):
+            return False
+        if idx < 0 or idx >= len(slots) or not slots[idx]:
+            return False
+        player = self.game._player_by_id(player_id)
+        if not player:
+            return False
+        noble = slots[idx]
+        try:
+            noble.toggle_visibility(True)
+        except AttributeError:
+            pass
+        player.owned_nobles.append(noble)
+        new_noble = self.game.noble_supply.pop() if self.game.noble_supply else None
+        if new_noble is not None:
+            try:
+                new_noble.toggle_visibility(True)
+                new_noble.toggle_accessibility(True)
+            except AttributeError:
+                pass
+        self.game.noble_slots[idx] = new_noble
+        self.game._log_game_event(
+            f"{self.game._player_label(player_id)} gained Noble "
+            f"\"{getattr(noble, 'name', 'Noble')}\" (free reward)."
+        )
+        return True
 
     def take_resource(self, player_id, resource):
         """

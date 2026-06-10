@@ -24,7 +24,7 @@ It does **not** apply `banned_cards.json` filtering, expansion gating, or any pr
 ## Endpoints
 
 - `GET /wiki` — serves `static/wiki/index.html`.
-- `GET /api/wiki/cards` — returns `{ counts: {citizens, monsters, domains, dukes, starters}, cards: {...} }`. Response shape per card matches the corresponding `cards.py` class's `to_dict()` output, with three additions:
+- `GET /api/wiki/cards` — returns `{ counts: {citizens, monsters, domains, dukes, starters, events, nobles}, cards: {...} }`. Response shape per card matches the corresponding `cards.py` class's `to_dict()` output, with three additions:
   - `domains` and `dukes` entries include `is_banned` (looked up against `banned_cards.json`).
   - `citizens`, `monsters`, and `domains` entries include `is_unimplemented` — true when the row has a special/effect flag set but the corresponding text column is `NULL` or whitespace-only. See [Unimplemented detection](#unimplemented-detection) below.
   - Every entry includes `alt_variants` — a sorted list of the alternate-artwork variant tokens that exist on disk for that card (e.g. `["alt"]` or `["alt_01", …, "alt_05"]`), plus `has_alt_image` (`true` when `alt_variants` is non-empty, kept for backwards compatibility). The client renders an "Alt" control for those cards. See [Alternate artwork](#alternate-artwork) below.
@@ -45,11 +45,11 @@ If the DB is unreachable, `/api/wiki/cards` returns `503` with a `detail` descri
 
 ## UI features
 
-- Type tabs (Citizens / Monsters / Domains / Dukes / Starters) with row counts.
+- Type tabs (Citizens / Monsters / Domains / Dukes / Starters / Events / Nobles) with row counts.
 - Free-text search across name, expansion, area, monster type, and every effect/text field.
 - Per-type filter chips: expansion, citizen role, citizen roll-match signature, monster area/type, domain effect kind, banned-only, implementation status (Implemented / Unimplemented). The citizen roll-match chips are derived from the data: any unique combination of positive `roll_match1`/`roll_match2` values becomes a chip (e.g. `3`, `9/10`, `7/8`); negative/zero sentinels are ignored.
 - Responsive card grid using `400×570` art from `images/{kind}s/`.
-- Click any card → modal with full art, stats, role badges, raw effect strings, payouts, and (for dukes) the full multiplier matrix.
+- Click any card → modal with full art, stats, role badges, raw effect strings, payouts, and (for dukes and nobles) the full multiplier matrix.
 - Banned entries render a red `Banned` badge but are still listed.
 - Unimplemented entries (see below) render a yellow `Unimplemented` badge but are still listed.
 

@@ -1104,6 +1104,10 @@ class GameActionRequest(BaseModel):
     event_id: Optional[int] = None  # For slaying Event cards on the board
     # take_resource: "gold" | "strength" | "magic" | "map"
     resource: Optional[str] = None
+    # buy_goods: which Araby goods slots (0-based) to buy in one Sail action.
+    slot_indices: Optional[List[int]] = None
+    # rescue_noble: which Amarynth noble slot (0-based) to rescue.
+    slot_index: Optional[int] = None
     gold_cost: Optional[int] = None
     strength_cost: Optional[int] = None
     magic_cost: Optional[int] = None
@@ -1852,6 +1856,78 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             try:
                 game.take_resource(request.player_id, r)
+            except ValueError as e:
+                _rollback_consumed_action(game)
+                raise HTTPException(status_code=400, detail=str(e))
+            except Exception:
+                _rollback_consumed_action(game)
+                raise
+            game.finish_turn_if_no_actions_remaining()
+            should_snapshot = True
+
+        elif request.action_type == "buy_goods":
+            if not request.slot_indices:
+                raise HTTPException(status_code=400, detail="slot_indices required")
+            if not game.consume_player_action(request.player_id, action_type="buy_goods"):
+                raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
+            try:
+                game.buy_goods(request.player_id, list(request.slot_indices))
+            except ValueError as e:
+                _rollback_consumed_action(game)
+                raise HTTPException(status_code=400, detail=str(e))
+            except Exception:
+                _rollback_consumed_action(game)
+                raise
+            game.finish_turn_if_no_actions_remaining()
+            should_snapshot = True
+
+        elif request.action_type == "buy_tomes":
+            if not request.slot_indices:
+                raise HTTPException(status_code=400, detail="slot_indices required")
+            if not game.consume_player_action(request.player_id, action_type="buy_tomes"):
+                raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
+            try:
+                game.buy_tomes(request.player_id, list(request.slot_indices))
+            except ValueError as e:
+                _rollback_consumed_action(game)
+                raise HTTPException(status_code=400, detail=str(e))
+            except Exception:
+                _rollback_consumed_action(game)
+                raise
+            game.finish_turn_if_no_actions_remaining()
+            should_snapshot = True
+
+        elif request.action_type == "sail_exekratys":
+            if request.resource is None or not str(request.resource).strip():
+                raise HTTPException(status_code=400, detail='resource required ("gold", "strength", or "magic")')
+            r = str(request.resource).strip().lower()
+            if r not in ("gold", "strength", "magic"):
+                raise HTTPException(status_code=400, detail='resource must be "gold", "strength", or "magic"')
+            if not game.consume_player_action(request.player_id, action_type="sail_exekratys"):
+                raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
+            try:
+                game.sail_exekratys(request.player_id, r)
+            except ValueError as e:
+                _rollback_consumed_action(game)
+                raise HTTPException(status_code=400, detail=str(e))
+            except Exception:
+                _rollback_consumed_action(game)
+                raise
+            game.finish_turn_if_no_actions_remaining()
+            should_snapshot = True
+
+        elif request.action_type == "rescue_noble":
+            if request.slot_index is None:
+                raise HTTPException(status_code=400, detail="slot_index required")
+            if request.resource is None or not str(request.resource).strip():
+                raise HTTPException(status_code=400, detail='resource required ("gold", "strength", or "magic")')
+            r = str(request.resource).strip().lower()
+            if r not in ("gold", "strength", "magic"):
+                raise HTTPException(status_code=400, detail='resource must be "gold", "strength", or "magic"')
+            if not game.consume_player_action(request.player_id, action_type="rescue_noble"):
+                raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
+            try:
+                game.rescue_noble(request.player_id, int(request.slot_index), r)
             except ValueError as e:
                 _rollback_consumed_action(game)
                 raise HTTPException(status_code=400, detail=str(e))

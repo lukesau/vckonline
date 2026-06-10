@@ -622,3 +622,58 @@ class DiceEngine:
         self.game.action_required["id"] = self.game.game_id
         self.game.action_required["action"] = ""
 
+    # ------------------------------------------------------------------
+    # Crimson Seas: rolling 6s feeds the Exekratys pool.
+    #
+    # At the end of the Roll Phase, for each 6 rolled (each die plus the dice
+    # sum, counted separately) the active player must place 1 of their own
+    # resources into the Exekratys pool. `finalize_roll` sets the obligation
+    # count; the prompt is opened lazily from `advance_tick`'s harvest branch so
+    # it sequences after any other roll-phase prompt (e.g. Skeleton Army's flip)
+    # and before harvest automation begins.
+    # ------------------------------------------------------------------
+    def _exekratys_offering_resource_options(self, player):
+        out = []
+        for res, attr in (("gold", "gold_score"), ("strength", "strength_score"), ("magic", "magic_score")):
+            have = int(getattr(player, attr, 0) or 0)
+            if have > 0:
+                out.append({"resource": res, "have": have})
+        return out
+
+    def _maybe_open_exekratys_offering_prompt(self, player_id):
+        """Open the next Exekratys placement prompt if one is owed.
+
+        Returns True if a prompt was opened (caller should treat the engine as
+        blocked). Returns False when nothing is owed, another choice is already
+        pending, or the player has no resources to place (in which case the
+        remaining obligation is dropped).
+        """
+        g = self.game
+        if int(getattr(g, "pending_exekratys_offerings", 0) or 0) <= 0:
+            return False
+        ar = g.action_required or {}
+        if ar.get("id") and ar.get("id") != g.game_id and (ar.get("action") or "") not in ("", "finalize_roll"):
+            return False
+        player = g._player_by_id(player_id)
+        if not player:
+            g.pending_exekratys_offerings = 0
+            g.pending_exekratys_offering_player = None
+            return False
+        options = self._exekratys_offering_resource_options(player)
+        if not options:
+            g._log_game_event(
+                f"{g._player_label(player_id)} rolled a 6 but has no resources to place on Exekratys."
+            )
+            g.pending_exekratys_offerings = 0
+            g.pending_exekratys_offering_player = None
+            return False
+        g.pending_required_choice = {
+            "kind": "exekratys_offering",
+            "player_id": player_id,
+            "options": options,
+            "remaining": int(g.pending_exekratys_offerings),
+        }
+        g.action_required["id"] = player_id
+        g.action_required["action"] = "exekratys_offering"
+        return True
+

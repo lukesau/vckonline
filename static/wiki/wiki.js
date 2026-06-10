@@ -6,7 +6,7 @@
 (() => {
   "use strict";
 
-  const TYPE_ORDER = ["citizens", "monsters", "domains", "dukes", "starters", "events"];
+  const TYPE_ORDER = ["citizens", "monsters", "domains", "dukes", "starters", "events", "nobles"];
   const TYPE_LABELS = {
     citizens: "Citizens",
     monsters: "Monsters",
@@ -14,6 +14,7 @@
     dukes:    "Dukes",
     starters: "Starters",
     events:   "Events",
+    nobles:   "Nobles",
   };
   // The card-image endpoint expects the *singular* type name.
   const TYPE_TO_IMAGE_KIND = {
@@ -23,6 +24,7 @@
     dukes:    "duke",
     starters: "starter",
     events:   "event",
+    nobles:   "noble",
   };
   const TYPE_TO_ID_FIELD = {
     citizens: "citizen_id",
@@ -31,6 +33,7 @@
     dukes:    "duke_id",
     starters: "starter_id",
     events:   "id_events",
+    nobles:   "noble_id",
   };
 
   const state = {
@@ -451,6 +454,13 @@
         options: [{ value: "yes", label: "Is monster" }],
       });
       groups.push(implementationGroup);
+    } else if (type === "nobles") {
+      groups.push(roleGroup);
+      groups.push({
+        key: "special",
+        label: "Payout",
+        options: [{ value: "yes", label: "Has special payout" }],
+      });
     }
     return groups;
   }
@@ -506,6 +516,7 @@
           c.activation_effect,
           c.roll_effect,
           c.effect_text,
+          c.special_duke_payout,
         ].filter(Boolean).join(" ").toLowerCase();
         if (!hay.includes(q)) return false;
       }
@@ -546,6 +557,10 @@
         if (f.effect === "passive"    && !c.has_passive_effect)     return false;
         if (f.effect === "reward"     && !c.has_special_reward)     return false;
         if (f.is_monster === "yes"    && !c.is_monster)             return false;
+      }
+      if (type === "nobles") {
+        if (!passesRoleFilter(c, f.role)) return false;
+        if (f.special === "yes" && !c.has_special_duke_payout) return false;
       }
       return true;
     });
@@ -693,6 +708,7 @@
     if (type === "domains") return renderDomain(card);
     if (type === "dukes") return renderDuke(card);
     if (type === "events") return renderEvent(card);
+    if (type === "nobles") return renderNoble(card);
     return null;
   }
 
@@ -852,5 +868,44 @@
       h("h3", {}, "VP multipliers"),
       h("div", { class: "wiki-multipliers" }, ...mults),
     );
+  }
+
+  function renderNoble(card) {
+    const multFields = [
+      ["shadow_multiplier", "Shadow"],
+      ["holy_multiplier", "Holy"],
+      ["soldier_multiplier", "Soldier"],
+      ["worker_multiplier", "Worker"],
+      ["monster_multiplier", "Monsters slain"],
+      ["citizen_multiplier", "Citizens owned"],
+      ["domain_multiplier", "Domains owned"],
+      ["boss_multiplier", "Bosses slain"],
+      ["minion_multiplier", "Minions slain"],
+      ["beast_multiplier", "Beasts slain"],
+      ["titan_multiplier", "Titans slain"],
+      ["goods_multiplier", "Goods"],
+    ];
+    const mults = multFields.map(([key, label]) => {
+      const v = Number(card[key] || 0);
+      const role = key.replace("_multiplier", "");
+      return h("div", { class: "wiki-mult" + (v === 0 ? " zero" : "") },
+        h("span", { class: "wiki-mult-label" }, roleIcon(role), label),
+        h("span", { class: "wiki-mult-value" }, v.toString()),
+      );
+    });
+    const sections = [
+      h("section", { class: "wiki-section" },
+        h("h3", {}, "VP multipliers"),
+        h("div", { class: "wiki-multipliers" }, ...mults),
+      ),
+    ];
+    const special = (card.special_duke_payout || "").toString().trim();
+    if (card.has_special_duke_payout && special) {
+      sections.push(h("section", { class: "wiki-section" },
+        h("h3", {}, "Special payout"),
+        h("div", { class: "wiki-effect" }, special),
+      ));
+    }
+    return h("div", {}, ...sections);
   }
 })();

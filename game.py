@@ -99,6 +99,14 @@ class Game:
         # feed it on rolling 6s and clear it by sailing there. Empty outside the
         # Crimson Seas preset.
         self.exekratys_resources = dict(game_state.get('exekratys_resources') or {})
+        # Crimson Seas roll obligation: each 6 rolled (each die plus the dice
+        # sum, counted separately) forces the active player to place 1 of their
+        # resources into the Exekratys pool. `pending_exekratys_offerings` is the
+        # number of placements still owed for the current roll; the active player
+        # who owes them is `pending_exekratys_offering_player`. Drained during the
+        # roll-to-harvest transition before any harvest automation runs.
+        self.pending_exekratys_offerings = int(game_state.get('pending_exekratys_offerings') or 0)
+        self.pending_exekratys_offering_player = game_state.get('pending_exekratys_offering_player')
         self.player_list = game_state['player_list']
         # Full duke catalog for this game's config (every duke that could be in
         # play), snapshot at setup before dealing. Used to surface a per-duke VP
@@ -322,6 +330,18 @@ class Game:
 
     def take_resource(self, player_id, resource):
         return self.player_actions.take_resource(player_id, resource)
+
+    def buy_goods(self, player_id, slot_indices):
+        return self.player_actions.buy_goods(player_id, slot_indices)
+
+    def buy_tomes(self, player_id, slot_indices):
+        return self.player_actions.buy_tomes(player_id, slot_indices)
+
+    def sail_exekratys(self, player_id, resource):
+        return self.player_actions.sail_exekratys(player_id, resource)
+
+    def rescue_noble(self, player_id, slot_index, resource):
+        return self.player_actions.rescue_noble(player_id, slot_index, resource)
 
     def _owned_citizen_count_for_role_selector(self, player, role_selector):
         role = (role_selector or "").strip().lower()

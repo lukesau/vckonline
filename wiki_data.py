@@ -12,7 +12,7 @@ in `banned_cards.json` are flagged via an extra `is_banned` boolean so
 the client can render a small badge, but they are not filtered out.
 """
 
-from cards import Citizen, Domain, Duke, Monster, Starter
+from cards import Citizen, Domain, Duke, Monster, Noble, Starter
 from banned_cards import banned_domain_ids, banned_duke_ids
 from card_filters import (
     is_unimplemented_citizen as _is_unimplemented_citizen,
@@ -231,6 +231,40 @@ def _load_starters(cur):
     return out
 
 
+def _load_nobles(cur):
+    rows = _fetch_all(cur, "SELECT * FROM nobles ORDER BY id_nobles")
+    out = []
+    for row in rows:
+        n = Noble(
+            row["id_nobles"],
+            row["name"],
+            row["shadow_count"],
+            row["holy_count"],
+            row["soldier_count"],
+            row["worker_count"],
+            row["shadow_multiplier"],
+            row["holy_multiplier"],
+            row["soldier_multiplier"],
+            row["worker_multiplier"],
+            row["monster_multiplier"],
+            row["citizen_multiplier"],
+            row["domain_multiplier"],
+            row["boss_multiplier"],
+            row["minion_multiplier"],
+            row["beast_multiplier"],
+            row["titan_multiplier"],
+            row["goods_multiplier"],
+            row["has_special_duke_payout"],
+            row["special_duke_payout"],
+            row["expansion"],
+        )
+        entry = n.to_dict()
+        entry["alt_variants"] = list_card_image_variants("noble", row["id_nobles"])
+        entry["has_alt_image"] = bool(entry["alt_variants"])
+        out.append(entry)
+    return out
+
+
 def load_all_cards_for_wiki():
     """Return a dict of `{citizens, monsters, domains, dukes, starters}` lists.
 
@@ -258,6 +292,7 @@ def load_all_cards_for_wiki():
                 "dukes": _load_dukes(cur, banned_dukes),
                 "starters": _load_starters(cur),
                 "events": _load_events(cur),
+                "nobles": _load_nobles(cur),
             }
         finally:
             cur.close()

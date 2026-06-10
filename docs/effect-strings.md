@@ -110,7 +110,7 @@ queues). Positive gains still reach everyone. Immediate losses floor at 0.
 | Flaming Devourer | roll_effect | `banish_center_citizen optional` | Monster event. While in play, when a 4 is rolled, the active player may banish one accessible citizen from the center stacks. The `optional` token makes the prompt skippable. |
 | Giants of Ostendaar | roll_effect + special_reward | `banish_center_domain optional` / `<domains>` | Monster event. While in play, when a 5 is rolled, the active player may banish one face-up domain from the center stacks; the next domain in that stack is revealed immediately (or the slot refills from the exhausted deck). Slaying it grants a free domain (`<domains>`). |
 | Leviathan | roll_effect + special_reward | `add_self_slay_cost s 1 max=10` / `count owned_monsters v 1` | Monster event. While in play, when a 6 is rolled, 1 Strength token is added to the Leviathan, raising its own slay cost by 1 (printed + tokens), capped at +10. Slaying it grants 1 VP per owned Monster (the slain Leviathan counts). |
-| Skeleton Army | roll_effect + special_reward | `flip_citizen targeted optional` / `choose g 4 t 1` | Monster event. While in play, when a 3 is rolled, the active player may flip one citizen on an opponent's tableau face-down (it stays inactive but is counted at end-game scoring); the prompt reuses the monster reward's targeted-flip flow and `optional` makes it skippable. The slay reward "Gain 4 Gold or 1 Tome" — tomes (`t`) aren't implemented yet, so outside Crimson Seas the tome leg is dropped (player just takes the gold) and inside Crimson Seas selecting the tome raises an explicit "not implemented" error. |
+| Skeleton Army | roll_effect + special_reward | `flip_citizen targeted optional` / `choose g 4 t 1` | Monster event. While in play, when a 3 is rolled, the active player may flip one citizen on an opponent's tableau face-down (it stays inactive but is counted at end-game scoring); the prompt reuses the monster reward's targeted-flip flow and `optional` makes it skippable. The slay reward "Gain 4 Gold or 1 Tome": outside Crimson Seas the tome (`t`) leg is dropped (player just takes the gold); inside Crimson Seas the tome leg expands into one pick per face-up Nae Aerie tome, and choosing one takes it for free (no gold, no map) and refreshes the Nae Aerie row. |
 | Ghost Ship | activation + roll_effect + special_reward | `add_self_gold_pool 1` / `add_self_gold_pool 1` / `gain_self_gold_pool` | Monster event with `roll_match1 == -1` (the "every roll phase" sentinel). On reveal, and at the end of **every** roll phase while in play, the active player places 1 Gold from their supply onto the card (a player short on gold places only what they have). The accumulated `gold_pool` is stored on the card (serialized, runtime-only like the `extra_*` costs). Whoever slays the ship claims the whole pool via `gain_self_gold_pool` (reads `game._immediate_slay_source_card`). |
 | Pirate Blockade | roll_effect + special_reward | `block_recruit_matching_roll` / `choose g 4 p 2` | Monster event with `roll_match1 == -1`. While in play, during the active player's **Action Phase**, no citizen whose roll match (`roll_match1`/`roll_match2`) equals either die or the dice sum may be recruited or gained — this covers the Recruit a Citizen action and any Monster/Domain citizen grant. Enforcement is an on-demand in-play scan (`Game._citizen_blocked_by_pirate_blockade`), so slaying the ship lifts the restriction immediately; the roll effect firing just logs the blocked values. The slay reward "Gain 4 Gold or 2 Maps" reuses the existing map (`p`) handling. |
 
@@ -200,6 +200,7 @@ Notes on reuse:
 | Orc Chieftain | `count area Mountain g 2` | Gain 2g per Mountain monster slain |
 | Dragonkin Ravagers | `count type Minion g 3` | Gain 3g per owned Minion-type monster (any area) |
 | Wereshark | `choose <count type Beast g 2> <count type Beast s 2> <count type Beast m 2>` | "Gain 2 Wild per owned Beast": pick g/s/m, each scaling 2 per owned Beast-type monster |
+| Gargan Soul Hunters | `choose <citizens 3> <noble>` | "Gain 3 Citizens or 1 Noble" (Crimson Seas). The `<citizens 3>` leg chains three single-citizen picks; the `<noble>` leg expands into one free pick per face-up Amarynth noble. |
 | (compound reward) | `<domains> + <citizens>` | Take a free domain, then take a free citizen (prompts open in order; reverse order also supported). |
 
 ---
@@ -271,15 +272,36 @@ choose m 2 p 1                              # pick one: +2 magic or +1 map (Crim
 and render with `/images/map.png`. There is currently no way to *spend* maps —
 they are only earned (citizen payouts, the `+1 Map` standard action) and shown.
 
-`t` = **tome**, another Crimson Seas resource, is **recognized but not yet
-implemented**. It only appears as a `choose` leg (e.g. Skeleton Army's
-`choose g 4 t 1`). Outside Crimson Seas the tome leg is dropped from the prompt
-(same as `p` maps) so the player is left with the card's non-tome out. Inside
-Crimson Seas the tome option is offered, but `_apply_choose_option` raises
-`ValueError("Tome payouts are not implemented yet.")` if it is selected, so the
-slaying player gets an explicit error rather than a silent no-op. Implement
-tomes by giving `t` a real branch in `_apply_choose_option` (and a `Player`
-score field) and dropping the `not crimson_seas` filter / raise.
+`t` = **tome**, another Crimson Seas resource. It appears as a `choose` leg
+(e.g. Skeleton Army's `choose g 4 t 1`). Outside Crimson Seas the tome leg is
+dropped from the prompt (same as `p` maps) so the player is left with the card's
+non-tome out. Inside Crimson Seas a "gain 1 Tome" lets the player take any one
+of the face-up Nae Aerie tomes for free: `_expand_choose_options_for_prompt`
+turns the `t 1` leg into one `tome.choice` option per filled tome slot (carrying
+`tome_type` + `slot_index`), and `_apply_choose_option` routes `tome.choice`
+through `PlayerActionsEngine.take_tome_from_slot` (append to `Player.owned_tomes`,
+then waterfall-refresh the row — no gold, no map). The leg is filtered out when
+no tome slots are filled. Only single-tome gains (`t 1`) are supported.
+
+#### `<noble>` and `<citizens N>` bracket legs
+
+Two bracket legs back Gargan Soul Hunters' reward (`choose <citizens 3> <noble>`,
+"Gain 3 Citizens or 1 Noble"):
+
+- `<noble>` — a Crimson Seas "gain 1 Noble" leg, the noble analogue of the `t`
+  tome leg. `_expand_choose_options_for_prompt` turns it into one `noble.choice`
+  option per face-up Amarynth slot (carrying `noble_id`, `name`, `slot_index`),
+  and `_apply_choose_option` routes `noble.choice` through
+  `PlayerActionsEngine.take_noble_from_slot` — the chosen noble is taken for free
+  (no resources, no map) and the emptied slot refills directly from the deck (no
+  cascade, matching `rescue_noble`). The leg is dropped outside Crimson Seas or
+  when no noble is face-up.
+- `<citizens N>` — "gain N citizens of your choice". It is **not** a new
+  multi-citizen mechanic: it is a single prompt option (`citizens_chain`) that,
+  once picked, stashes a `pending_payout_continuation` of N bare `<citizens>`
+  legs. The existing continuation machinery then opens (and resolves) one
+  ordinary single-citizen pick at a time, stopping early if the board runs out.
+  The leg is filtered out when no citizen is claimable.
 
 Maps are gated to the **Crimson Seas preset** via `Game.crimson_seas_enabled()` (true
 only when `preset == "crimsonseas"`). Crimson Seas citizens/monsters can still

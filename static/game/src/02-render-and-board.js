@@ -83,6 +83,49 @@ function tableauGroupsForPlayer(player) {
   return groups;
 }
 
+// Crimson Seas tableau section: a single column split into 3 equal cells
+// (Nobles top, Tomes middle, Goods bottom), each 1/3 of the 2-card strip height.
+// Always rendered in Crimson Seas games so the layout is visible even when empty.
+function makeCrimsonSeasTableauSection(player) {
+  const grp = mk('card-group cs-group');
+  const col = mk('cs-column');
+  const cells = [
+    ['Nobles', 'nobles', player.owned_nobles || []],
+    ['Tomes',  'tomes',  player.owned_tomes  || []],
+    ['Goods',  'goods',  player.owned_goods  || []],
+  ];
+  cells.forEach(([label, kind, items]) => {
+    const cell = mk(`cs-cell cs-cell-${kind}`);
+    const lbl = mk('cs-cell-label');
+    lbl.textContent = label;
+    cell.appendChild(lbl);
+    const row = mk('cs-cell-items');
+    items.forEach(it => row.appendChild(makeCrimsonSeasItem(kind, it)));
+    cell.appendChild(row);
+    col.appendChild(cell);
+  });
+  grp.appendChild(col);
+  return grp;
+}
+
+function makeCrimsonSeasItem(kind, item) {
+  const wrap = mk(`cs-item cs-item-${kind}`);
+  const img = document.createElement('img');
+  img.className = 'cs-item-img';
+  if (kind === 'goods') {
+    img.src = SAIL_GOODS_IMAGES[item] || '';
+    img.alt = item;
+  } else if (kind === 'tomes') {
+    img.src = SAIL_TOME_IMAGES[item] || '';
+    img.alt = item;
+  } else {
+    img.src = `/card-image/noble/${item.noble_id}`;
+    img.alt = item.name || 'Noble';
+  }
+  wrap.appendChild(img);
+  return wrap;
+}
+
 // ── Main render ───────────────────────────────────────────────────────────
 function render(state) {
   // Drop out-of-order state pushes from older ticks. WebSocket messages can
@@ -234,6 +277,11 @@ function renderSeatEl(player, state, variant) {
     grp.appendChild(stacksWrap);
     tableau.appendChild(grp);
   });
+  // Crimson Seas pieces live in a dedicated section to the left of Domains, laid
+  // out top→bottom (Nobles / Tomes / Goods) instead of side by side.
+  if (crimsonSeasEnabled(state)) {
+    tableau.insertBefore(makeCrimsonSeasTableauSection(player), tableau.firstChild);
+  }
   inner.appendChild(tableau);
   el.appendChild(inner);
   wireSeatTableauOpen(el, player);
@@ -975,12 +1023,18 @@ const SAIL_GOODS_IMAGES = {
   spices: '/images/goods_spices.png',
 };
 
+// Gold cost per Araby goods slot, top→bottom. Must match game_setup.GOODS_SLOT_COSTS.
+const SAIL_GOODS_SLOT_COSTS = [6, 4, 2];
+
 // Tome token artwork (square tiles, one per resource type).
 const SAIL_TOME_IMAGES = {
   gold: '/images/tome_gold.jpg',
   magic: '/images/tome_magic.jpg',
   strength: '/images/tome_strength.jpg',
 };
+
+// Gold cost per Nae Aerie tome slot, top→bottom. Must match game_setup.TOME_SLOT_COSTS.
+const SAIL_TOME_SLOT_COSTS = [7, 5, 3];
 
 /** Place an overlay node at a pixel box { left, top, w, h }, normalized to % of the mat. */
 function placeSailAsset(overlay, box, node) {
@@ -1045,20 +1099,46 @@ function renderSailAssets(overlay, state) {
   const L = SAIL_LAYOUT;
   const goods = (state && state.goods_slots) || [];
   L.goods.slots.forEach((s, i) => {
-    const node = goods[i] ? makeSailToken(SAIL_GOODS_IMAGES[goods[i]], goods[i], 'sail-good-token') : makeSailEmptySlot();
+    let node;
+    if (goods[i]) {
+      node = makeSailToken(SAIL_GOODS_IMAGES[goods[i]], goods[i], 'sail-good-token');
+      // Any goods click opens the single Araby shop modal (one Sail buys any
+      // number of the face-up goods together for 1 map).
+      node.classList.add('sail-clickable');
+      node.addEventListener('click', e => { e.stopPropagation(); openArabyGoodsModal(); });
+    } else {
+      node = makeSailEmptySlot();
+    }
     placeSailAsset(overlay, sailBoxOf(L.goods, s), node);
   });
   const tomes = (state && state.tome_slots) || [];
   L.tomes.slots.forEach((s, i) => {
-    const node = tomes[i] ? makeSailToken(SAIL_TOME_IMAGES[tomes[i]], `${tomes[i]} tome`, 'sail-tome-token') : makeSailEmptySlot();
+    let node;
+    if (tomes[i]) {
+      node = makeSailToken(SAIL_TOME_IMAGES[tomes[i]], `${tomes[i]} tome`, 'sail-tome-token');
+      node.classList.add('sail-clickable');
+      node.addEventListener('click', e => { e.stopPropagation(); openNaeAerieTomesModal(); });
+    } else {
+      node = makeSailEmptySlot();
+    }
     placeSailAsset(overlay, sailBoxOf(L.tomes, s), node);
   });
   const nobles = (state && state.noble_slots) || [];
   L.nobles.slots.forEach((s, i) => {
-    const node = nobles[i] ? makeSailNobleCard(nobles[i]) : makeSailEmptySlot();
+    let node;
+    if (nobles[i]) {
+      node = makeSailNobleCard(nobles[i]);
+      node.classList.add('sail-clickable');
+      node.addEventListener('click', e => { e.stopPropagation(); openAmarynthNobleModal(i); });
+    } else {
+      node = makeSailEmptySlot();
+    }
     placeSailAsset(overlay, sailBoxOf(L.nobles, s), node);
   });
-  placeSailAsset(overlay, L.exekratys, makeSailExekratysReadout(state));
+  const exe = makeSailExekratysReadout(state);
+  exe.classList.add('sail-clickable');
+  exe.addEventListener('click', e => { e.stopPropagation(); openExekratysSailModal(); });
+  placeSailAsset(overlay, L.exekratys, exe);
 }
 
 // An image token (Goods/Tomes) filling its slot box.
@@ -1075,6 +1155,335 @@ function makeSailToken(src, alt, extraClass) {
 // Faint outline for an empty slot (e.g. supply exhausted near end-game).
 function makeSailEmptySlot() {
   return mk('sail-slot-empty');
+}
+
+// Click any face-up Araby goods to open the shop. One Sail (1 map) buys any
+// subset of the 3 face-up goods, each at its slot's gold price.
+function openArabyGoodsModal() {
+  openSailShopModal({
+    title: 'Sail to Araby',
+    noun: 'Goods',
+    actionType: 'buy_goods',
+    slotsKey: 'goods_slots',
+    costs: SAIL_GOODS_SLOT_COSTS,
+    images: SAIL_GOODS_IMAGES,
+    label: t => t.charAt(0).toUpperCase() + t.slice(1),
+  });
+}
+
+// Click any face-up Nae Aerie tome to open the shop. Identical to Araby but for
+// tomes (slot costs 7/5/3).
+function openNaeAerieTomesModal() {
+  openSailShopModal({
+    title: 'Sail to Nae Aerie',
+    noun: 'Tomes',
+    actionType: 'buy_tomes',
+    slotsKey: 'tome_slots',
+    costs: SAIL_TOME_SLOT_COSTS,
+    images: SAIL_TOME_IMAGES,
+    label: t => `${t.charAt(0).toUpperCase() + t.slice(1)} Tome`,
+  });
+}
+
+// Sail-to-Amarynth: rescue 1 Noble from a face-up slot. Costs 1 map plus
+// (9 + nobles already in your tableau) of one chosen resource type.
+function openAmarynthNobleModal(slotIndex) {
+  if (getVisiblePromptOverlay()) return;
+  if (document.getElementById('card-modal-overlay')) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'card-modal-overlay';
+  overlay.className = 'card-modal-overlay';
+  const modal = mk('card-modal sail-shop-modal sail-noble-modal');
+  modal.addEventListener('click', e => e.stopPropagation());
+
+  const labels = { gold: 'Gold', strength: 'Strength', magic: 'Magic' };
+  const scoreKey = { gold: 'gold_score', strength: 'strength_score', magic: 'magic_score' };
+
+  function render() {
+    modal.innerHTML = '';
+    const state = latestGameState || {};
+    const noble = (state.noble_slots || [])[slotIndex] || null;
+    const player = (state.player_list || []).find(p => idsMatch(p.player_id, PLAYER_ID)) || null;
+    const ownedNobles = (player && Array.isArray(player.owned_nobles)) ? player.owned_nobles.length : 0;
+    const playerMap = Number(player && player.map_score || 0);
+    const canAct = canOfferTakeResourceAction(state);
+    const cost = 9 + ownedNobles;
+
+    const heading = document.createElement('h2');
+    heading.className = 'modal-card-name';
+    heading.textContent = 'Sail to Amarynth';
+    modal.appendChild(heading);
+
+    if (!noble) {
+      const empty = mk('sail-shop-sub');
+      empty.textContent = 'That noble slot is empty.';
+      modal.appendChild(empty);
+    } else {
+      const img = document.createElement('img');
+      img.className = 'sail-noble-modal-img';
+      img.src = `/card-image/noble/${noble.noble_id}`;
+      img.alt = noble.name || 'Noble';
+      modal.appendChild(img);
+
+      const sub = mk('sail-shop-sub');
+      sub.textContent = `Rescue costs ${cost} of one resource type + 1 map`
+        + (ownedNobles ? ` (9 + ${ownedNobles} noble${ownedNobles === 1 ? '' : 's'} in your tableau).` : '.');
+      modal.appendChild(sub);
+
+      const list = mk('sail-shop-list');
+      SAIL_EXEKRATYS_RESOURCES.forEach(res => {
+        const have = Number(player && player[scoreKey[res]] || 0);
+        const item = mk('sail-shop-item sail-exe-item');
+        const icon = document.createElement('img');
+        icon.className = 'sail-shop-item-img';
+        icon.src = TABLEAU_RESOURCE_ICONS[res] || '';
+        icon.alt = res;
+        const meta = mk('sail-shop-item-meta');
+        const nm = mk('sail-shop-item-name');
+        nm.textContent = `Pay with ${labels[res]}`;
+        const cst = mk('sail-shop-item-cost');
+        cst.textContent = `${cost} ${labels[res]} (have ${have}) + 1 map`;
+        meta.appendChild(nm);
+        meta.appendChild(cst);
+        item.appendChild(icon);
+        item.appendChild(meta);
+        const enabled = canAct && have >= cost && playerMap >= 1;
+        if (enabled) {
+          item.classList.add('sail-clickable');
+          item.addEventListener('click', () => {
+            postGameAction({ player_id: PLAYER_ID, action_type: 'rescue_noble', slot_index: slotIndex, resource: res });
+            dismissCardInspectModal();
+          });
+        } else {
+          item.classList.add('is-disabled');
+        }
+        list.appendChild(item);
+      });
+      modal.appendChild(list);
+    }
+
+    const footer = mk('sail-shop-footer');
+    const actions = mk('sail-shop-actions');
+    actions.appendChild(promptButton('Cancel', () => dismissCardInspectModal(), true));
+    footer.appendChild(actions);
+    modal.appendChild(footer);
+
+    if (!canAct) {
+      const note = mk('sail-shop-note');
+      note.textContent = 'You can rescue a noble on your turn during the action phase.';
+      modal.appendChild(note);
+    } else if (playerMap < 1) {
+      const note = mk('sail-shop-note');
+      note.textContent = 'You need 1 map to sail.';
+      modal.appendChild(note);
+    }
+  }
+
+  overlay._refreshFromLiveState = render;
+  render();
+  overlay.appendChild(modal);
+  mountCardInspectOverlay(overlay, modal);
+  document.body.appendChild(overlay);
+}
+
+// Sail-to-Exekratys: drain ALL of one chosen resource type from the pool for
+// 1 map. One button per resource shows how much would be received.
+function openExekratysSailModal() {
+  if (getVisiblePromptOverlay()) return;
+  if (document.getElementById('card-modal-overlay')) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'card-modal-overlay';
+  overlay.className = 'card-modal-overlay';
+  const modal = mk('card-modal sail-shop-modal');
+  modal.addEventListener('click', e => e.stopPropagation());
+
+  const labels = { gold: 'Gold', strength: 'Strength', magic: 'Magic' };
+
+  function render() {
+    modal.innerHTML = '';
+    const state = latestGameState || {};
+    const pool = state.exekratys_resources || {};
+    const player = (state.player_list || []).find(p => idsMatch(p.player_id, PLAYER_ID)) || null;
+    const playerMap = Number(player && player.map_score || 0);
+    const canAct = canOfferTakeResourceAction(state);
+
+    const heading = document.createElement('h2');
+    heading.className = 'modal-card-name';
+    heading.textContent = 'Sail to Exekratys';
+    modal.appendChild(heading);
+
+    const sub = mk('sail-shop-sub');
+    sub.textContent = 'Take all of one resource type from the island (costs 1 map).';
+    modal.appendChild(sub);
+
+    const list = mk('sail-shop-list');
+    SAIL_EXEKRATYS_RESOURCES.forEach(res => {
+      const amount = Number(pool[res] || 0);
+      const item = mk('sail-shop-item sail-exe-item');
+      const img = document.createElement('img');
+      img.className = 'sail-shop-item-img';
+      img.src = TABLEAU_RESOURCE_ICONS[res] || '';
+      img.alt = res;
+      const meta = mk('sail-shop-item-meta');
+      const nm = mk('sail-shop-item-name');
+      nm.textContent = labels[res] || res;
+      const cst = mk('sail-shop-item-cost');
+      cst.textContent = `Take ${amount} (1 map)`;
+      meta.appendChild(nm);
+      meta.appendChild(cst);
+      item.appendChild(img);
+      item.appendChild(meta);
+      const enabled = canAct && playerMap >= 1;
+      if (enabled) {
+        item.classList.add('sail-clickable');
+        item.addEventListener('click', () => {
+          postGameAction({ player_id: PLAYER_ID, action_type: 'sail_exekratys', resource: res });
+          dismissCardInspectModal();
+        });
+      } else {
+        item.classList.add('is-disabled');
+      }
+      list.appendChild(item);
+    });
+    modal.appendChild(list);
+
+    const footer = mk('sail-shop-footer');
+    const actions = mk('sail-shop-actions');
+    actions.appendChild(promptButton('Cancel', () => dismissCardInspectModal(), true));
+    footer.appendChild(actions);
+    modal.appendChild(footer);
+
+    if (!canAct) {
+      const note = mk('sail-shop-note');
+      note.textContent = 'You can sail on your turn during the action phase.';
+      modal.appendChild(note);
+    } else if (playerMap < 1) {
+      const note = mk('sail-shop-note');
+      note.textContent = 'You need 1 map to sail.';
+      modal.appendChild(note);
+    }
+  }
+
+  overlay._refreshFromLiveState = render;
+  render();
+  overlay.appendChild(modal);
+  mountCardInspectOverlay(overlay, modal);
+  document.body.appendChild(overlay);
+}
+
+// Generic Sail shop: pick any subset of the 3 face-up tokens to buy in one Sail
+// action (gold per slot + 1 map total). Re-renders live from state.
+function openSailShopModal(cfg) {
+  if (getVisiblePromptOverlay()) return;
+  if (document.getElementById('card-modal-overlay')) return;
+
+  const selected = new Set();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'card-modal-overlay';
+  overlay.className = 'card-modal-overlay';
+  const modal = mk('card-modal sail-shop-modal');
+  modal.addEventListener('click', e => e.stopPropagation());
+
+  const nounLower = cfg.noun.toLowerCase();
+
+  function render() {
+    modal.innerHTML = '';
+    const state = latestGameState || {};
+    const slots = state[cfg.slotsKey] || [];
+    const player = (state.player_list || []).find(p => idsMatch(p.player_id, PLAYER_ID)) || null;
+    const playerGold = Number(player && player.gold_score || 0);
+    const playerMap = Number(player && player.map_score || 0);
+    const canAct = canOfferTakeResourceAction(state);
+
+    const heading = document.createElement('h2');
+    heading.className = 'modal-card-name';
+    heading.textContent = cfg.title;
+    modal.appendChild(heading);
+
+    const sub = mk('sail-shop-sub');
+    sub.textContent = `Buy any number of ${cfg.noun} in one Sail (costs 1 map total).`;
+    modal.appendChild(sub);
+
+    const list = mk('sail-shop-list');
+    let anyAvail = false;
+    slots.forEach((type, i) => {
+      if (!type) return;
+      anyAvail = true;
+      const cost = cfg.costs[i] != null ? cfg.costs[i] : 0;
+      const isSel = selected.has(i);
+      const item = mk('sail-shop-item' + (isSel ? ' is-selected' : ''));
+      const img = document.createElement('img');
+      img.className = 'sail-shop-item-img';
+      img.src = cfg.images[type] || '';
+      img.alt = type;
+      const meta = mk('sail-shop-item-meta');
+      const nm = mk('sail-shop-item-name');
+      nm.textContent = cfg.label(type);
+      const cst = mk('sail-shop-item-cost');
+      cst.textContent = `${cost} gold`;
+      meta.appendChild(nm);
+      meta.appendChild(cst);
+      const check = mk('sail-shop-item-check');
+      check.textContent = isSel ? '✓' : '';
+      item.appendChild(img);
+      item.appendChild(meta);
+      item.appendChild(check);
+      item.addEventListener('click', () => {
+        if (selected.has(i)) selected.delete(i); else selected.add(i);
+        render();
+      });
+      list.appendChild(item);
+    });
+    if (!anyAvail) {
+      const empty = mk('sail-shop-sub');
+      empty.textContent = `No ${nounLower} are currently available.`;
+      list.appendChild(empty);
+    }
+    modal.appendChild(list);
+
+    const totalGold = [...selected].reduce(
+      (sum, i) => sum + (cfg.costs[i] != null ? cfg.costs[i] : 0), 0);
+
+    const footer = mk('sail-shop-footer');
+    const total = mk('sail-shop-total');
+    total.textContent = selected.size
+      ? `Total: ${totalGold} gold + 1 map`
+      : `Select ${nounLower} to buy`;
+    footer.appendChild(total);
+
+    const canBuy = canAct && selected.size > 0 && playerGold >= totalGold && playerMap >= 1;
+    const buyBtn = promptButton('Buy', () => {
+      if (!canBuy) return;
+      postGameAction({ player_id: PLAYER_ID, action_type: cfg.actionType, slot_indices: [...selected] });
+      dismissCardInspectModal();
+    });
+    buyBtn.disabled = !canBuy;
+    const cancelBtn = promptButton('Cancel', () => dismissCardInspectModal(), true);
+    const actions = mk('sail-shop-actions');
+    actions.appendChild(cancelBtn);
+    actions.appendChild(buyBtn);
+    footer.appendChild(actions);
+    modal.appendChild(footer);
+
+    let noteText = '';
+    if (!canAct) noteText = `You can buy ${nounLower} on your turn during the action phase.`;
+    else if (selected.size && playerGold < totalGold) noteText = 'Not enough gold for this selection.';
+    else if (selected.size && playerMap < 1) noteText = 'You need 1 map to sail.';
+    if (noteText) {
+      const note = mk('sail-shop-note');
+      note.textContent = noteText;
+      modal.appendChild(note);
+    }
+  }
+
+  overlay._refreshFromLiveState = render;
+  render();
+  overlay.appendChild(modal);
+  mountCardInspectOverlay(overlay, modal);
+  document.body.appendChild(overlay);
 }
 
 // A dealt Noble card shown face-up in its Amarynth slot.
