@@ -76,6 +76,18 @@ class Game:
         # this is the Crimson Seas preset. Defaults to "current" for older
         # saves that predate the field.
         self.preset = (game_state.get('preset') or 'current')
+        # Crimson Seas Goods tokens (Araby). `goods_supply` is the hidden
+        # face-down stack; `goods_slots` holds the (up to 3) face-up tokens in
+        # the Araby slots. Each entry is a goods type string (see
+        # game_setup.GOODS_TYPES). Empty outside the Crimson Seas preset.
+        self.goods_supply = list(game_state.get('goods_supply') or [])
+        self.goods_slots = list(game_state.get('goods_slots') or [])
+        # Crimson Seas Tome tokens (Nae Aerie). `tome_supply` is the hidden
+        # face-down stack; `tome_slots` holds the (up to 3) face-up tomes in the
+        # Nae Aerie slots. Each entry is a resource type string (see
+        # game_setup.TOME_TYPES). Empty outside the Crimson Seas preset.
+        self.tome_supply = list(game_state.get('tome_supply') or [])
+        self.tome_slots = list(game_state.get('tome_slots') or [])
         self.player_list = game_state['player_list']
         # Full duke catalog for this game's config (every duke that could be in
         # play), snapshot at setup before dealing. Used to surface a per-duke VP

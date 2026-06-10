@@ -555,7 +555,7 @@ function renderCenter(state) {
     makeGridSection('Citizens 6–12', citizenGrid.slice(5),     'citizen', 5, 'board-citizens-2'),
     makeGridSection('Domains',       state.domain_grid  || [], 'domain',  5, 'board-domains'),
   ];
-  if (crimsonSeasEnabled(state)) sections.unshift(makeSailSection());
+  if (crimsonSeasEnabled(state)) sections.unshift(makeSailSection(state));
   boardSections.forEach(({ key }, i) => {
     sections[i].dataset.boardSection = key;
     const slide = mk('center-board-slide');
@@ -967,6 +967,21 @@ const SAIL_LAYOUT = {
 
 const SAIL_EXEKRATYS_RESOURCES = ['strength', 'gold', 'magic'];
 
+// Goods token artwork (square PNGs with transparent octagon backgrounds).
+const SAIL_GOODS_IMAGES = {
+  artifacts: '/images/goods_artifacts.png',
+  jewels: '/images/goods_jewels.png',
+  fabrics: '/images/goods_fabrics.png',
+  spices: '/images/goods_spices.png',
+};
+
+// Tome token artwork (square tiles, one per resource type).
+const SAIL_TOME_IMAGES = {
+  gold: '/images/tome_gold.jpg',
+  magic: '/images/tome_magic.jpg',
+  strength: '/images/tome_strength.jpg',
+};
+
 /** Place an overlay node at a pixel box { left, top, w, h }, normalized to % of the mat. */
 function placeSailAsset(overlay, box, node) {
   node.classList.add('sail-asset');
@@ -982,7 +997,7 @@ function sailBoxOf(group, slot) {
   return { left: slot.left, top: slot.top, w: group.w, h: group.h };
 }
 
-function makeSailSection() {
+function makeSailSection(state) {
   const sec = mk('center-section board-sail');
   const lbl = mk('section-label');
   lbl.textContent = 'Sail';
@@ -1000,7 +1015,7 @@ function makeSailSection() {
 
   const overlay = mk('sail-overlay');
   mat.appendChild(overlay);
-  renderSailAssets(overlay);
+  renderSailAssets(overlay, state);
 
   wrap.appendChild(mat);
   // Vertical wheel scrolls the wide mat horizontally (same feel as the tableaus).
@@ -1023,19 +1038,40 @@ function makeSailSection() {
   return sec;
 }
 
-// Render the overlay assets. For now these are no-image placeholders just to
-// validate positioning; swap in real Goods/Tome/Noble card nodes and live
-// Exekratys resource counts later.
-function renderSailAssets(overlay) {
+// Render the overlay assets. Goods/Tomes are dealt from live state; Nobles and
+// the Exekratys readout are still placeholders pending their own state wiring.
+function renderSailAssets(overlay, state) {
   overlay.innerHTML = '';
   const L = SAIL_LAYOUT;
-  L.goods.slots.forEach((s, i) =>
-    placeSailAsset(overlay, sailBoxOf(L.goods, s), makeSailPlaceholderCard('Good', 'sail-good', i)));
-  L.tomes.slots.forEach((s, i) =>
-    placeSailAsset(overlay, sailBoxOf(L.tomes, s), makeSailPlaceholderCard('Tome', 'sail-tome', i)));
+  const goods = (state && state.goods_slots) || [];
+  L.goods.slots.forEach((s, i) => {
+    const node = goods[i] ? makeSailToken(SAIL_GOODS_IMAGES[goods[i]], goods[i], 'sail-good-token') : makeSailEmptySlot();
+    placeSailAsset(overlay, sailBoxOf(L.goods, s), node);
+  });
+  const tomes = (state && state.tome_slots) || [];
+  L.tomes.slots.forEach((s, i) => {
+    const node = tomes[i] ? makeSailToken(SAIL_TOME_IMAGES[tomes[i]], `${tomes[i]} tome`, 'sail-tome-token') : makeSailEmptySlot();
+    placeSailAsset(overlay, sailBoxOf(L.tomes, s), node);
+  });
   L.nobles.slots.forEach((s, i) =>
     placeSailAsset(overlay, sailBoxOf(L.nobles, s), makeSailNobleCard(i)));
   placeSailAsset(overlay, L.exekratys, makeSailExekratysReadout());
+}
+
+// An image token (Goods/Tomes) filling its slot box.
+function makeSailToken(src, alt, extraClass) {
+  const wrap = mk(`sail-token ${extraClass || ''}`);
+  const img = document.createElement('img');
+  img.className = 'sail-token-img';
+  img.src = src || '';
+  img.alt = alt || '';
+  wrap.appendChild(img);
+  return wrap;
+}
+
+// Faint outline for an empty slot (e.g. supply exhausted near end-game).
+function makeSailEmptySlot() {
+  return mk('sail-slot-empty');
 }
 
 // Noble placeholder: the noble card back filling its slot, with the noble

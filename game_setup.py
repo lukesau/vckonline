@@ -46,6 +46,21 @@ DEBUG_DIE_TWO_VALUES = (4, 5)
 KINGS_GUARD_EVENT_ACTIVATION = "place_kings_guard"
 KINGS_GUARD_EXPANSION = "kingsguard"
 
+# Crimson Seas "Goods" tokens (Araby). Four types, 6 of each (24 total). At setup
+# they're shuffled face-down into a supply and 3 are dealt face-up into the 3
+# Araby slots on the Island Board. Goods are plain type strings on the wire/state;
+# they're not DB-backed Card objects.
+GOODS_TYPES = ("artifacts", "jewels", "fabrics", "spices")
+GOODS_COPIES_PER_TYPE = 6
+GOODS_SLOT_COUNT = 3
+
+# Crimson Seas "Tome" tokens (Nae Aerie). One type per resource, 7 of each (21
+# total). Shuffled face-down into a supply; 3 dealt face-up into the 3 Nae Aerie
+# slots. Like Goods, tomes are plain type strings on the wire/state.
+TOME_TYPES = ("gold", "magic", "strength")
+TOME_COPIES_PER_TYPE = 7
+TOME_SLOT_COUNT = 3
+
 # Starters split into two groups by roll_match:
 #   - "core" starters (Peasant/Knight, real roll numbers) are mandatory: every
 #     player always gets all of them.
@@ -985,10 +1000,29 @@ def load_game_data(
                     domain.toggle_accessibility(True)
                 stack.append(domain)
 
+        # Crimson Seas: shuffle the Goods/Tome supplies and deal 3 face-up into
+        # Araby (Goods) and Nae Aerie (Tomes).
+        goods_supply = []
+        goods_slots = []
+        tome_supply = []
+        tome_slots = []
+        if preset == "crimsonseas":
+            goods_supply = [t for t in GOODS_TYPES for _ in range(GOODS_COPIES_PER_TYPE)]
+            random.shuffle(goods_supply)
+            goods_slots = [goods_supply.pop() for _ in range(min(GOODS_SLOT_COUNT, len(goods_supply)))]
+
+            tome_supply = [t for t in TOME_TYPES for _ in range(TOME_COPIES_PER_TYPE)]
+            random.shuffle(tome_supply)
+            tome_slots = [tome_supply.pop() for _ in range(min(TOME_SLOT_COUNT, len(tome_supply)))]
+
         game_state = {
             "game_id": game_id,
             "debug_mode": bool(debug_mode),
             "preset": preset,
+            "goods_supply": goods_supply,
+            "goods_slots": goods_slots,
+            "tome_supply": tome_supply,
+            "tome_slots": tome_slots,
             "pending_required_choice": None,
             "player_list": player_list,
             "all_dukes": all_dukes,

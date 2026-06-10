@@ -143,6 +143,12 @@ class GameObjectEncoder(JSONEncoder):
                 "undead_samurai_pool": list(getattr(obj, "undead_samurai_pool", None) or []),
                 "undead_samurai_placed": bool(getattr(obj, "undead_samurai_placed", False)),
                 "kings_guard_pool": list(getattr(obj, "kings_guard_pool", None) or []),
+                # Crimson Seas Goods/Tomes: the face-up Araby/Nae Aerie slots are
+                # public; the face-down supplies are hidden, so only sizes go out.
+                "goods_slots": list(getattr(obj, "goods_slots", None) or []),
+                "goods_supply_size": len(getattr(obj, "goods_supply", None) or []),
+                "tome_slots": list(getattr(obj, "tome_slots", None) or []),
+                "tome_supply_size": len(getattr(obj, "tome_supply", None) or []),
                 "pending_reroll_twilight_used": bool(getattr(obj, "_pending_reroll_twilight_used", False)),
                 "pending_reroll_blood_moon_used": bool(getattr(obj, "_pending_reroll_blood_moon_used", False)),
             }
@@ -221,6 +227,11 @@ def serialize_game_to_save_dict(game):
     # reads the underscored keys via `game_state.get('_pending_reroll_*_used')`.
     base["_pending_reroll_twilight_used"] = bool(getattr(game, "_pending_reroll_twilight_used", False))
     base["_pending_reroll_blood_moon_used"] = bool(getattr(game, "_pending_reroll_blood_moon_used", False))
+
+    # Goods/Tome slots are already in the wire dict; the hidden supplies (full
+    # contents, not just size) must be persisted so a reload can keep dealing.
+    base["goods_supply"] = list(getattr(game, "goods_supply", []) or [])
+    base["tome_supply"] = list(getattr(game, "tome_supply", []) or [])
 
     return base
 

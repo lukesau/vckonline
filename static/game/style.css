@@ -1280,6 +1280,27 @@ html, body {
 .board-sail .sail-good { border-radius: 22%; }
 .board-sail .sail-tome { border-radius: 12%; }
 
+/* Image tokens (Goods): art fills the slot box; octagon shape comes from the PNG. */
+.board-sail .sail-token {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.board-sail .sail-token-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.5));
+}
+
+/* Tome tiles are opaque square art; round the corners slightly. */
+.board-sail .sail-tome-token .sail-token-img { border-radius: 8%; }
+
+.board-sail .sail-slot-empty {
+  border: 2px dashed rgba(255, 255, 255, 0.4);
+  border-radius: 12%;
+}
+
 /* Noble card back filling its slot, outlined in the noble border color. */
 .board-sail .sail-noble {
   padding: 0;
