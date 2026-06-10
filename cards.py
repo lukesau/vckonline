@@ -433,6 +433,102 @@ class Duke(Card):
         return _apply_persisted_card_flags(card, data)
 
 
+class Noble(Card):
+    """Crimson Seas Noble (Amarynth). DB-backed scoring card dealt face-up to
+    the 3 Noble slots on the Island Board at setup. Like Duke, a Noble is a
+    bundle of role counts plus end-game multipliers; the scoring/payout
+    implementation isn't wired up yet — this class just carries the data so the
+    dealer can shuffle the deck and place cards on the mat.
+    """
+
+    def __init__(self, noble_id, name, shadow_count, holy_count, soldier_count, worker_count,
+                 shadow_multiplier, holy_multiplier, soldier_multiplier, worker_multiplier,
+                 monster_multiplier, citizen_multiplier, domain_multiplier, boss_multiplier,
+                 minion_multiplier, beast_multiplier, titan_multiplier, goods_multiplier,
+                 has_special_duke_payout, special_duke_payout, expansion):
+        super().__init__()
+        self.noble_id = noble_id
+        self.name = name
+        self.shadow_count = _coerce_int(shadow_count)
+        self.holy_count = _coerce_int(holy_count)
+        self.soldier_count = _coerce_int(soldier_count)
+        self.worker_count = _coerce_int(worker_count)
+        self.shadow_multiplier = _coerce_int(shadow_multiplier)
+        self.holy_multiplier = _coerce_int(holy_multiplier)
+        self.soldier_multiplier = _coerce_int(soldier_multiplier)
+        self.worker_multiplier = _coerce_int(worker_multiplier)
+        self.monster_multiplier = _coerce_int(monster_multiplier)
+        self.citizen_multiplier = _coerce_int(citizen_multiplier)
+        self.domain_multiplier = _coerce_int(domain_multiplier)
+        self.boss_multiplier = _coerce_int(boss_multiplier)
+        self.minion_multiplier = _coerce_int(minion_multiplier)
+        self.beast_multiplier = _coerce_int(beast_multiplier)
+        self.titan_multiplier = _coerce_int(titan_multiplier)
+        self.goods_multiplier = _coerce_int(goods_multiplier)
+        self.has_special_duke_payout = has_special_duke_payout
+        self.special_duke_payout = special_duke_payout
+        self.expansion = expansion
+
+    def to_dict(self):
+        return {
+            **super().to_dict(),
+            "noble_id": self.noble_id,
+            "name": self.name,
+            "shadow_count": self.shadow_count,
+            "holy_count": self.holy_count,
+            "soldier_count": self.soldier_count,
+            "worker_count": self.worker_count,
+            "roles": {
+                "shadow": self.shadow_count,
+                "holy": self.holy_count,
+                "soldier": self.soldier_count,
+                "worker": self.worker_count,
+            },
+            "shadow_multiplier": self.shadow_multiplier,
+            "holy_multiplier": self.holy_multiplier,
+            "soldier_multiplier": self.soldier_multiplier,
+            "worker_multiplier": self.worker_multiplier,
+            "monster_multiplier": self.monster_multiplier,
+            "citizen_multiplier": self.citizen_multiplier,
+            "domain_multiplier": self.domain_multiplier,
+            "boss_multiplier": self.boss_multiplier,
+            "minion_multiplier": self.minion_multiplier,
+            "beast_multiplier": self.beast_multiplier,
+            "titan_multiplier": self.titan_multiplier,
+            "goods_multiplier": self.goods_multiplier,
+            "has_special_duke_payout": self.has_special_duke_payout,
+            "special_duke_payout": self.special_duke_payout,
+            "expansion": self.expansion,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        card = cls(
+            noble_id=data["noble_id"],
+            name=data["name"],
+            shadow_count=data.get("shadow_count"),
+            holy_count=data.get("holy_count"),
+            soldier_count=data.get("soldier_count"),
+            worker_count=data.get("worker_count"),
+            shadow_multiplier=data.get("shadow_multiplier"),
+            holy_multiplier=data.get("holy_multiplier"),
+            soldier_multiplier=data.get("soldier_multiplier"),
+            worker_multiplier=data.get("worker_multiplier"),
+            monster_multiplier=data.get("monster_multiplier"),
+            citizen_multiplier=data.get("citizen_multiplier"),
+            domain_multiplier=data.get("domain_multiplier"),
+            boss_multiplier=data.get("boss_multiplier"),
+            minion_multiplier=data.get("minion_multiplier"),
+            beast_multiplier=data.get("beast_multiplier"),
+            titan_multiplier=data.get("titan_multiplier"),
+            goods_multiplier=data.get("goods_multiplier"),
+            has_special_duke_payout=data.get("has_special_duke_payout", 0),
+            special_duke_payout=data.get("special_duke_payout"),
+            expansion=data.get("expansion"),
+        )
+        return _apply_persisted_card_flags(card, data)
+
+
 class Exhausted(Card):
     def __init__(self, exhausted_id):
         super().__init__()

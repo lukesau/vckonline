@@ -1053,8 +1053,11 @@ function renderSailAssets(overlay, state) {
     const node = tomes[i] ? makeSailToken(SAIL_TOME_IMAGES[tomes[i]], `${tomes[i]} tome`, 'sail-tome-token') : makeSailEmptySlot();
     placeSailAsset(overlay, sailBoxOf(L.tomes, s), node);
   });
-  L.nobles.slots.forEach((s, i) =>
-    placeSailAsset(overlay, sailBoxOf(L.nobles, s), makeSailNobleCard(i)));
+  const nobles = (state && state.noble_slots) || [];
+  L.nobles.slots.forEach((s, i) => {
+    const node = nobles[i] ? makeSailNobleCard(nobles[i]) : makeSailEmptySlot();
+    placeSailAsset(overlay, sailBoxOf(L.nobles, s), node);
+  });
   placeSailAsset(overlay, L.exekratys, makeSailExekratysReadout());
 }
 
@@ -1074,15 +1077,13 @@ function makeSailEmptySlot() {
   return mk('sail-slot-empty');
 }
 
-// Noble placeholder: the noble card back filling its slot, with the noble
-// outline color (--card-n-border, the back's dominant color). No live noble
-// data/class exists yet, so every slot just shows the face-down back.
-function makeSailNobleCard(idx) {
+// A dealt Noble card shown face-up in its Amarynth slot.
+function makeSailNobleCard(noble) {
   const card = mk('sail-card sail-noble');
   const img = document.createElement('img');
   img.className = 'sail-noble-img';
-  img.src = '/images/nobles/noble_back.jpg';
-  img.alt = idx != null ? `Noble ${idx + 1}` : 'Noble';
+  img.src = `/card-image/noble/${noble.noble_id}`;
+  img.alt = noble.name || 'Noble';
   card.appendChild(img);
   return card;
 }

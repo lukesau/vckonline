@@ -1,7 +1,7 @@
 import json
 from json import JSONEncoder
 
-from cards import Citizen, Domain, Duke, Event, Exhausted, Monster, Starter
+from cards import Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Starter
 from game_models import GameMember, LobbyMember, Player
 
 
@@ -72,6 +72,8 @@ class GameObjectEncoder(JSONEncoder):
                 "harvest_delta": getattr(obj, "harvest_delta", {"gold": 0, "strength": 0, "magic": 0, "victory": 0, "map": 0}),
             }
         if isinstance(obj, Duke):
+            return obj.to_dict()
+        if isinstance(obj, Noble):
             return obj.to_dict()
         if isinstance(obj, Event):
             return obj.to_dict()
@@ -149,6 +151,10 @@ class GameObjectEncoder(JSONEncoder):
                 "goods_supply_size": len(getattr(obj, "goods_supply", None) or []),
                 "tome_slots": list(getattr(obj, "tome_slots", None) or []),
                 "tome_supply_size": len(getattr(obj, "tome_supply", None) or []),
+                # Crimson Seas Nobles: the face-up Amarynth slots are public; the
+                # face-down deck is hidden, so only its size goes out.
+                "noble_slots": [n.to_dict() for n in (getattr(obj, "noble_slots", None) or [])],
+                "noble_supply_size": len(getattr(obj, "noble_supply", None) or []),
                 "pending_reroll_twilight_used": bool(getattr(obj, "_pending_reroll_twilight_used", False)),
                 "pending_reroll_blood_moon_used": bool(getattr(obj, "_pending_reroll_blood_moon_used", False)),
             }
@@ -189,6 +195,8 @@ def _rehydrate_card_from_dict(d):
         return Domain.from_dict(d)
     if "duke_id" in d:
         return Duke.from_dict(d)
+    if "noble_id" in d:
+        return Noble.from_dict(d)
     if "monster_id" in d:
         return Monster.from_dict(d)
     if "exhausted_id" in d or d.get("name") == "Exhausted":
@@ -233,6 +241,12 @@ def serialize_game_to_save_dict(game):
     base["goods_supply"] = list(getattr(game, "goods_supply", []) or [])
     base["tome_supply"] = list(getattr(game, "tome_supply", []) or [])
 
+    # Noble slots are already in the wire dict as card dicts; the hidden deck
+    # (full contents, not just size) must be persisted so a reload can keep
+    # dealing. Both rehydrate back into Noble objects on load.
+    base["noble_slots"] = [n.to_dict() for n in (getattr(game, "noble_slots", []) or [])]
+    base["noble_supply"] = [n.to_dict() for n in (getattr(game, "noble_supply", []) or [])]
+
     return base
 
 
@@ -273,6 +287,12 @@ def deserialize_save_dict_to_game(data):
     ]
     state["all_dukes"] = [
         _rehydrate_card_from_dict(c) for c in (state.get("all_dukes") or [])
+    ]
+    state["noble_slots"] = [
+        _rehydrate_card_from_dict(c) for c in (state.get("noble_slots") or [])
+    ]
+    state["noble_supply"] = [
+        _rehydrate_card_from_dict(c) for c in (state.get("noble_supply") or [])
     ]
 
     return Game(state)

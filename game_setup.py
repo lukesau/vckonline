@@ -3,7 +3,7 @@ from typing import List
 
 from banned_cards import banned_domain_ids, banned_duke_ids
 from card_filters import is_unimplemented_event, keep_for_random
-from cards import Citizen, Domain, Duke, Event, Exhausted, Monster, Starter
+from cards import Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Starter
 from game_models import Player
 
 # Domain IDs granted (one extra copy per player) when the lobby's
@@ -60,6 +60,12 @@ GOODS_SLOT_COUNT = 3
 TOME_TYPES = ("gold", "magic", "strength")
 TOME_COPIES_PER_TYPE = 7
 TOME_SLOT_COUNT = 3
+
+# Crimson Seas "Noble" cards (Amarynth). Unlike Goods/Tomes these are real
+# DB-backed Card objects (the `nobles` table). At setup the deck is shuffled
+# face-down into a supply and 3 are dealt face-up into the 3 Amarynth slots on
+# the Island Board.
+NOBLE_SLOT_COUNT = 3
 
 # Starters split into two groups by roll_match:
 #   - "core" starters (Peasant/Knight, real roll numbers) are mandatory: every
@@ -316,6 +322,9 @@ def load_game_data(
     # ends up in the deck (see the deck build after monster-area selection).
     kings_guard_reserve = []
     kings_guard_pool = []
+    # Crimson Seas Nobles (Amarynth). Materialized Noble objects loaded while the
+    # DB cursor is open; only shuffled/dealt for the crimsonseas preset.
+    noble_pool = []
     starter_query = "SELECT * FROM starters ORDER BY id_starters"
     starter_stack = []
     player_list = []
@@ -761,6 +770,36 @@ def load_game_data(
         except Exception:
             kings_guard_reserve = []
 
+        # Crimson Seas Nobles. Only the crimsonseas preset uses the Amarynth
+        # board, so only load the deck there. Materialized into Noble objects
+        # now while the cursor is open; shuffled/dealt below.
+        if preset == "crimsonseas":
+            my_cursor.execute("SELECT * FROM nobles")
+            for row in (my_cursor.fetchall() or []):
+                noble_pool.append(Noble(
+                    row["id_nobles"],
+                    row["name"],
+                    row["shadow_count"],
+                    row["holy_count"],
+                    row["soldier_count"],
+                    row["worker_count"],
+                    row["shadow_multiplier"],
+                    row["holy_multiplier"],
+                    row["soldier_multiplier"],
+                    row["worker_multiplier"],
+                    row["monster_multiplier"],
+                    row["citizen_multiplier"],
+                    row["domain_multiplier"],
+                    row["boss_multiplier"],
+                    row["minion_multiplier"],
+                    row["beast_multiplier"],
+                    row["titan_multiplier"],
+                    row["goods_multiplier"],
+                    row["has_special_duke_payout"],
+                    row["special_duke_payout"],
+                    row["expansion"],
+                ))
+
         my_cursor.close()
         my_connect.close()
     except Exception as e:
@@ -1001,11 +1040,15 @@ def load_game_data(
                 stack.append(domain)
 
         # Crimson Seas: shuffle the Goods/Tome supplies and deal 3 face-up into
-        # Araby (Goods) and Nae Aerie (Tomes).
+        # Araby (Goods) and Nae Aerie (Tomes). Nobles (Amarynth) are real cards:
+        # shuffle the deck and deal 3 face-up into the Amarynth slots, leaving the
+        # rest in a face-down supply.
         goods_supply = []
         goods_slots = []
         tome_supply = []
         tome_slots = []
+        noble_supply = []
+        noble_slots = []
         if preset == "crimsonseas":
             goods_supply = [t for t in GOODS_TYPES for _ in range(GOODS_COPIES_PER_TYPE)]
             random.shuffle(goods_supply)
@@ -1015,6 +1058,13 @@ def load_game_data(
             random.shuffle(tome_supply)
             tome_slots = [tome_supply.pop() for _ in range(min(TOME_SLOT_COUNT, len(tome_supply)))]
 
+            noble_supply = list(noble_pool)
+            random.shuffle(noble_supply)
+            noble_slots = [noble_supply.pop() for _ in range(min(NOBLE_SLOT_COUNT, len(noble_supply)))]
+            for noble in noble_slots:
+                noble.toggle_visibility(True)
+                noble.toggle_accessibility(True)
+
         game_state = {
             "game_id": game_id,
             "debug_mode": bool(debug_mode),
@@ -1023,6 +1073,8 @@ def load_game_data(
             "goods_slots": goods_slots,
             "tome_supply": tome_supply,
             "tome_slots": tome_slots,
+            "noble_supply": noble_supply,
+            "noble_slots": noble_slots,
             "pending_required_choice": None,
             "player_list": player_list,
             "all_dukes": all_dukes,

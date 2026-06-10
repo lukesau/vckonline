@@ -130,6 +130,7 @@ The PK columns are named `id_<table>` (legacy schema), not `<table>_id`:
 | `dukes`    | `id_dukes`    |
 | `starters` | `id_starters` |
 | `events`   | `id_events`   |
+| `nobles`   | `id_nobles`   |
 
 The Python card classes (`cards.py`) expose them as `citizen_id`, `monster_id`, etc. — the mapping happens in `game_setup.py` when building objects from DB rows.
 

@@ -88,6 +88,12 @@ class Game:
         # game_setup.TOME_TYPES). Empty outside the Crimson Seas preset.
         self.tome_supply = list(game_state.get('tome_supply') or [])
         self.tome_slots = list(game_state.get('tome_slots') or [])
+        # Crimson Seas Noble cards (Amarynth). `noble_supply` is the hidden
+        # face-down deck; `noble_slots` holds the (up to 3) face-up Noble cards
+        # in the Amarynth slots. Entries are Noble card objects (see
+        # game_setup.NOBLE_SLOT_COUNT). Empty outside the Crimson Seas preset.
+        self.noble_supply = list(game_state.get('noble_supply') or [])
+        self.noble_slots = list(game_state.get('noble_slots') or [])
         self.player_list = game_state['player_list']
         # Full duke catalog for this game's config (every duke that could be in
         # play), snapshot at setup before dealing. Used to surface a per-duke VP

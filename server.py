@@ -51,6 +51,7 @@ _CARD_IMAGE_DIRS: Dict[str, Path] = {
     "duke":    _REPO_ROOT / "images" / "dukes",
     "starter": _REPO_ROOT / "images" / "starters",
     "event":   _REPO_ROOT / "images" / "exhausted",
+    "noble":   _REPO_ROOT / "images" / "nobles",
 }
 # Single 400x570 back for all Exhausted tokens; generate with scripts/card_image_utils.py from images/exhausted_back.jpg
 _EXHAUSTED_CARD_JPEG = _REPO_ROOT / "images" / "exhausted" / "exhausted_card.jpg"
