@@ -79,7 +79,7 @@ class ChooseEngine:
                 amt = int(amt_s)
             except (TypeError, ValueError):
                 return (command or ""), []
-            if tok not in ("g", "s", "m", "v", "p") or amt <= 0:
+            if tok not in ("g", "s", "m", "v", "p", "t") or amt <= 0:
                 return (command or ""), []
             options.append({"token": tok, "amount": amt})
             i = k
@@ -87,7 +87,7 @@ class ChooseEngine:
             return (command or ""), []
         norm_parts = []
         for o in options:
-            if o["token"] in ("g", "s", "m", "v", "p"):
+            if o["token"] in ("g", "s", "m", "v", "p", "t"):
                 norm_parts.append(f"{o['token']} {o['amount']}")
             elif o["token"] == "count_area":
                 area_tok = self.game.payouts._emit_payout_token(o.get('area'))
@@ -372,14 +372,22 @@ class ChooseEngine:
     # ----------------------------------------------------------------------
 
     def _filter_unavailable_choose_options(self, options):
-        maps_enabled = self.game.maps_enabled()
+        crimson_seas = self.game.maps_enabled()
         out = []
         for opt in options or []:
             token = (opt.get("token") or "").strip().lower()
             # Maps are a Crimson Seas mechanic. Outside that preset, drop the
             # map option entirely so the player is only offered the card's
             # non-map "out". (Crimson Seas cards always provide one.)
-            if token == "p" and not maps_enabled:
+            if token == "p" and not crimson_seas:
+                continue
+            # Tomes are likewise a Crimson Seas mechanic, and not implemented
+            # yet. Outside Crimson Seas the card always offers a non-tome "out",
+            # so drop the leg and let the rest of the choose stand. Inside
+            # Crimson Seas the option is kept; picking it surfaces an explicit
+            # "not implemented" error to the slaying player (see
+            # _apply_choose_option) rather than silently doing nothing.
+            if token == "t" and not crimson_seas:
                 continue
             if token == "citizens_where":
                 spec = opt.get("spec") or {}
@@ -393,7 +401,7 @@ class ChooseEngine:
         expanded = []
         for opt in options or []:
             token = (opt.get("token") or "").strip().lower()
-            if token in ("g", "s", "m", "v", "p"):
+            if token in ("g", "s", "m", "v", "p", "t"):
                 expanded.append({"token": token, "amount": int(opt.get("amount", 0) or 0)})
                 continue
             if token == "count_area":
@@ -563,6 +571,12 @@ class ChooseEngine:
             else:
                 return False
             return True
+        if token == "t":
+            # Tomes are not implemented yet. This branch is only reachable in a
+            # Crimson Seas game (the option is filtered out elsewhere), where we
+            # surface an explicit error to the slaying player instead of
+            # silently dropping their choice.
+            raise ValueError("Tome payouts are not implemented yet.")
         dg = ds = dm = dv = dp = 0
         if token == "g":
             dg = amount
@@ -588,8 +602,8 @@ class ChooseEngine:
 
     def _describe_choose_option(self, opt):
         token = (opt.get("token") or "").strip().lower()
-        if token in ("g", "s", "m", "v", "p"):
-            label = {"g": "gold", "s": "strength", "m": "magic", "v": "victory", "p": "map"}[token]
+        if token in ("g", "s", "m", "v", "p", "t"):
+            label = {"g": "gold", "s": "strength", "m": "magic", "v": "victory", "p": "map", "t": "tome"}[token]
             return f"+{int(opt.get('amount', 0) or 0)} {label}"
         if token == "count_area":
             area = opt.get("area")

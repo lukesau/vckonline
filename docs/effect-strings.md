@@ -110,6 +110,7 @@ queues). Positive gains still reach everyone. Immediate losses floor at 0.
 | Flaming Devourer | roll_effect | `banish_center_citizen optional` | Monster event. While in play, when a 4 is rolled, the active player may banish one accessible citizen from the center stacks. The `optional` token makes the prompt skippable. |
 | Giants of Ostendaar | roll_effect + special_reward | `banish_center_domain optional` / `<domains>` | Monster event. While in play, when a 5 is rolled, the active player may banish one face-up domain from the center stacks; the next domain in that stack is revealed immediately (or the slot refills from the exhausted deck). Slaying it grants a free domain (`<domains>`). |
 | Leviathan | roll_effect + special_reward | `add_self_slay_cost s 1 max=10` / `count owned_monsters v 1` | Monster event. While in play, when a 6 is rolled, 1 Strength token is added to the Leviathan, raising its own slay cost by 1 (printed + tokens), capped at +10. Slaying it grants 1 VP per owned Monster (the slain Leviathan counts). |
+| Skeleton Army | roll_effect + special_reward | `flip_citizen targeted optional` / `choose g 4 t 1` | Monster event. While in play, when a 3 is rolled, the active player may flip one citizen on an opponent's tableau face-down (it stays inactive but is counted at end-game scoring); the prompt reuses the monster reward's targeted-flip flow and `optional` makes it skippable. The slay reward "Gain 4 Gold or 1 Tome" — tomes (`t`) aren't implemented yet, so outside Crimson Seas the tome leg is dropped (player just takes the gold) and inside Crimson Seas selecting the tome raises an explicit "not implemented" error. |
 
 Notes on reuse:
 
@@ -255,6 +256,16 @@ choose m 2 p 1                              # pick one: +2 magic or +1 map (Crim
 `p`. Maps are tracked on `Player.map_score`, surface in `harvest_delta["map"]`,
 and render with `/images/map.png`. There is currently no way to *spend* maps —
 they are only earned (citizen payouts, the `+1 Map` standard action) and shown.
+
+`t` = **tome**, another Crimson Seas resource, is **recognized but not yet
+implemented**. It only appears as a `choose` leg (e.g. Skeleton Army's
+`choose g 4 t 1`). Outside Crimson Seas the tome leg is dropped from the prompt
+(same as `p` maps) so the player is left with the card's non-tome out. Inside
+Crimson Seas the tome option is offered, but `_apply_choose_option` raises
+`ValueError("Tome payouts are not implemented yet.")` if it is selected, so the
+slaying player gets an explicit error rather than a silent no-op. Implement
+tomes by giving `t` a real branch in `_apply_choose_option` (and a `Player`
+score field) and dropping the `not crimson_seas` filter / raise.
 
 Maps are gated to the **Crimson Seas preset** via `Game.maps_enabled()` (true
 only when `preset == "crimsonseas"`). Crimson Seas citizens/monsters can still

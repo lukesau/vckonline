@@ -352,6 +352,10 @@ class DiceEngine:
           banish_center_domain [optional]   — active player banishes (or may
                                               skip) a face-up domain from center
                                               stacks; the next domain is revealed
+          flip_citizen targeted [optional]  — active player flips (or may skip)
+                                              one citizen on an opponent's
+                                              tableau face-down for the rest of
+                                              the game (Skeleton Army)
           add_self_slay_cost s|m|g N [max=K]  — add N to THIS event's own slay
                                               cost (no choice); capped at +K
         """
@@ -370,6 +374,15 @@ class DiceEngine:
             if optional:
                 command += " optional"
             self.game.payouts._execute_banish_center_payout(command, player_id)
+            return
+
+        if verb == "flip_citizen":
+            # Skeleton Army: when a 3 is rolled the active player MAY flip one
+            # citizen on an opponent's tableau face-down. It stays inactive for
+            # the rest of the game and is counted at end-game scoring (the flip
+            # mechanic). Reuses the monster reward's targeted-flip prompt; the
+            # `optional` token makes the prompt skippable.
+            self.game.payouts._execute_flip_citizen_payout(raw, player_id)
             return
 
         if len(parts) < 3:
