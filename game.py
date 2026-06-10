@@ -398,6 +398,66 @@ class Game:
         """
         return (self.preset or "").strip().lower() == "crimsonseas"
 
+    def _pirate_blockade_in_play(self):
+        """True if a Pirate Blockade monster event is currently on the board.
+
+        Identified by its roll-effect marker (`block_recruit_matching_roll`) so
+        the check is card-agnostic. The blockade fires its roll effect each roll
+        phase, but the actual recruit/gain restriction is evaluated on demand
+        (see `_pirate_blockade_blocked_roll_values`) so slaying the ship lifts
+        the restriction immediately.
+        """
+        for grid in (self.monster_grid, self.citizen_grid, self.domain_grid):
+            for stack in (grid or []):
+                if not stack:
+                    continue
+                top = stack[-1]
+                if not isinstance(top, Event) or not bool(getattr(top, "is_monster", 0)):
+                    continue
+                raw = (getattr(top, "roll_effect", None) or "").strip().lower()
+                if raw.split(" ", 1)[0] == "block_recruit_matching_roll":
+                    return True
+        return False
+
+    def _pirate_blockade_blocked_roll_values(self):
+        """The set of citizen roll-match values that may not be recruited/gained
+        this turn while Pirate Blockade is in play, else an empty set.
+
+        Only active during the active player's Action Phase (the card text scopes
+        the restriction to "the Action Phase"); reads this turn's FINAL dice.
+        """
+        if (getattr(self, "phase", None) or "") != "action":
+            return set()
+        if not self._pirate_blockade_in_play():
+            return set()
+        vals = set()
+        for v in (self.die_one, self.die_two, self.die_sum):
+            try:
+                iv = int(v)
+            except (TypeError, ValueError):
+                continue
+            if iv > 0:
+                vals.add(iv)
+        return vals
+
+    def _citizen_blocked_by_pirate_blockade(self, citizen):
+        """True if `citizen` may not be recruited/gained right now because its
+        roll match equals one of the values blocked by an in-play Pirate
+        Blockade."""
+        if citizen is None:
+            return False
+        blocked = self._pirate_blockade_blocked_roll_values()
+        if not blocked:
+            return False
+        for attr in ("roll_match1", "roll_match2"):
+            try:
+                rv = int(getattr(citizen, attr, 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if rv in blocked:
+                return True
+        return False
+
     def _player_scores_line(self, player):
         if not player:
             return "G?/S?/M?/VP?/P?"

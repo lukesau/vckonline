@@ -33,6 +33,8 @@ function tableauCardFullText(card) {
   const specialCost = (card.special_cost ?? '').toString().trim();
   if (specialReward) parts.push(`Special reward: ${specialReward}`);
   if (specialCost) parts.push(`Special cost: ${specialCost}`);
+  const goldPool = Number(card.gold_pool || 0);
+  if (goldPool) parts.push(`Gold pool: ${goldPool}`);
 
   if (card.duke_id !== undefined) {
     const mults = [];
@@ -1187,6 +1189,8 @@ function buildCardStats(card) {
   if (card.gold_reward)     push('Gold reward',  card.gold_reward,     'modal-gold', 'gold', true);
   if (card.strength_reward) push('Str reward',   card.strength_reward, 'modal-str',  'strength', true);
   if (card.magic_reward)    push('Mag reward',   card.magic_reward,    'modal-mag',  'magic', true);
+  // Ghost Ship: gold banked on the card, claimed in full by the slayer.
+  if (card.gold_pool)       push('Gold pool',    card.gold_pool,       'modal-gold', 'gold', false);
 
   if (card.domain_id != null) {
     const reqRoles = [

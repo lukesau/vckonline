@@ -204,6 +204,13 @@ class EventsEngine:
         if not activation:
             return
         low = activation.lower()
+        if low.startswith("add_self_gold_pool"):
+            # Ghost Ship: on reveal the active player immediately places gold
+            # from their supply onto the card (same accrual the roll effect
+            # uses each roll phase). No prompt, so fire it right here where the
+            # card object is in hand rather than routing through _fire_activation.
+            self.game.dice._accrue_event_gold_pool(event, revealing_player_id, activation.split())
+            return
         if "place_reserve_monster" in low:
             if getattr(self.game, "undead_samurai_placed", False):
                 return

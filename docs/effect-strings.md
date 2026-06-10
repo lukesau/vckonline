@@ -111,6 +111,8 @@ queues). Positive gains still reach everyone. Immediate losses floor at 0.
 | Giants of Ostendaar | roll_effect + special_reward | `banish_center_domain optional` / `<domains>` | Monster event. While in play, when a 5 is rolled, the active player may banish one face-up domain from the center stacks; the next domain in that stack is revealed immediately (or the slot refills from the exhausted deck). Slaying it grants a free domain (`<domains>`). |
 | Leviathan | roll_effect + special_reward | `add_self_slay_cost s 1 max=10` / `count owned_monsters v 1` | Monster event. While in play, when a 6 is rolled, 1 Strength token is added to the Leviathan, raising its own slay cost by 1 (printed + tokens), capped at +10. Slaying it grants 1 VP per owned Monster (the slain Leviathan counts). |
 | Skeleton Army | roll_effect + special_reward | `flip_citizen targeted optional` / `choose g 4 t 1` | Monster event. While in play, when a 3 is rolled, the active player may flip one citizen on an opponent's tableau face-down (it stays inactive but is counted at end-game scoring); the prompt reuses the monster reward's targeted-flip flow and `optional` makes it skippable. The slay reward "Gain 4 Gold or 1 Tome" — tomes (`t`) aren't implemented yet, so outside Crimson Seas the tome leg is dropped (player just takes the gold) and inside Crimson Seas selecting the tome raises an explicit "not implemented" error. |
+| Ghost Ship | activation + roll_effect + special_reward | `add_self_gold_pool 1` / `add_self_gold_pool 1` / `gain_self_gold_pool` | Monster event with `roll_match1 == -1` (the "every roll phase" sentinel). On reveal, and at the end of **every** roll phase while in play, the active player places 1 Gold from their supply onto the card (a player short on gold places only what they have). The accumulated `gold_pool` is stored on the card (serialized, runtime-only like the `extra_*` costs). Whoever slays the ship claims the whole pool via `gain_self_gold_pool` (reads `game._immediate_slay_source_card`). |
+| Pirate Blockade | roll_effect + special_reward | `block_recruit_matching_roll` / `choose g 4 p 2` | Monster event with `roll_match1 == -1`. While in play, during the active player's **Action Phase**, no citizen whose roll match (`roll_match1`/`roll_match2`) equals either die or the dice sum may be recruited or gained — this covers the Recruit a Citizen action and any Monster/Domain citizen grant. Enforcement is an on-demand in-play scan (`Game._citizen_blocked_by_pirate_blockade`), so slaying the ship lifts the restriction immediately; the roll effect firing just logs the blocked values. The slay reward "Gain 4 Gold or 2 Maps" reuses the existing map (`p`) handling. |
 
 Notes on reuse:
 
@@ -156,6 +158,18 @@ Notes on reuse:
   `_unexhaust_stack_top_if_present`) and the event recycles into the deck; a
   later re-reveal restores exactly the retracted count. Guards already hired into
   a tableau are never touched.
+- Monster-event `roll_effect` verbs are dispatched by `DiceEngine._execute_event_roll_effect`
+  against the FINAL dice each roll phase. `roll_match1` selects when they fire:
+  a positive value matches that die or the dice sum, and the sentinel `-1` means
+  "every roll phase" (Ghost Ship, Pirate Blockade). Verbs:
+  `all_lose <r> N`, `add_slay_cost <r> N` (player picks a board monster),
+  `add_self_slay_cost <r> N [max=K]` (accrue onto this card),
+  `banish_center_citizen|banish_center_domain [optional]`,
+  `flip_citizen targeted [optional]`, `add_self_gold_pool N` (active player moves
+  N gold onto this card's `gold_pool`), and `block_recruit_matching_roll`
+  (Pirate Blockade marker — no state mutation; the recruit/gain block is enforced
+  on demand). `gain_self_gold_pool` is the matching slay reward that pays out the
+  accumulated pool.
 - `grant_all <flag>` is a "rest of the game" passive: on reveal it grants the
   named flag (e.g. `action.blessedlands`, `action.darklordrising`) to every
   player's `granted_effects` (idempotent). The grant is tied to the card being

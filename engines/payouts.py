@@ -475,6 +475,26 @@ class PayoutsEngine:
         )
         return [0, 0, 0, 0]
 
+    def _execute_gain_self_gold_pool_payout(self, player_id):
+        """Ghost Ship: the slayer gains all gold accumulated on the slain card.
+
+        The card being slain is exposed by ``slay_monster`` on
+        ``game._immediate_slay_source_card``. We read its ``gold_pool``, return
+        it as a gold payout (the slay flow applies it to the player) and zero the
+        pool so it can't be claimed twice.
+        """
+        card = getattr(self.game, "_immediate_slay_source_card", None)
+        pool = int(getattr(card, "gold_pool", 0) or 0) if card is not None else 0
+        if card is not None:
+            card.gold_pool = 0
+        if pool > 0:
+            name = getattr(self.game, "_immediate_slay_source_label", None) or "the ship"
+            self.game._log_game_event(
+                f"{self.game._player_label(player_id)} claimed {pool} gold "
+                f"from the pool on \"{name}\"."
+            )
+        return [pool, 0, 0, 0]
+
     def _execute_steal_citizen_payout(self, command, player_id):
         """Hobb's End: steal a citizen (cost <= max_cost) from an opponent's tableau.
 
@@ -891,6 +911,8 @@ class PayoutsEngine:
         if low == "concurrent_flip_one_citizen":
             self.game.dice._begin_concurrent_flip_one_citizen(player_id)
             return [0, 0, 0, 0]
+        if low == "gain_self_gold_pool":
+            return self._execute_gain_self_gold_pool_payout(player_id)
         if low.startswith("flip_citizen"):
             return self._execute_flip_citizen_payout(raw, player_id)
         if low == "flip_opponent_citizen":

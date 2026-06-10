@@ -1459,6 +1459,11 @@ class PlayerActionsEngine:
             if int(getattr(top, "citizen_id", -1)) != int(citizen_id) or not getattr(top, "is_accessible", False):
                 continue
 
+            if self.game._citizen_blocked_by_pirate_blockade(top):
+                raise ValueError(
+                    "Pirate Blockade: a citizen matching this turn's roll cannot be recruited."
+                )
+
             player = None
             for p in self.game.player_list:
                 if p.player_id == player_id:
@@ -1589,10 +1594,14 @@ class PlayerActionsEngine:
                 _prior_required_action = (self.game.action_required or {}).get("action", "") if isinstance(self.game.action_required, dict) else ""
                 _prior_concurrent = getattr(self.game, "concurrent_action", None)
                 self.game._immediate_slay_source_label = getattr(top, "name", "Monster")
+                # Expose the slain card so card-state rewards (Ghost Ship's
+                # gain_self_gold_pool) can read accumulated tokens off it.
+                self.game._immediate_slay_source_card = top
                 try:
                     payout = self.game.payouts.execute_special_payout(top.special_reward, player_id)
                 finally:
                     self.game._immediate_slay_source_label = None
+                    self.game._immediate_slay_source_card = None
                 _new_required_action = (self.game.action_required or {}).get("action", "") if isinstance(self.game.action_required, dict) else ""
                 _new_concurrent = getattr(self.game, "concurrent_action", None)
                 _opened_new_prompt = (

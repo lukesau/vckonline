@@ -1640,7 +1640,36 @@ function makeCard(card, mode) {
     _appendCardText(el, card, mode);
   }
 
+  // Ghost Ship: gold accumulated on the card is just a bank sitting on the
+  // monster (claimed by the slayer), not a slay-cost change like Leviathan's
+  // strength tokens — so it gets its own coin badge rather than folding into
+  // the cost line. Shown for any face-up card carrying a pool.
+  if (!cardObscuredFromViewer(card)) {
+    const goldBadge = makeGoldPoolBadge(card);
+    if (goldBadge) el.appendChild(goldBadge);
+  }
+
   return el;
+}
+
+// Coin badge for a card's accumulated gold pool (Ghost Ship). Returns null when
+// the card carries no pool. Positioned top-left so it clears the "Alt" control
+// (top-right) and the stack-depth badge (bottom-right).
+function makeGoldPoolBadge(card) {
+  const pool = Number(card && card.gold_pool) || 0;
+  if (pool <= 0) return null;
+  const badge = mk('card-gold-pool');
+  const img = document.createElement('img');
+  img.className = 'card-gold-pool-icon';
+  img.alt = '';
+  img.src = TABLEAU_RESOURCE_ICONS.gold;
+  const num = mk('card-gold-pool-count');
+  num.textContent = String(pool);
+  badge.appendChild(img);
+  badge.appendChild(num);
+  badge.title = `${pool} gold on this card`;
+  badge.setAttribute('aria-label', `${pool} gold on this card`);
+  return badge;
 }
 
 // Small top-right "Alt" button mirroring the wiki: a single alternate toggles

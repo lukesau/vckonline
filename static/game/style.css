@@ -1073,6 +1073,33 @@ html, body {
   pointer-events: none;
 }
 
+/* Ghost Ship gold pool: a coin badge in the top-left corner. */
+.card-gold-pool {
+  position: absolute;
+  top: 4px; left: 4px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px 2px 3px;
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.74);
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  font-weight: 700;
+  font-size: clamp(10px, 2.4vmin, 14px);
+  line-height: 1;
+  pointer-events: none;
+}
+.card-gold-pool-icon {
+  width: 1.05em;
+  height: 1.05em;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+.card-gold-pool-count { font-variant-numeric: tabular-nums; }
+
 /* Ordered tableau stacks (e.g. slain monsters): cards are fanned vertically so
    each card after the first overlaps the previous one. The overlap distance is
    set via --fan-overlap by JS so the whole pile always fits the 1×2 (100cqh)

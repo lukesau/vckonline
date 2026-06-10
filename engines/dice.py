@@ -337,7 +337,15 @@ class DiceEngine:
                     match_val = int(top.roll_match1 or 0)
                 except (TypeError, ValueError):
                     continue
-                if match_val == d1 or match_val == d2 or match_val == (d1 + d2):
+                # roll_match1 == -1 is the "every roll phase" sentinel (Ghost
+                # Ship): the effect fires regardless of the dice. Otherwise the
+                # effect matches a specific die value or the dice sum.
+                if (
+                    match_val == -1
+                    or match_val == d1
+                    or match_val == d2
+                    or match_val == (d1 + d2)
+                ):
                     self._execute_event_roll_effect(top, active_player_id)
 
     def _execute_event_roll_effect(self, event, player_id):
@@ -383,6 +391,29 @@ class DiceEngine:
             # mechanic). Reuses the monster reward's targeted-flip prompt; the
             # `optional` token makes the prompt skippable.
             self.game.payouts._execute_flip_citizen_payout(raw, player_id)
+            return
+
+        if verb == "add_self_gold_pool":
+            # Ghost Ship: at the end of every roll phase the active player must
+            # place N gold from their supply onto this card. The accumulated
+            # pool is claimed by whoever slays the ship (gain_self_gold_pool).
+            self._accrue_event_gold_pool(event, player_id, parts)
+            return
+
+        if verb == "block_recruit_matching_roll":
+            # Pirate Blockade: while in play, during the active player's Action
+            # Phase no citizen whose roll match equals either die or the dice sum
+            # may be recruited or gained. Enforcement is an on-demand in-play scan
+            # (Game._citizen_blocked_by_pirate_blockade); this firing just logs
+            # the restriction for the turn so the values are visible in the log.
+            vals = sorted(
+                {int(self.game.die_one or 0), int(self.game.die_two or 0), int(self.game.die_sum or 0)}
+                - {0}
+            )
+            self.game._log_game_event(
+                f"Event \"{event.name}\" in play: citizens matching roll value(s) "
+                f"{', '.join(str(v) for v in vals)} cannot be recruited or gained this turn."
+            )
             return
 
         if len(parts) < 3:
@@ -498,6 +529,38 @@ class DiceEngine:
             self.game._log_game_event(
                 f"Event \"{event.name}\" triggered but unknown verb: {verb!r}"
             )
+
+    def _accrue_event_gold_pool(self, event, player_id, parts):
+        """Move up to N gold from the active player's supply onto ``event``'s
+        gold pool (Ghost Ship). ``parts`` is the tokenized effect string, e.g.
+        ``["add_self_gold_pool", "1"]``. A player who is short on gold places
+        only what they have; a player with none places nothing.
+        """
+        try:
+            amount = int(parts[1]) if len(parts) >= 2 else 1
+        except (TypeError, ValueError):
+            amount = 0
+        if amount <= 0:
+            return
+        player = self.game._player_by_id(player_id)
+        if not player:
+            return
+        available = int(getattr(player, "gold_score", 0) or 0)
+        placed = min(amount, available)
+        name = getattr(event, "name", "Event")
+        if placed <= 0:
+            self.game._log_game_event(
+                f"{self.game._player_label(player_id)} has no gold to place on \"{name}\"."
+            )
+            return
+        before = self.game._player_scores_line(player)
+        player.gold_score = available - placed
+        event.gold_pool = int(getattr(event, "gold_pool", 0) or 0) + placed
+        after = self.game._player_scores_line(player)
+        self.game._log_game_event(
+            f"{self.game._player_label(player_id)} placed {placed} gold on \"{name}\" "
+            f"(pool now {event.gold_pool}); scores {before} -> {after}"
+        )
 
     def apply_event_slay_cost(self, player_id, monster_id=None, event_id=None):
         """Resolve the pending_event_slay_cost choice.

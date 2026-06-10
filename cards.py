@@ -475,6 +475,12 @@ class Event(Card):
         self.extra_strength_cost = _coerce_int(extra_strength_cost)
         self.extra_magic_cost = _coerce_int(extra_magic_cost)
         self.extra_gold_cost = _coerce_int(extra_gold_cost)
+        # Accumulated gold tokens sitting on this card (Ghost Ship). The active
+        # player adds to it on reveal and each roll phase; the slayer claims the
+        # whole pool as their reward. Runtime-only state, so (like the extra_*
+        # cost fields) it is set here and restored in from_dict / emitted by
+        # to_dict rather than coming from a DB column.
+        self.gold_pool = 0
         self.monster_type = monster_type
         self.vp_reward = _coerce_int(vp_reward)
         self.gold_reward = _coerce_int(gold_reward)
@@ -505,6 +511,7 @@ class Event(Card):
             "extra_strength_cost": self.extra_strength_cost,
             "extra_magic_cost": self.extra_magic_cost,
             "extra_gold_cost": self.extra_gold_cost,
+            "gold_pool": int(getattr(self, "gold_pool", 0) or 0),
             "monster_type": self.monster_type,
             "vp_reward": self.vp_reward,
             "gold_reward": self.gold_reward,
@@ -542,4 +549,5 @@ class Event(Card):
             extra_magic_cost=d.get("extra_magic_cost", 0),
             extra_gold_cost=d.get("extra_gold_cost", 0),
         )
+        card.gold_pool = _coerce_int(d.get("gold_pool", 0))
         return _apply_persisted_card_flags(card, d)

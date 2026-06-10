@@ -321,6 +321,10 @@ class ChooseEngine:
             # Skip Event/Exhausted placeholders that may occupy citizen slots.
             if getattr(top, "citizen_id", None) is None:
                 continue
+            # Pirate Blockade: a citizen whose roll match equals this turn's
+            # rolled values may not be gained, even via a Monster/Domain reward.
+            if self.game._citizen_blocked_by_pirate_blockade(top):
+                continue
             if self._citizen_matches_filter(top, spec):
                 out.append(top)
         return out
