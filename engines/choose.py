@@ -376,7 +376,7 @@ class ChooseEngine:
     # ----------------------------------------------------------------------
 
     def _filter_unavailable_choose_options(self, options):
-        crimson_seas = self.game.maps_enabled()
+        crimson_seas = self.game.crimson_seas_enabled()
         out = []
         for opt in options or []:
             token = (opt.get("token") or "").strip().lower()

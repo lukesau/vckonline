@@ -174,7 +174,7 @@ function makePromptResourcesPanel(state) {
     pills.appendChild(makeResourceScorePill('gold', p.gold_score, 'Gold', TABLEAU_RESOURCE_ICONS.gold));
     pills.appendChild(makeResourceScorePill('strength', p.strength_score, 'Strength', TABLEAU_RESOURCE_ICONS.strength));
     pills.appendChild(makeResourceScorePill('magic', p.magic_score, 'Magic', TABLEAU_RESOURCE_ICONS.magic));
-    if (mapsEnabled(state)) {
+    if (crimsonSeasEnabled(state)) {
       pills.appendChild(makeResourceScorePill('map', p.map_score, 'Map', TABLEAU_RESOURCE_ICONS.map));
     }
     pills.appendChild(makeVpScorePill(p.victory_score));

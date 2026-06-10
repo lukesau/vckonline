@@ -385,16 +385,17 @@ class Game:
             return p.name
         return str(player_id)[:8]
 
-    def maps_enabled(self):
-        """True when the "map" resource is an active part of this game.
+    def crimson_seas_enabled(self):
+        """True when this game was dealt from the Crimson Seas preset.
 
-        Maps are a Crimson Seas mechanic. Other presets may still deal Crimson
-        Seas citizens/monsters (e.g. `random`), but those cards are designed to
-        always have a non-map "out", so outside the Crimson Seas preset we keep
-        maps invisible/unusable: the score pill and +1 Map action are hidden,
-        the standard-action map take is rejected, and map options are dropped
-        from `choose` prompts. Any incidental map gain still tracks silently on
-        `map_score`.
+        Crimson Seas adds a whole bundle of mechanics (the Sail/island board,
+        maps, tomes, goods, nobles, …). All of that is gated on this single
+        check. Other presets may still deal Crimson Seas citizens/monsters
+        (e.g. `random`), but those cards are designed to always have a non-map
+        "out", so outside the Crimson Seas preset we keep maps invisible/unusable:
+        the score pill and +1 Map action are hidden, the standard-action map take
+        is rejected, and map options are dropped from `choose` prompts. Any
+        incidental map gain still tracks silently on `map_score`.
         """
         return (self.preset or "").strip().lower() == "crimsonseas"
 

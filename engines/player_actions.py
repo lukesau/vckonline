@@ -1738,7 +1738,7 @@ class PlayerActionsEngine:
         choice = (resource or "").strip().lower()
         if choice not in ("gold", "strength", "magic", "map"):
             raise ValueError('resource must be "gold", "strength", "magic", or "map".')
-        if choice == "map" and not self.game.maps_enabled():
+        if choice == "map" and not self.game.crimson_seas_enabled():
             raise ValueError("Maps are only available in the Crimson Seas preset.")
 
         player = None

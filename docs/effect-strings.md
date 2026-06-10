@@ -281,7 +281,7 @@ slaying player gets an explicit error rather than a silent no-op. Implement
 tomes by giving `t` a real branch in `_apply_choose_option` (and a `Player`
 score field) and dropping the `not crimson_seas` filter / raise.
 
-Maps are gated to the **Crimson Seas preset** via `Game.maps_enabled()` (true
+Maps are gated to the **Crimson Seas preset** via `Game.crimson_seas_enabled()` (true
 only when `preset == "crimsonseas"`). Crimson Seas citizens/monsters can still
 appear in other presets (e.g. `random`), but they always have a non-map "out",
 so outside Crimson Seas the engine drops `p` legs from `choose` prompts, rejects

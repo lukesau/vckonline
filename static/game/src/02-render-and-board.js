@@ -5,10 +5,11 @@ function idsMatch(a, b) {
   return String(a ?? '').trim() === String(b ?? '').trim();
 }
 
-// Maps are a Crimson Seas mechanic. Hide all map UI (score pill, +1 Map action)
-// unless this game was dealt from the Crimson Seas preset. The engine performs
-// the matching server-side gating; this just keeps the UI clean elsewhere.
-function mapsEnabled(state) {
+// Crimson Seas adds a whole bundle of mechanics (the Sail/island board, maps,
+// tomes, goods, nobles, …). All of that UI is gated on this single check so it
+// stays hidden unless the game was dealt from the Crimson Seas preset. The
+// engine performs the matching server-side gating; this just keeps the UI clean.
+function crimsonSeasEnabled(state) {
   return String(state?.preset ?? '').trim().toLowerCase() === 'crimsonseas';
 }
 
@@ -529,6 +530,12 @@ const BOARD_SECTIONS = [
   { key: 'domains',    label: 'Domains' },
 ];
 
+function boardSectionsForState(state) {
+  return crimsonSeasEnabled(state)
+    ? [{ key: 'sail', label: 'Sail' }, ...BOARD_SECTIONS]
+    : BOARD_SECTIONS;
+}
+
 function renderCenter(state) {
   const el = document.getElementById('zone-center');
   if (!el) return;
@@ -541,13 +548,15 @@ function renderCenter(state) {
   const viewport = mk('center-board-viewport');
 
   const citizenGrid = state.citizen_grid || [];
+  const boardSections = boardSectionsForState(state);
   const sections = [
     makeGridSection('Monsters',      state.monster_grid || [], 'monster', 5, 'board-monsters'),
     makeGridSection('Citizens 1–5',  citizenGrid.slice(0, 5),  'citizen', 5, 'board-citizens-1'),
     makeGridSection('Citizens 6–12', citizenGrid.slice(5),     'citizen', 5, 'board-citizens-2'),
     makeGridSection('Domains',       state.domain_grid  || [], 'domain',  5, 'board-domains'),
   ];
-  BOARD_SECTIONS.forEach(({ key }, i) => {
+  if (crimsonSeasEnabled(state)) sections.unshift(makeSailSection());
+  boardSections.forEach(({ key }, i) => {
     sections[i].dataset.boardSection = key;
     const slide = mk('center-board-slide');
     slide.appendChild(sections[i]);
@@ -561,7 +570,7 @@ function renderCenter(state) {
   body.appendChild(tabsBar);
   el.appendChild(body);
 
-  setupBoardTabs(el, tabsBar, viewport);
+  setupBoardTabs(el, tabsBar, viewport, boardSections);
 }
 
 /** Vertical wheel → horizontal scroll on opponent top strips and narrow-layout carousel tableaus. */
@@ -614,15 +623,15 @@ function syncBoardTabsObserver() {
   if (zone) syncBoardTabState(zone);
 }
 
-function setupBoardTabs(zoneCenter, tabsBar, viewport) {
+function setupBoardTabs(zoneCenter, tabsBar, viewport, boardSections) {
   const slides = Array.from(viewport.children);
   tabsBar.innerHTML = '';
   let initialIdx = 0;
   if (centerBoardActiveTabKey != null) {
-    const j = BOARD_SECTIONS.findIndex(s => s.key === centerBoardActiveTabKey);
+    const j = boardSections.findIndex(s => s.key === centerBoardActiveTabKey);
     if (j >= 0) initialIdx = j;
   }
-  const tabs = BOARD_SECTIONS.map(({ key, label }, i) => {
+  const tabs = boardSections.map(({ key, label }, i) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'board-tab' + (i === initialIdx ? ' is-active' : '');
@@ -660,7 +669,7 @@ function setupBoardTabs(zoneCenter, tabsBar, viewport) {
         const d = Math.abs(r.left + r.width / 2 - mid);
         if (d < bestDist) { bestDist = d; best = i; }
       });
-      const sec = BOARD_SECTIONS[best];
+      const sec = boardSections[best];
       if (sec) centerBoardActiveTabKey = sec.key;
       syncTabActive(best);
     }, 80);
@@ -687,7 +696,7 @@ function makeResourceActionBar(state) {
   const canTake = canOfferTakeResourceAction(state);
   const resourceBar = document.createElement('div');
   resourceBar.className = 'resource-action-bar' + (canTake ? '' : ' resource-action-bar--inactive');
-  const resources = mapsEnabled(state) ? ['gold', 'strength', 'magic', 'map'] : ['gold', 'strength', 'magic'];
+  const resources = crimsonSeasEnabled(state) ? ['gold', 'strength', 'magic', 'map'] : ['gold', 'strength', 'magic'];
   resources.forEach(r => {
     const lab = r.charAt(0).toUpperCase() + r.slice(1);
     const btn = promptButton('', () => {
@@ -909,6 +918,23 @@ function makeInfoBar(state) {
   bar.appendChild(row);
 
   return bar;
+}
+
+// Crimson Seas island board: a static image instead of a card grid (placeholder
+// preview until the Sail interactions are wired up).
+function makeSailSection() {
+  const sec = mk('center-section board-sail');
+  const lbl = mk('section-label');
+  lbl.textContent = 'Sail';
+  sec.appendChild(lbl);
+  const wrap = mk('sail-board');
+  const img = document.createElement('img');
+  img.className = 'sail-board-img';
+  img.src = '/images/crimson_seas_mat.jpg';
+  img.alt = 'Crimson Seas island board';
+  wrap.appendChild(img);
+  sec.appendChild(wrap);
+  return sec;
 }
 
 function makeGridSection(label, grid, _type, _cols, extraClass) {
@@ -1246,7 +1272,7 @@ function makeHeader(player, state) {
   resRow.appendChild(makeResourceScorePill('gold', player.gold_score, 'Gold', TABLEAU_RESOURCE_ICONS.gold));
   resRow.appendChild(makeResourceScorePill('strength', player.strength_score, 'Strength', TABLEAU_RESOURCE_ICONS.strength));
   resRow.appendChild(makeResourceScorePill('magic', player.magic_score, 'Magic', TABLEAU_RESOURCE_ICONS.magic));
-  if (mapsEnabled(state)) {
+  if (crimsonSeasEnabled(state)) {
     resRow.appendChild(makeResourceScorePill('map', player.map_score, 'Map', TABLEAU_RESOURCE_ICONS.map));
   }
   resRow.appendChild(makeVpScorePill(player.victory_score));

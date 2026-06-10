@@ -1206,6 +1206,22 @@ html, body {
   margin-bottom: 2px;
 }
 
+/* Crimson Seas island board (Sail tab): show the artwork scaled to the viewport. */
+.board-sail .sail-board {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.board-sail .sail-board-img {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
 .grid-row {
   display: flex;
   flex-direction: row;
