@@ -1011,6 +1011,14 @@ function makeSailSection() {
     e.preventDefault();
     wrap.scrollLeft += delta;
   }, { passive: false });
+  // Persist scroll across the periodic state-poll re-renders.
+  wrap.addEventListener('scroll', () => { sailBoardScrollLeft = wrap.scrollLeft; }, { passive: true });
+  const restoreSailScroll = () => {
+    const max = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
+    wrap.scrollLeft = Math.min(sailBoardScrollLeft, max);
+  };
+  if (img.complete) requestAnimationFrame(restoreSailScroll);
+  else img.addEventListener('load', () => requestAnimationFrame(restoreSailScroll), { once: true });
   sec.appendChild(wrap);
   return sec;
 }
@@ -1026,8 +1034,21 @@ function renderSailAssets(overlay) {
   L.tomes.slots.forEach((s, i) =>
     placeSailAsset(overlay, sailBoxOf(L.tomes, s), makeSailPlaceholderCard('Tome', 'sail-tome', i)));
   L.nobles.slots.forEach((s, i) =>
-    placeSailAsset(overlay, sailBoxOf(L.nobles, s), makeSailPlaceholderCard('Noble', 'sail-noble', i)));
+    placeSailAsset(overlay, sailBoxOf(L.nobles, s), makeSailNobleCard(i)));
   placeSailAsset(overlay, L.exekratys, makeSailExekratysReadout());
+}
+
+// Noble placeholder: the noble card back filling its slot, with the noble
+// outline color (--card-n-border, the back's dominant color). No live noble
+// data/class exists yet, so every slot just shows the face-down back.
+function makeSailNobleCard(idx) {
+  const card = mk('sail-card sail-noble');
+  const img = document.createElement('img');
+  img.className = 'sail-noble-img';
+  img.src = '/images/nobles/noble_back.jpg';
+  img.alt = idx != null ? `Noble ${idx + 1}` : 'Noble';
+  card.appendChild(img);
+  return card;
 }
 
 // A no-image placeholder card sized to fill its slot box.

@@ -87,6 +87,9 @@ let tableauCarouselActiveId = null;
 /** Center board tab carousel: last focused section key (BOARD_SECTIONS[].key) across re-renders */
 let centerBoardActiveTabKey = null;
 
+/** Sail tab: horizontal scrollLeft of the Crimson Seas mat, persisted across re-renders */
+let sailBoardScrollLeft = 0;
+
 /** Narrow carousel: horizontal scrollLeft of each player's `.tableau-cards` strip */
 const tableauStripScrollByPlayerId = {};
 

@@ -13,6 +13,7 @@
   --card-s:  #252525;  --card-s-border: #526263;
   --card-k:  #1e0e30;  --card-k-border: #823956;
   --card-x:  #141414;  --card-x-border: #A83524;
+  --card-n:  #221b18;  --card-n-border: #423632;
 
   --gold:  #dfb152;
   --str:   #c45433;
@@ -1278,6 +1279,21 @@ html, body {
 }
 .board-sail .sail-good { border-radius: 22%; }
 .board-sail .sail-tome { border-radius: 12%; }
+
+/* Noble card back filling its slot, outlined in the noble border color. */
+.board-sail .sail-noble {
+  padding: 0;
+  border-color: var(--card-n-border);
+  background: var(--card-n);
+  overflow: hidden;
+}
+.board-sail .sail-noble-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: inherit;
+}
 
 /* Exekratys resource readout: centered row of icon + count chips inside the oval. */
 .board-sail .sail-exekratys {
