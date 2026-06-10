@@ -67,6 +67,11 @@ TOME_SLOT_COUNT = 3
 # the Island Board.
 NOBLE_SLOT_COUNT = 3
 
+# Crimson Seas Exekratys (the cursed island) starts seeded with 2 of each
+# resource. Insertion order is Gold, Strength, Magic to match the game's
+# standard resource ordering used everywhere else in the UI.
+EXEKRATYS_STARTING_RESOURCES = {"gold": 2, "strength": 2, "magic": 2}
+
 # Starters split into two groups by roll_match:
 #   - "core" starters (Peasant/Knight, real roll numbers) are mandatory: every
 #     player always gets all of them.
@@ -813,10 +818,17 @@ def load_game_data(
     else:
         for player in player_list_from_lobby:
             my_player = Player(player.player_id, player.name)
+            # Crimson Seas: every player starts with 2 Map tokens.
+            if preset == "crimsonseas":
+                my_player.map_score = 2
             if debug_mode:
                 my_player.gold_score = 100
                 my_player.strength_score = 100
                 my_player.magic_score = 100
+                # Maps are a Crimson Seas resource; only stock them in debug
+                # games that actually use maps.
+                if preset == "crimsonseas":
+                    my_player.map_score = 100
             player_list.append(my_player)
         random.shuffle(player_list)
         player_list[0].is_first = True
@@ -1049,6 +1061,7 @@ def load_game_data(
         tome_slots = []
         noble_supply = []
         noble_slots = []
+        exekratys_resources = {}
         if preset == "crimsonseas":
             goods_supply = [t for t in GOODS_TYPES for _ in range(GOODS_COPIES_PER_TYPE)]
             random.shuffle(goods_supply)
@@ -1065,6 +1078,10 @@ def load_game_data(
                 noble.toggle_visibility(True)
                 noble.toggle_accessibility(True)
 
+            # Exekratys starts seeded with 2 of each resource (ordered Gold,
+            # Strength, Magic to match the rest of the game's resource order).
+            exekratys_resources = dict(EXEKRATYS_STARTING_RESOURCES)
+
         game_state = {
             "game_id": game_id,
             "debug_mode": bool(debug_mode),
@@ -1075,6 +1092,7 @@ def load_game_data(
             "tome_slots": tome_slots,
             "noble_supply": noble_supply,
             "noble_slots": noble_slots,
+            "exekratys_resources": exekratys_resources,
             "pending_required_choice": None,
             "player_list": player_list,
             "all_dukes": all_dukes,

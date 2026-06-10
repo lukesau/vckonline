@@ -965,7 +965,7 @@ const SAIL_LAYOUT = {
   exekratys: { left: 2372, top: 770, w: 720, h: 318 },
 };
 
-const SAIL_EXEKRATYS_RESOURCES = ['strength', 'gold', 'magic'];
+const SAIL_EXEKRATYS_RESOURCES = ['gold', 'strength', 'magic'];
 
 // Goods token artwork (square PNGs with transparent octagon backgrounds).
 const SAIL_GOODS_IMAGES = {
@@ -1058,7 +1058,7 @@ function renderSailAssets(overlay, state) {
     const node = nobles[i] ? makeSailNobleCard(nobles[i]) : makeSailEmptySlot();
     placeSailAsset(overlay, sailBoxOf(L.nobles, s), node);
   });
-  placeSailAsset(overlay, L.exekratys, makeSailExekratysReadout());
+  placeSailAsset(overlay, L.exekratys, makeSailExekratysReadout(state));
 }
 
 // An image token (Goods/Tomes) filling its slot box.
@@ -1099,7 +1099,8 @@ function makeSailPlaceholderCard(label, extraClass, idx) {
 
 // Exekratys resource pool: a centered row of resource icons + counts, inset from
 // the oval's bounding box so the readout sits comfortably inside the oval.
-function makeSailExekratysReadout() {
+function makeSailExekratysReadout(state) {
+  const counts = (state && state.exekratys_resources) || {};
   const wrap = mk('sail-exekratys');
   SAIL_EXEKRATYS_RESOURCES.forEach(res => {
     const chip = mk('sail-exekratys-chip');
@@ -1108,7 +1109,7 @@ function makeSailExekratysReadout() {
     icon.src = TABLEAU_RESOURCE_ICONS[res];
     icon.alt = res;
     const count = mk('sail-exekratys-count');
-    count.textContent = '0';
+    count.textContent = String(counts[res] || 0);
     chip.appendChild(icon);
     chip.appendChild(count);
     wrap.appendChild(chip);

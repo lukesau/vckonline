@@ -155,6 +155,8 @@ class GameObjectEncoder(JSONEncoder):
                 # face-down deck is hidden, so only its size goes out.
                 "noble_slots": [n.to_dict() for n in (getattr(obj, "noble_slots", None) or [])],
                 "noble_supply_size": len(getattr(obj, "noble_supply", None) or []),
+                # Exekratys resource pool (public: resource -> count).
+                "exekratys_resources": dict(getattr(obj, "exekratys_resources", None) or {}),
                 "pending_reroll_twilight_used": bool(getattr(obj, "_pending_reroll_twilight_used", False)),
                 "pending_reroll_blood_moon_used": bool(getattr(obj, "_pending_reroll_blood_moon_used", False)),
             }

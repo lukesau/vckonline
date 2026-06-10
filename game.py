@@ -94,6 +94,11 @@ class Game:
         # game_setup.NOBLE_SLOT_COUNT). Empty outside the Crimson Seas preset.
         self.noble_supply = list(game_state.get('noble_supply') or [])
         self.noble_slots = list(game_state.get('noble_slots') or [])
+        # Crimson Seas Exekratys resource pool (the cursed island). A dict of
+        # resource -> count (e.g. {"gold": 2, "strength": 2, "magic": 2}). Players
+        # feed it on rolling 6s and clear it by sailing there. Empty outside the
+        # Crimson Seas preset.
+        self.exekratys_resources = dict(game_state.get('exekratys_resources') or {})
         self.player_list = game_state['player_list']
         # Full duke catalog for this game's config (every duke that could be in
         # play), snapshot at setup before dealing. Used to surface a per-duke VP
