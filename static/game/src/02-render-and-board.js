@@ -920,19 +920,89 @@ function makeInfoBar(state) {
   return bar;
 }
 
-// Crimson Seas island board: a static image instead of a card grid (placeholder
-// preview until the Sail interactions are wired up).
+// ── Crimson Seas island board (Sail tab) ───────────────────────────────────
+// The mat artwork is scaled client-side (fit-to-height, horizontally scrollable).
+// Overlaid assets stay locked to the artwork by using NORMALIZED coordinates
+// (fractions 0–1 of the mat's natural size) inside a wrapper that shrink-wraps
+// the rendered image, so percentages resolve against the exact image box at any
+// scale. Coordinates are measured against the native-size mat image.
+const SAIL_MAT_NATURAL = { w: 5173, h: 1137 };
+
+// Asset positions measured against the native-size mat image (5173×1137). Each
+// box is { left, top, w, h } in source pixels of the asset's top-left corner and
+// bounding-box size; placeSailAsset() normalizes them to % of the mat so they
+// stay locked to the artwork at any client-side scale.
+const SAIL_LAYOUT = {
+  // Araby: octagonal Goods tokens (square 224×224 art with transparency).
+  goods: {
+    w: 224, h: 224,
+    slots: [
+      { left: 218, top: 195 },
+      { left: 218, top: 505 },
+      { left: 218, top: 815 },
+    ],
+  },
+  // Nae Aerie: square Tome tokens (224×224).
+  tomes: {
+    w: 224, h: 224,
+    slots: [
+      { left: 1116, top: 190 },
+      { left: 1116, top: 502 },
+      { left: 1116, top: 812 },
+    ],
+  },
+  // Amarynth: rectangular Noble cards (520×814).
+  nobles: {
+    w: 520, h: 814,
+    slots: [
+      { left: 3456, top: 204 },
+      { left: 4030, top: 204 },
+      { left: 4604, top: 204 },
+    ],
+  },
+  // Exekratys: oval resource pool. Box is the oval's bounding rect (corners lie
+  // outside the oval); we render a centered resource readout inside it.
+  exekratys: { left: 2372, top: 770, w: 720, h: 318 },
+};
+
+const SAIL_EXEKRATYS_RESOURCES = ['strength', 'gold', 'magic'];
+
+/** Place an overlay node at a pixel box { left, top, w, h }, normalized to % of the mat. */
+function placeSailAsset(overlay, box, node) {
+  node.classList.add('sail-asset');
+  node.style.left = `${(box.left / SAIL_MAT_NATURAL.w) * 100}%`;
+  node.style.top = `${(box.top / SAIL_MAT_NATURAL.h) * 100}%`;
+  node.style.width = `${(box.w / SAIL_MAT_NATURAL.w) * 100}%`;
+  node.style.height = `${(box.h / SAIL_MAT_NATURAL.h) * 100}%`;
+  overlay.appendChild(node);
+  return node;
+}
+
+function sailBoxOf(group, slot) {
+  return { left: slot.left, top: slot.top, w: group.w, h: group.h };
+}
+
 function makeSailSection() {
   const sec = mk('center-section board-sail');
   const lbl = mk('section-label');
   lbl.textContent = 'Sail';
   sec.appendChild(lbl);
+
   const wrap = mk('sail-board');
+  // .sail-mat shrink-wraps the image so the overlay box matches the artwork exactly.
+  const mat = mk('sail-mat');
+  mat.style.aspectRatio = `${SAIL_MAT_NATURAL.w} / ${SAIL_MAT_NATURAL.h}`;
   const img = document.createElement('img');
   img.className = 'sail-board-img';
   img.src = '/images/crimson_seas_mat.jpg';
   img.alt = 'Crimson Seas island board';
-  wrap.appendChild(img);
+  mat.appendChild(img);
+
+  const overlay = mk('sail-overlay');
+  mat.appendChild(overlay);
+  renderSailAssets(overlay);
+
+  wrap.appendChild(mat);
   // Vertical wheel scrolls the wide mat horizontally (same feel as the tableaus).
   wrap.addEventListener('wheel', e => {
     if (wrap.scrollWidth <= wrap.clientWidth + 1) return;
@@ -943,6 +1013,49 @@ function makeSailSection() {
   }, { passive: false });
   sec.appendChild(wrap);
   return sec;
+}
+
+// Render the overlay assets. For now these are no-image placeholders just to
+// validate positioning; swap in real Goods/Tome/Noble card nodes and live
+// Exekratys resource counts later.
+function renderSailAssets(overlay) {
+  overlay.innerHTML = '';
+  const L = SAIL_LAYOUT;
+  L.goods.slots.forEach((s, i) =>
+    placeSailAsset(overlay, sailBoxOf(L.goods, s), makeSailPlaceholderCard('Good', 'sail-good', i)));
+  L.tomes.slots.forEach((s, i) =>
+    placeSailAsset(overlay, sailBoxOf(L.tomes, s), makeSailPlaceholderCard('Tome', 'sail-tome', i)));
+  L.nobles.slots.forEach((s, i) =>
+    placeSailAsset(overlay, sailBoxOf(L.nobles, s), makeSailPlaceholderCard('Noble', 'sail-noble', i)));
+  placeSailAsset(overlay, L.exekratys, makeSailExekratysReadout());
+}
+
+// A no-image placeholder card sized to fill its slot box.
+function makeSailPlaceholderCard(label, extraClass, idx) {
+  const card = mk(`sail-card ${extraClass}`);
+  const name = mk('sail-card-label');
+  name.textContent = idx != null ? `${label} ${idx + 1}` : label;
+  card.appendChild(name);
+  return card;
+}
+
+// Exekratys resource pool: a centered row of resource icons + counts, inset from
+// the oval's bounding box so the readout sits comfortably inside the oval.
+function makeSailExekratysReadout() {
+  const wrap = mk('sail-exekratys');
+  SAIL_EXEKRATYS_RESOURCES.forEach(res => {
+    const chip = mk('sail-exekratys-chip');
+    const icon = document.createElement('img');
+    icon.className = 'sail-exekratys-icon';
+    icon.src = TABLEAU_RESOURCE_ICONS[res];
+    icon.alt = res;
+    const count = mk('sail-exekratys-count');
+    count.textContent = '0';
+    chip.appendChild(icon);
+    chip.appendChild(count);
+    wrap.appendChild(chip);
+  });
+  return wrap;
 }
 
 function makeGridSection(label, grid, _type, _cols, extraClass) {

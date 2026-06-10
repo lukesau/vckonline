@@ -1227,6 +1227,15 @@ html, body {
 
 .board-sail .sail-board::-webkit-scrollbar { display: none; }
 
+/* Shrink-wraps the rendered image so the overlay box matches the artwork; this
+   is the reference box every overlaid asset is positioned against (in %). */
+.board-sail .sail-mat {
+  position: relative;
+  height: 100%;
+  flex: 0 0 auto;
+  border-radius: 6px;
+}
+
 .board-sail .sail-board-img {
   display: block;
   height: 100%;
@@ -1234,6 +1243,67 @@ html, body {
   max-width: none;
   border-radius: 6px;
 }
+
+.board-sail .sail-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Overlaid assets are anchored by their top-left corner at the slot's box. */
+.board-sail .sail-asset {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+
+/* No-image placeholder card filling its slot box. */
+.board-sail .sail-card {
+  container-type: size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  border-radius: 8px;
+  background: rgba(20, 24, 34, 0.78);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+.board-sail .sail-card-label {
+  font-weight: 700;
+  font-size: clamp(9px, 1.6cqw, 18px);
+  letter-spacing: 0.04em;
+  padding: 2px;
+}
+.board-sail .sail-good { border-radius: 22%; }
+.board-sail .sail-tome { border-radius: 12%; }
+
+/* Exekratys resource readout: centered row of icon + count chips inside the oval. */
+.board-sail .sail-exekratys {
+  container-type: size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8%;
+  padding: 0 6%;
+}
+.board-sail .sail-exekratys-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.25em;
+  color: #fff;
+  font-weight: 800;
+  font-size: clamp(10px, 2.4cqw, 26px);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+.board-sail .sail-exekratys-icon {
+  width: 1.6em;
+  height: 1.6em;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.board-sail .sail-exekratys-count { font-variant-numeric: tabular-nums; }
 
 .grid-row {
   display: flex;
