@@ -90,17 +90,17 @@ function makeCrimsonSeasTableauSection(player) {
   const grp = mk('card-group cs-group');
   const col = mk('cs-column');
   const cells = [
-    ['Nobles', 'nobles', player.owned_nobles || []],
-    ['Tomes',  'tomes',  player.owned_tomes  || []],
-    ['Goods',  'goods',  player.owned_goods  || []],
+    ['Nobles', 'nobles', csNobleEntries(player.owned_nobles)],
+    ['Tomes',  'tomes',  csTomeEntries(player.owned_tomes)],
+    ['Goods',  'goods',  csGoodsEntries(player.owned_goods)],
   ];
-  cells.forEach(([label, kind, items]) => {
+  cells.forEach(([label, kind, entries]) => {
     const cell = mk(`cs-cell cs-cell-${kind}`);
     const lbl = mk('cs-cell-label');
     lbl.textContent = label;
     cell.appendChild(lbl);
     const row = mk('cs-cell-items');
-    items.forEach(it => row.appendChild(makeCrimsonSeasItem(kind, it)));
+    entries.forEach(({ item, count }) => row.appendChild(makeCrimsonSeasItem(kind, item, count)));
     cell.appendChild(row);
     col.appendChild(cell);
   });
@@ -108,7 +108,46 @@ function makeCrimsonSeasTableauSection(player) {
   return grp;
 }
 
-function makeCrimsonSeasItem(kind, item) {
+// Nobles are unique rescued cards — each gets its own slot (never stacked), so
+// the Nobles row grows with the number rescued.
+function csNobleEntries(nobles) {
+  return (Array.isArray(nobles) ? nobles : []).map(item => ({ item, count: 1 }));
+}
+
+// Goods collapse to one icon per type (there are only 4 types), so the Goods row
+// caps at 4 icons no matter how many are owned.
+function csGoodsEntries(goods) {
+  return csGroupEntries(Array.isArray(goods) ? goods : [], g => String(g));
+}
+
+// Tomes collapse to one icon per type. Flipped (spent-this-turn) tomes look
+// different from face-up ones, so they don't merge with them — mirroring how
+// citizens key on is_flipped.
+function csTomeEntries(tomes) {
+  return csGroupEntries(Array.isArray(tomes) ? tomes : [], t => (
+    (t && typeof t === 'object') ? `${t.tome_type}|${t.is_flipped ? 1 : 0}` : String(t)
+  ));
+}
+
+// Collapse identical items into {item, count} entries, preserving first-seen order.
+function csGroupEntries(items, keyOf) {
+  const order = [];
+  const byKey = new Map();
+  items.forEach(item => {
+    const key = keyOf(item);
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      const entry = { item, count: 1 };
+      byKey.set(key, entry);
+      order.push(entry);
+    }
+  });
+  return order;
+}
+
+function makeCrimsonSeasItem(kind, item, count) {
   const wrap = mk(`cs-item cs-item-${kind}`);
   if (kind === 'goods') {
     const img = document.createElement('img');
@@ -158,6 +197,11 @@ function makeCrimsonSeasItem(kind, item) {
     img.src = `/card-image/noble/${item.noble_id}`;
     img.alt = item.name || 'Noble';
     wrap.appendChild(img);
+  }
+  if (count > 1) {
+    const badge = mk('stack-depth cs-item-count');
+    badge.textContent = `\u00D7${count}`;
+    wrap.appendChild(badge);
   }
   return wrap;
 }
