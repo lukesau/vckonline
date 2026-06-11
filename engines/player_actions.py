@@ -1908,18 +1908,50 @@ class PlayerActionsEngine:
 
         raise ValueError("Domain not available to purchase.")
 
-    def _validate_gold_tome_portion(self, player, tome_payment, gold_cost, what):
-        """Goods/Tomes cost gold specifically (no substitution), so only Gold
-        tomes apply. Validate the requested Gold-tome count is legal and
-        available (without flipping anything yet) and return it."""
+    def _plan_sail_gold_payment(self, player, gold_cost, tome_payment, what):
+        """Plan payment of a Sail Gold cost, allowing Magic as a wild substitute.
+
+        Magic is wild and may stand in for the Gold cost of buying Goods/Tomes,
+        exactly like hiring a Citizen or building a Domain: Magic covers Gold,
+        but at least 1 Gold must be paid whenever any Magic is used. Strength is
+        not wild here and cannot pay. Gold tomes count as Gold and Magic tomes
+        count as Magic.
+
+        Tomes the caller marked for use are spent first (they refresh at end of
+        turn); the remaining cost is covered by treasury Gold, then treasury
+        Magic. Validates without mutating and returns the plan
+        {tg, tm, gold_portion, magic_portion}, or raises ValueError. Every
+        redeemed tome is guaranteed to be spent (gold_portion >= tg,
+        magic_portion >= tm) so no leftover credit leaks.
+        """
+        gold_cost = int(gold_cost or 0)
         tome_counts = self._sanitize_tome_payment(tome_payment)
-        if tome_counts["strength"] or tome_counts["magic"]:
-            raise ValueError(f"Only Gold tomes can pay for {what}.")
+        if tome_counts["strength"]:
+            raise ValueError(f"Strength tomes cannot pay for {what}.")
         tg = tome_counts["gold"]
-        if tg > gold_cost:
+        tm = tome_counts["magic"]
+        if tg + tm > gold_cost:
             raise ValueError("Too many tomes for this purchase.")
-        self._verify_tome_payment_available(player, {"gold": tg, "strength": 0, "magic": 0})
-        return tg
+        self._verify_tome_payment_available(player, {"gold": tg, "strength": 0, "magic": tm})
+        remainder = gold_cost - tg - tm
+        gp_treasury = min(int(getattr(player, "gold_score", 0) or 0), remainder)
+        mp_treasury = remainder - gp_treasury
+        if int(getattr(player, "magic_score", 0) or 0) < mp_treasury:
+            raise ValueError(f"Need {gold_cost} gold (magic may substitute) to buy the selected {what}.")
+        gold_portion = tg + gp_treasury
+        magic_portion = tm + mp_treasury
+        if magic_portion > 0 and gold_portion < 1:
+            raise ValueError("Must pay at least 1 gold to use magic as wild.")
+        return {"tg": tg, "tm": tm, "gold_portion": gold_portion, "magic_portion": magic_portion}
+
+    @staticmethod
+    def _sail_pay_log_str(gold_portion, magic_portion):
+        bits = []
+        if gold_portion:
+            bits.append(f"{gold_portion} gold")
+        if magic_portion:
+            bits.append(f"{magic_portion} magic")
+        return " + ".join(bits) if bits else "0 gold"
 
     def buy_goods(self, player_id, slot_indices, tome_payment=None):
         """Sail to Araby and buy Goods tokens in one Sail action.
@@ -1930,8 +1962,10 @@ class PlayerActionsEngine:
         cascade down to the cheapest (bottom) slots preserving order, and new
         tokens are drawn from the supply to fill the emptied top slots.
 
-        `tome_payment` optionally funds part of the gold cost with face-up Gold
-        tomes (flipped face-down here, refreshed at end of turn).
+        Magic is wild and may substitute for the gold cost (treasury Magic or
+        Magic tomes), as long as at least 1 Gold is paid. `tome_payment`
+        optionally funds part of the cost with face-up Gold and/or Magic tomes
+        (flipped face-down here, refreshed at end of turn).
         """
         from game_setup import GOODS_SLOT_COSTS
 
@@ -1963,16 +1997,16 @@ class PlayerActionsEngine:
         goods_discount = 1 if self.game._player_has_action_effect_flag(player, "action.portofdrake") else 0
         gold_cost = sum(max(0, int(GOODS_SLOT_COSTS[i]) - goods_discount) for i in indices)
         map_cost = 1
-        tg = self._validate_gold_tome_portion(player, tome_payment, gold_cost, "goods")
-        if int(getattr(player, "gold_score", 0)) + tg < gold_cost:
-            raise ValueError(f"Need {gold_cost} gold to buy the selected goods.")
+        plan = self._plan_sail_gold_payment(player, gold_cost, tome_payment, "goods")
         if int(getattr(player, "map_score", 0)) < map_cost:
             raise ValueError("Need 1 map to sail.")
 
         bought = [slots[i] for i in indices]
         before = self.game._player_scores_line(player)
-        redeemed = self.redeem_tomes_to_score(player_id, {"gold": tg}) if tg else None
-        player.gold_score = int(player.gold_score) - gold_cost
+        tome_pay = {"gold": plan["tg"], "magic": plan["tm"]}
+        redeemed = self.redeem_tomes_to_score(player_id, tome_pay) if (plan["tg"] or plan["tm"]) else None
+        player.gold_score = int(player.gold_score) - plan["gold_portion"]
+        player.magic_score = int(player.magic_score) - plan["magic_portion"]
         player.map_score = int(player.map_score) - map_cost
         player.owned_goods.extend(bought)
 
@@ -1981,9 +2015,10 @@ class PlayerActionsEngine:
 
         after = self.game._player_scores_line(player)
         suffix = self._tome_pay_log_suffix(redeemed) if redeemed else ""
+        pay_str = self._sail_pay_log_str(plan["gold_portion"], plan["magic_portion"])
         self.game._log_game_event(
             f"{self.game._player_label(player_id)} sailed to Araby and bought "
-            f"{', '.join(bought)} for {gold_cost} gold + 1 map{suffix}; scores {before} -> {after}"
+            f"{', '.join(bought)} for {pay_str} + 1 map{suffix}; scores {before} -> {after}"
         )
 
     def buy_tomes(self, player_id, slot_indices, tome_payment=None):
@@ -1994,8 +2029,10 @@ class PlayerActionsEngine:
         (TOME_SLOT_COSTS). Afterwards the board refreshes — unbought tomes
         cascade down to the cheapest slots and fresh tomes fill the top.
 
-        `tome_payment` optionally funds part of the gold cost with face-up Gold
-        tomes (redeemed up front, refreshed at end of turn).
+        Magic is wild and may substitute for the gold cost (treasury Magic or
+        Magic tomes), as long as at least 1 Gold is paid. `tome_payment`
+        optionally funds part of the cost with face-up Gold and/or Magic tomes
+        (redeemed up front, refreshed at end of turn).
         """
         from game_setup import TOME_SLOT_COSTS
 
@@ -2026,16 +2063,16 @@ class PlayerActionsEngine:
         tome_discount = 1 if self.game._player_has_action_effect_flag(player, "action.browncoatssanctum") else 0
         gold_cost = sum(max(0, int(TOME_SLOT_COSTS[i]) - tome_discount) for i in indices)
         map_cost = 1
-        tg = self._validate_gold_tome_portion(player, tome_payment, gold_cost, "tomes")
-        if int(getattr(player, "gold_score", 0)) + tg < gold_cost:
-            raise ValueError(f"Need {gold_cost} gold to buy the selected tomes.")
+        plan = self._plan_sail_gold_payment(player, gold_cost, tome_payment, "tomes")
         if int(getattr(player, "map_score", 0)) < map_cost:
             raise ValueError("Need 1 map to sail.")
 
         bought = [slots[i] for i in indices]
         before = self.game._player_scores_line(player)
-        redeemed = self.redeem_tomes_to_score(player_id, {"gold": tg}) if tg else None
-        player.gold_score = int(player.gold_score) - gold_cost
+        tome_pay = {"gold": plan["tg"], "magic": plan["tm"]}
+        redeemed = self.redeem_tomes_to_score(player_id, tome_pay) if (plan["tg"] or plan["tm"]) else None
+        player.gold_score = int(player.gold_score) - plan["gold_portion"]
+        player.magic_score = int(player.magic_score) - plan["magic_portion"]
         player.map_score = int(player.map_score) - map_cost
         player.owned_tomes.extend(Tome(t) for t in bought)
 
@@ -2044,9 +2081,10 @@ class PlayerActionsEngine:
 
         after = self.game._player_scores_line(player)
         suffix = self._tome_pay_log_suffix(redeemed) if redeemed else ""
+        pay_str = self._sail_pay_log_str(plan["gold_portion"], plan["magic_portion"])
         self.game._log_game_event(
             f"{self.game._player_label(player_id)} sailed to Nae Aerie and bought "
-            f"{', '.join(bought)} for {gold_cost} gold + 1 map{suffix}; scores {before} -> {after}"
+            f"{', '.join(bought)} for {pay_str} + 1 map{suffix}; scores {before} -> {after}"
         )
 
     def rescue_noble(self, player_id, slot_index, resource, tome_payment=None):

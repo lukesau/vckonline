@@ -1290,7 +1290,18 @@ function confirmAndPostGameAction(body, ui, afterSuccess) {
     confirmLabel,
     onConfirm: async () => {
       const ok = await postGameAction(body);
-      if (ok && typeof afterSuccess === 'function') afterSuccess();
+      if (ok && typeof afterSuccess === 'function') {
+        afterSuccess();
+        // postGameAction already rendered the new state, but it did so while the
+        // launching card modal was still open. Prompts that refuse to stack on
+        // top of a card-modal-overlay (e.g. Dampiar's Workshop "may Sail") get
+        // suppressed there. Now that afterSuccess() has closed that modal,
+        // re-render the prompt so the freshly-required ask surfaces immediately
+        // instead of waiting for the next state poll.
+        if (typeof renderPromptModal === 'function' && latestGameState) {
+          renderPromptModal(latestGameState);
+        }
+      }
     },
   });
 }

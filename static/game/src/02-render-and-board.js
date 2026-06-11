@@ -1540,9 +1540,11 @@ function openSailShopModal(cfg) {
   if (document.getElementById('card-modal-overlay')) return;
 
   const selected = new Set();
-  // Saved (toggled-off) Gold tome indices. Goods/Tomes cost gold, so only Gold
-  // tomes apply; default is "used" (tome-first).
+  // Saved (toggled-off) tome indices. Goods/Tomes cost gold; Gold tomes pay it
+  // directly and Magic tomes pay it as wild (magic is wild for gold). Default is
+  // "used" (tome-first); the player clicks a chip to save it for later.
   const savedGoldTomes = new Set();
+  const savedMagicTomes = new Set();
 
   const overlay = document.createElement('div');
   overlay.id = 'card-modal-overlay';
@@ -1612,33 +1614,50 @@ function openSailShopModal(cfg) {
 
     const totalGold = [...selected].reduce(
       (sum, i) => sum + (costs[i] != null ? costs[i] : 0), 0);
+    const playerMagic = Number(player && player.magic_score || 0);
 
-    // Gold tomes the player can spend toward the gold cost (tome-first).
-    const availGoldTomes = faceUpTomeCountsForPlayer(player).gold;
+    // Tomes the player can spend toward the gold cost (tome-first). Gold tomes
+    // pay gold directly; Magic tomes pay as wild. Tomes are applied first, then
+    // treasury gold, then treasury magic (so at least 1 gold is paid whenever
+    // possible, matching the hire/build "magic is wild" rule).
+    const tomeCounts = faceUpTomeCountsForPlayer(player);
+    const availGoldTomes = tomeCounts.gold;
+    const availMagicTomes = tomeCounts.magic;
     const usedGoldTomes = Math.max(0, availGoldTomes - savedGoldTomes.size);
-    const tomeGoldApplied = Math.min(usedGoldTomes, totalGold);
-    const bankGoldNeeded = Math.max(0, totalGold - tomeGoldApplied);
+    const usedMagicTomes = Math.max(0, availMagicTomes - savedMagicTomes.size);
 
-    if (availGoldTomes > 0) {
+    const tomeGoldApplied = Math.min(usedGoldTomes, totalGold);
+    const tomeMagicApplied = Math.min(usedMagicTomes, totalGold - tomeGoldApplied);
+    const afterTomes = Math.max(0, totalGold - tomeGoldApplied - tomeMagicApplied);
+    const treasuryGold = Math.min(playerGold, afterTomes);
+    const treasuryMagic = afterTomes - treasuryGold;
+    const goldPortion = tomeGoldApplied + treasuryGold;
+    const magicPortion = tomeMagicApplied + treasuryMagic;
+    const needsMinGold = magicPortion > 0 && goldPortion < 1;
+    const canCover = treasuryMagic <= playerMagic && !needsMinGold;
+
+    function renderTomeRow(label, count, savedSet, imgSrc, alt) {
+      if (count <= 0) return;
       const trow = mk('market-tome-row');
       const tlbl = mk('market-tome-label');
-      tlbl.textContent = 'Gold tomes';
+      tlbl.textContent = label;
       trow.appendChild(tlbl);
       const tchips = mk('market-tome-chips');
-      for (let i = 0; i < availGoldTomes; i++) {
-        const used = !savedGoldTomes.has(i);
+      const cls = alt === 'magic tome' ? 'market-tome-chip--magic' : 'market-tome-chip--gold';
+      for (let i = 0; i < count; i++) {
+        const used = !savedSet.has(i);
         const chip = document.createElement('button');
         chip.type = 'button';
-        chip.className = `market-tome-chip market-tome-chip--gold ${used ? 'is-used' : 'is-saved'}`;
+        chip.className = `market-tome-chip ${cls} ${used ? 'is-used' : 'is-saved'}`;
         chip.disabled = !canAct;
         const cimg = document.createElement('img');
-        cimg.src = SAIL_TOME_IMAGES.gold;
-        cimg.alt = 'gold tome';
+        cimg.src = imgSrc;
+        cimg.alt = alt;
         chip.appendChild(cimg);
-        chip.title = used ? 'Gold tome — used to pay (click to save)' : 'Gold tome — saved (click to use)';
+        chip.title = used ? `${label} — used to pay (click to save)` : `${label} — saved (click to use)`;
         chip.addEventListener('click', e => {
           e.stopPropagation();
-          if (savedGoldTomes.has(i)) savedGoldTomes.delete(i); else savedGoldTomes.add(i);
+          if (savedSet.has(i)) savedSet.delete(i); else savedSet.add(i);
           render();
         });
         tchips.appendChild(chip);
@@ -1647,20 +1666,32 @@ function openSailShopModal(cfg) {
       modal.appendChild(trow);
     }
 
+    renderTomeRow('Gold tomes', availGoldTomes, savedGoldTomes, SAIL_TOME_IMAGES.gold, 'gold tome');
+    renderTomeRow('Magic tomes', availMagicTomes, savedMagicTomes, SAIL_TOME_IMAGES.magic, 'magic tome');
+
     const footer = mk('sail-shop-footer');
     const total = mk('sail-shop-total');
-    total.textContent = selected.size
-      ? (tomeGoldApplied
-          ? `Total: ${totalGold} gold (${tomeGoldApplied} from tomes, ${bankGoldNeeded} treasury) + 1 map`
-          : `Total: ${totalGold} gold + 1 map`)
-      : `Select ${nounLower} to buy`;
+    if (selected.size) {
+      const parts = [];
+      if (tomeGoldApplied) parts.push(`${tomeGoldApplied} gold tome${tomeGoldApplied > 1 ? 's' : ''}`);
+      if (treasuryGold) parts.push(`${treasuryGold} treasury gold`);
+      if (tomeMagicApplied) parts.push(`${tomeMagicApplied} magic tome${tomeMagicApplied > 1 ? 's' : ''}`);
+      if (treasuryMagic) parts.push(`${treasuryMagic} treasury magic`);
+      total.textContent = parts.length > 1
+        ? `Total: ${totalGold} gold (${parts.join(', ')}) + 1 map`
+        : `Total: ${totalGold} gold + 1 map`;
+    } else {
+      total.textContent = `Select ${nounLower} to buy`;
+    }
     footer.appendChild(total);
 
-    const canBuy = canAct && selected.size > 0 && playerGold >= bankGoldNeeded && playerMap >= 1;
+    const canBuy = canAct && selected.size > 0 && canCover && playerMap >= 1;
     const buyBtn = promptButton('Buy', () => {
       if (!canBuy) return;
       const action = { player_id: PLAYER_ID, action_type: cfg.actionType, slot_indices: [...selected] };
-      if (tomeGoldApplied > 0) action.tome_payment = { gold: tomeGoldApplied, strength: 0, magic: 0 };
+      if (tomeGoldApplied > 0 || tomeMagicApplied > 0) {
+        action.tome_payment = { gold: tomeGoldApplied, strength: 0, magic: tomeMagicApplied };
+      }
       postGameAction(action);
       dismissCardInspectModal();
     });
@@ -1674,7 +1705,8 @@ function openSailShopModal(cfg) {
 
     let noteText = '';
     if (!canAct) noteText = `You can buy ${nounLower} on your turn during the action phase.`;
-    else if (selected.size && playerGold < bankGoldNeeded) noteText = 'Not enough gold for this selection.';
+    else if (selected.size && needsMinGold) noteText = 'You must pay at least 1 gold to use magic as wild.';
+    else if (selected.size && treasuryMagic > playerMagic) noteText = 'Not enough gold or magic for this selection.';
     else if (selected.size && playerMap < 1) noteText = 'You need 1 map to sail.';
     if (noteText) {
       const note = mk('sail-shop-note');

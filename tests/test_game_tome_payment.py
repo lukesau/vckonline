@@ -148,10 +148,47 @@ class BuyGoodsTomeTests(unittest.TestCase):
         self.assertEqual(p.owned_goods, ["jewels"])
         self.assertEqual(face_up(p, "gold"), 0)           # all 3 flipped
 
-    def test_non_gold_tomes_rejected_for_goods(self):
+    def test_magic_tomes_pay_goods_cost_as_wild(self):
+        # Magic is wild for the gold cost: 1 magic tome + 5 treasury gold = 6.
         game, players = make_game(tomes=[Tome("magic")])
+        p = players[0]
+        p.gold_score = 5
+        p.magic_score = 0
+
+        game.buy_goods(p.player_id, [0], tome_payment={"magic": 1})
+
+        self.assertEqual(int(p.gold_score), 0)            # 5 - 5 treasury gold
+        self.assertEqual(int(p.magic_score), 0)           # +1 redeemed, -1 spent
+        self.assertEqual(p.owned_goods, ["jewels"])
+        self.assertEqual(face_up(p, "magic"), 0)          # magic tome flipped
+
+    def test_treasury_magic_pays_goods_cost_as_wild(self):
+        # No tomes: 1 treasury gold + 5 treasury magic covers the 6 gold cost.
+        game, players = make_game()
+        p = players[0]
+        p.gold_score = 1
+        p.magic_score = 5
+
+        game.buy_goods(p.player_id, [0])
+
+        self.assertEqual(int(p.gold_score), 0)
+        self.assertEqual(int(p.magic_score), 0)
+        self.assertEqual(p.owned_goods, ["jewels"])
+
+    def test_pure_magic_payment_requires_at_least_one_gold(self):
+        # Slot 2 costs 2 gold; with 0 gold and only magic, the wild rule blocks it.
+        game, players = make_game()
+        p = players[0]
+        p.gold_score = 0
+        p.magic_score = 10
         with self.assertRaises(ValueError):
-            game.buy_goods(players[0].player_id, [0], tome_payment={"magic": 1})
+            game.buy_goods(p.player_id, [2])
+
+    def test_strength_tomes_rejected_for_goods(self):
+        # Strength is not wild for the gold cost.
+        game, players = make_game(tomes=[Tome("strength")])
+        with self.assertRaises(ValueError):
+            game.buy_goods(players[0].player_id, [0], tome_payment={"strength": 1})
 
     def test_more_tomes_than_cost_rejected(self):
         game, players = make_game(tomes=[Tome("gold")] * 8)
@@ -213,6 +250,7 @@ class BuyTomesTomeTests(unittest.TestCase):
         d.acquired_turn_number = int(game.turn_number)
         p.owned_domains.append(d)
         p.gold_score = 2
+        p.magic_score = 0  # no wild fallback, so the full cost must bite
         # Slot 2 still costs 3 on the turn Browncoat's Sanctum was bought.
         with self.assertRaises(ValueError):
             game.buy_tomes(p.player_id, [2])
@@ -260,6 +298,7 @@ class BuyGoodsDiscountTests(unittest.TestCase):
         d.acquired_turn_number = int(game.turn_number)
         p.owned_domains.append(d)
         p.gold_score = 5
+        p.magic_score = 0  # no wild fallback, so the full cost must bite
         # Slot 0 still costs 6 on the turn Port of Drake was bought.
         with self.assertRaises(ValueError):
             game.buy_goods(p.player_id, [0])

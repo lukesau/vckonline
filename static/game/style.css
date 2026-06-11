@@ -1390,13 +1390,12 @@ html, body {
   height: min(100cqh, var(--tableau-strip-max-h));
   padding-right: 6px;
   border-right: 1px solid rgba(255, 255, 255, 0.1);
-  /* Height of one of the 3 stacked cells. Each item is sized off this so it has
+  /* Total height of the stacked section. Each item is sized off this so it has
      a DEFINITE width (height × aspect-ratio); otherwise the section's content
      width would be driven by the full-resolution artwork and balloon absurdly
      wide. With definite item widths the section is exactly as wide as its
-     contents: capped by 4 goods icons until enough nobles are rescued to grow
-     the Nobles row past them. */
-  --cs-cell-h: calc(min(100cqh, var(--tableau-strip-max-h)) / 3);
+     contents (Nobles, unstacked, grow it widest). */
+  --cs-group-h: min(100cqh, var(--tableau-strip-max-h));
 }
 .cs-column {
   display: flex;
@@ -1413,6 +1412,8 @@ html, body {
   padding-bottom: 2px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
+/* Nobles take half the height; Tomes + Goods a quarter each (2 : 1 : 1). */
+.cs-cell-nobles { flex-grow: 2; }
 .cs-cell:last-child { border-bottom: none; }
 .cs-cell-label {
   writing-mode: vertical-rl;
@@ -1443,15 +1444,16 @@ html, body {
   justify-content: center;
   position: relative;
 }
-/* Each item's height is derived from the cell height and its width follows from
-   aspect-ratio, giving a definite width the section can size itself to. */
+/* Each item's height is derived from the section height (matching its cell's
+   share: Nobles 1/2, Goods/Tomes 1/4) and its width follows from aspect-ratio,
+   giving a definite width the section can size itself to. */
 .cs-item-nobles {
-  height: calc(var(--cs-cell-h, 60px) * 0.9);
+  height: calc(var(--cs-group-h, 200px) * 0.45);
   aspect-ratio: 520 / 814;
 }
 .cs-item-goods,
 .cs-item-tomes {
-  height: calc(var(--cs-cell-h, 60px) * 0.5);
+  height: calc(var(--cs-group-h, 200px) * 0.2);
   aspect-ratio: 1 / 1;
 }
 .cs-item-img {
