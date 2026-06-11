@@ -40,6 +40,10 @@ _GAME_CLIENT_INDEX = _REPO_ROOT / "static" / "game" / "index.html"
 _COUNTER_INDEX = _REPO_ROOT / "static" / "counter" / "index.html"
 _WIKI_INDEX = _REPO_ROOT / "static" / "wiki" / "index.html"
 _RULEBOOKS_DIR = _REPO_ROOT / "static" / "rulebooks"
+# Standalone "rule card" images (not DB cards) live alongside the PDFs in
+# static/rulebooks/. Files are named rule_card_<front|back>_<slug>.<ext> and are
+# grouped into a front/back pair per slug.
+_RULE_CARD_RE = re.compile(r"^rule_card_(front|back)_(.+)\.(?:png|jpg|jpeg)$", re.IGNORECASE)
 
 # Cached wiki payload. Card data is static between server restarts; lazy-load on
 # first request and reuse forever (override with ?refresh=1).
@@ -2362,18 +2366,44 @@ async def wiki_cards(refresh: bool = False):
 
 @app.get("/api/wiki/rulebooks")
 async def wiki_rulebooks():
-    """List the rulebook PDFs available under static/rulebooks/.
+    """List rulebook PDFs and standalone rule cards for the wiki Rulebooks tab.
 
-    Scanned live on each request (a handful of files, changes rarely) so a
-    dropped-in PDF appears without a server restart. Returns each file's
-    display name (filename without the .pdf extension) and a static URL.
+    Both are scanned live on each request (a handful of files, changes rarely)
+    so a dropped-in file appears without a server restart.
+
+    - `rulebooks`: PDFs under `static/rulebooks/`; each has a display `name`
+      (filename without `.pdf`) and a static `url`.
+    - `rule_cards`: front/back image pairs under `static/rulebooks/` named
+      `rule_card_<front|back>_<slug>.<ext>`, grouped by `<slug>`. Each has a
+      `name` (slug, underscores → spaces, title-cased), `slug`, and
+      `front_url` / `back_url` (either may be null if only one side exists).
     """
     books = []
+    pairs = {}
     if _RULEBOOKS_DIR.is_dir():
-        for f in sorted(_RULEBOOKS_DIR.glob("*.pdf")):
-            url = "/static/rulebooks/" + urllib.parse.quote(f.name)
-            books.append({"name": f.stem, "url": url})
-    return {"rulebooks": books}
+        for f in sorted(_RULEBOOKS_DIR.iterdir()):
+            if not f.is_file():
+                continue
+            m = _RULE_CARD_RE.match(f.name)
+            if m:
+                side, slug = m.group(1).lower(), m.group(2)
+                url = "/static/rulebooks/" + urllib.parse.quote(f.name)
+                pairs.setdefault(slug, {})[side] = url
+            elif f.suffix.lower() == ".pdf":
+                url = "/static/rulebooks/" + urllib.parse.quote(f.name)
+                books.append({"name": f.stem, "url": url})
+
+    rule_cards = []
+    for slug in sorted(pairs):
+        sides = pairs[slug]
+        rule_cards.append({
+            "name": slug.replace("_", " ").title(),
+            "slug": slug,
+            "front_url": sides.get("front"),
+            "back_url": sides.get("back"),
+        })
+
+    return {"rulebooks": books, "rule_cards": rule_cards}
 
 
 # In-memory cache of preset previews. Card data is static between server

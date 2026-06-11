@@ -798,12 +798,25 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
 }
 
 /* ── Rulebooks tab ───────────────────────────────────────────────────── */
+/* The shared grid container becomes a plain block on this tab so the PDF row
+   and the rule-card grid can each own their layout. */
+.wiki-grid.wiki-grid--plain {
+  display: block;
+}
+.wiki-rb-section + .wiki-rb-section {
+  margin-top: 32px;
+}
+.wiki-rb-heading {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 14px;
+  color: var(--text);
+}
 .wiki-rulebooks {
   list-style: none;
-  margin: 0 auto;
+  margin: 0;
   display: flex;
   flex-flow: row wrap;
-  justify-content: center;
   gap: 10px;
 }
 .wiki-rulebook-item { margin: 0; }
@@ -838,4 +851,12 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   text-align: center;
   color: var(--muted);
   padding: 32px 16px;
+}
+
+/* Rule-card modal: image-only, so collapse the two-column body to a single
+   centered image column. */
+.wiki-modal-body.rule-card {
+  display: block;
+  max-width: 360px;
+  margin: 0 auto;
 }

@@ -41,7 +41,10 @@
 
   const state = {
     raw: null,                  // full payload from /api/wiki/cards
-    rulebooks: null,            // cached list from /api/wiki/rulebooks
+    rulebooks: null,            // cached PDF list from /api/wiki/rulebooks
+    ruleCards: null,            // cached rule-card list from /api/wiki/rulebooks
+    // Per rule-card front/back selection: slug -> "front" | "back" (absent = front).
+    ruleCardSides: new Map(),
     activeType: "citizens",
     search: "",
     filters: {},                // { citizens: { role: 'shadow' }, monsters: { area: 'Forest' }, ... }
@@ -601,6 +604,7 @@
       renderRulebooks();
       return;
     }
+    el.grid.classList.remove("wiki-grid--plain");
     if (!state.raw) return;
     const cards = filteredCards();
     el.grid.innerHTML = "";
@@ -623,14 +627,19 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = await res.json();
       state.rulebooks = Array.isArray(body.rulebooks) ? body.rulebooks : [];
+      state.ruleCards = Array.isArray(body.rule_cards) ? body.rule_cards : [];
     } catch (err) {
       state.rulebooks = [];
+      state.ruleCards = [];
     }
     if (state.activeType === RULEBOOKS_TAB) render();
   }
 
   function renderRulebooks() {
     el.empty.hidden = true;
+    // The container is normally a CSS grid; switch it to a plain block so the
+    // sections below can use their own layouts (a wrapping PDF row + a card grid).
+    el.grid.classList.add("wiki-grid--plain");
     if (state.rulebooks === null) {
       el.grid.innerHTML = "";
       el.grid.appendChild(h("p", { class: "wiki-rulebooks-status" }, "Loading rulebooks..."));
@@ -638,21 +647,115 @@
       return;
     }
     el.grid.innerHTML = "";
-    if (!state.rulebooks.length) {
+
+    const books = state.rulebooks || [];
+    const cards = state.ruleCards || [];
+    if (!books.length && !cards.length) {
       el.grid.appendChild(h("p", { class: "wiki-rulebooks-status" }, "No rulebooks available."));
       return;
     }
-    const list = h("ul", { class: "wiki-rulebooks" });
-    for (const book of state.rulebooks) {
-      list.appendChild(h("li", { class: "wiki-rulebook-item" },
-        h("a", {
-          class: "wiki-rulebook-link",
-          href: book.url,
-          target: "_blank",
-          rel: "noopener noreferrer",
-        }, book.name)));
+
+    if (books.length) {
+      const list = h("ul", { class: "wiki-rulebooks" });
+      for (const book of books) {
+        list.appendChild(h("li", { class: "wiki-rulebook-item" },
+          h("a", {
+            class: "wiki-rulebook-link",
+            href: book.url,
+            target: "_blank",
+            rel: "noopener noreferrer",
+          }, book.name)));
+      }
+      el.grid.appendChild(h("section", { class: "wiki-rb-section" },
+        h("h2", { class: "wiki-rb-heading" }, "Rulebooks"),
+        list));
     }
-    el.grid.appendChild(list);
+
+    if (cards.length) {
+      const cardGrid = h("div", { class: "wiki-grid" });
+      for (const card of cards) {
+        cardGrid.appendChild(renderRuleCardGridCard(card));
+      }
+      el.grid.appendChild(h("section", { class: "wiki-rb-section" },
+        h("h2", { class: "wiki-rb-heading" }, "Rule Cards"),
+        cardGrid));
+    }
+  }
+
+  // ── rule cards (front/back image-only cards, no DB) ────────────────────
+  const ruleCardSide = (slug) => state.ruleCardSides.get(slug) || "front";
+  const setRuleCardSide = (slug, side) => {
+    if (side === "back") state.ruleCardSides.set(slug, "back");
+    else state.ruleCardSides.delete(slug);
+  };
+
+  // Reuses the alt-toggle button as a front/back flip. Returns { wrap, altBtn }
+  // matching buildArtworkControls so the grid layers the button over the art
+  // and the modal places it below the image.
+  function buildRuleCardArtwork(card, { modal }) {
+    const hasBoth = !!card.front_url && !!card.back_url;
+    let side = ruleCardSide(card.slug);
+    const urlFor = (s) => (s === "back" ? (card.back_url || card.front_url) : (card.front_url || card.back_url));
+
+    const imgClass = modal ? "wiki-modal-image" : "wiki-card-image";
+    const wrap = h("div", { class: "wiki-art-wrap" });
+    const img = h("img", {
+      class: imgClass,
+      src: urlFor(side),
+      alt: "",
+      loading: modal ? null : "lazy",
+    });
+    img.addEventListener("error", () => {
+      img.replaceWith(h("div", { class: imgClass + " missing" }, "no image"));
+    });
+    wrap.appendChild(img);
+
+    let altBtn = null;
+    if (hasBoth) {
+      altBtn = h("button", {
+        type: "button",
+        class: "wiki-alt-toggle" + (modal ? " modal" : ""),
+      });
+      const sync = () => {
+        const onBack = side === "back";
+        altBtn.classList.toggle("active", onBack);
+        altBtn.setAttribute("aria-pressed", onBack ? "true" : "false");
+        altBtn.textContent = modal
+          ? (onBack ? "Show front" : "Show back")
+          : (onBack ? "Front" : "Back");
+      };
+      altBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        side = side === "back" ? "front" : "back";
+        setRuleCardSide(card.slug, side);
+        img.src = urlFor(side);
+        sync();
+      });
+      sync();
+      if (!modal) wrap.appendChild(altBtn);
+    }
+
+    return { wrap, altBtn };
+  }
+
+  function renderRuleCardGridCard(card) {
+    const { wrap } = buildRuleCardArtwork(card, { modal: false });
+    const node = h("div", { class: "wiki-card" },
+      wrap,
+      h("div", { class: "wiki-card-meta" },
+        h("div", { class: "wiki-card-name" }, card.name || "(unnamed)")),
+    );
+    node.addEventListener("click", () => openRuleCardModal(card));
+    return node;
+  }
+
+  function openRuleCardModal(card) {
+    el.modalBody.innerHTML = "";
+    el.modalBody.classList.add("rule-card");
+    const { wrap, altBtn } = buildRuleCardArtwork(card, { modal: true });
+    el.modalBody.appendChild(h("div", { class: "wiki-modal-image-col" }, wrap, altBtn));
+    el.modal.classList.add("open");
+    el.modal.setAttribute("aria-hidden", "false");
   }
 
   function renderGridCard(card) {
@@ -690,6 +793,7 @@
   // ── detail modal ──────────────────────────────────────────────────────
   function openModal(card) {
     el.modalBody.innerHTML = "";
+    el.modalBody.classList.remove("rule-card");
     el.modalBody.appendChild(renderDetail(card));
     el.modal.classList.add("open");
     el.modal.setAttribute("aria-hidden", "false");
@@ -697,6 +801,7 @@
   function closeModal() {
     el.modal.classList.remove("open");
     el.modal.setAttribute("aria-hidden", "true");
+    el.modalBody.classList.remove("rule-card");
     // The modal can flip a card to alt art; re-render so the grid card's
     // thumbnail picks up that selection.
     render();

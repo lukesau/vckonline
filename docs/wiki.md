@@ -21,6 +21,7 @@ It does **not** apply `banned_cards.json` filtering, expansion gating, or any pr
 | FastAPI routes | `server.py` — `GET /wiki`, `GET /api/wiki/cards`, `GET /api/wiki/rulebooks` |
 | Card images (reused) | `/card-image/{kind}/{id}` endpoint in `server.py` |
 | Rulebook PDFs | `static/rulebooks/*.pdf` (served via the `/static` mount) |
+| Rule card images | `static/rulebooks/rule_card_<front\|back>_<slug>.<png\|jpg\|jpeg>` |
 
 ## Endpoints
 
@@ -31,7 +32,7 @@ It does **not** apply `banned_cards.json` filtering, expansion gating, or any pr
   - Every entry includes `alt_variants` — a sorted list of the alternate-artwork variant tokens that exist on disk for that card (e.g. `["alt"]` or `["alt_01", …, "alt_05"]`), plus `has_alt_image` (`true` when `alt_variants` is non-empty, kept for backwards compatibility). The client renders an "Alt" control for those cards. See [Alternate artwork](#alternate-artwork) below.
 - `GET /api/wiki/cards?refresh=1` — bust the in-memory cache and reload from the DB. Useful when you edit a row and want to see it without restarting the server.
 - `GET /card-image-variants/{kind}/{id}` — returns `{ "variants": [...] }`, the same token list, scanned live. Used by the in-game Margrave artwork chooser so the client never hard-codes how many alternates exist.
-- `GET /api/wiki/rulebooks` — returns `{ "rulebooks": [{ "name", "url" }, ...] }` by scanning `static/rulebooks/*.pdf` live (sorted by filename; `name` is the filename without `.pdf`, `url` is the `/static/rulebooks/...` path). Drop a PDF into `static/rulebooks/` and it appears on the next page load — no restart needed. Powers the **Rulebooks** tab, which renders the list as links that open each PDF in a new tab (no embedded viewer).
+- `GET /api/wiki/rulebooks` — returns `{ "rulebooks": [{ "name", "url" }, ...], "rule_cards": [{ "name", "slug", "front_url", "back_url" }, ...] }`. Everything lives in `static/rulebooks/`: PDFs become `rulebooks`, and files named `rule_card_<front|back>_<slug>.<png|jpg|jpeg>` are grouped into front/back `rule_cards` by slug. Drop in files and they appear on the next page load — no restart needed.
 
 The wiki uses the existing `/card-image/{kind}/{id}` endpoint for art. To request an alternate, append `?variant=<token>` (e.g. `?variant=alt` or `?variant=alt_01`); the endpoint then looks for a file beginning with `<token>_<kind>_<id>_` instead of `<kind>_<id>_`. The token is restricted to `[a-z0-9_]+` so it is safe to splice into a filename prefix. Other callers of `/card-image/...` are unaffected — they keep getting the canonical art by default.
 
@@ -47,7 +48,7 @@ If the DB is unreachable, `/api/wiki/cards` returns `503` with a `detail` descri
 
 ## UI features
 
-- Type tabs (Citizens / Monsters / Domains / Dukes / Starters / Events / Nobles) with row counts, plus a **Rulebooks** tab that lists the PDFs in `static/rulebooks/` as new-tab links. The Rulebooks tab needs no DB, so it stays reachable even when the card data fails to load.
+- Type tabs (Citizens / Monsters / Domains / Dukes / Starters / Events / Nobles) with row counts, plus a **Rulebooks** tab. That tab shows PDFs in `static/rulebooks/` as new-tab links and rule cards (also in `static/rulebooks/`) in the same card grid style as DB cards. Rule cards open an image-only modal and use the existing Alt button styling as a front/back toggle. The Rulebooks tab needs no DB, so it stays reachable even when the card data fails to load.
 - Free-text search across name, expansion, area, monster type, and every effect/text field.
 - Per-type filter chips: expansion, citizen role, citizen roll-match signature, monster area/type, domain effect kind, banned-only, implementation status (Implemented / Unimplemented). The citizen roll-match chips are derived from the data: any unique combination of positive `roll_match1`/`roll_match2` values becomes a chip (e.g. `3`, `9/10`, `7/8`); negative/zero sentinels are ignored.
 - Responsive card grid using `400×570` art from `images/{kind}s/`.
