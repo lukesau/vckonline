@@ -293,12 +293,14 @@ class HarvestEngine:
         # -1/-1 starter at all means nothing happens on the no_payout outcome.
         #
         # A -1/-1 starter carries BOTH a `doubles` leg and a `no_payout` leg.
-        # The rulebook is explicit that on a doubles roll that does not
-        # activate any dice-value citizens the starter fires TWICE — once for
-        # doubles, once for no_payout. So that starter's own in-band doubles
-        # activation must NOT suppress its own no_payout trigger. Every other
-        # activation (peasant on 5, knight on 6, any citizen, or another
-        # starter) still suppresses it.
+        # By default the starter's own in-band doubles activation counts as "a
+        # card fired" and suppresses its own no_payout leg, so it pays out at
+        # most once per harvest (Margrave, Coxswain). The Herald is the lone
+        # exception (`doubles_or_no_payout_twice`): the rulebook says it fires
+        # TWICE on a doubles roll that activates no other card — once for
+        # doubles, once for no_payout — so its own doubles activation does NOT
+        # suppress its no_payout trigger. Every other activation (peasant on 5,
+        # knight on 6, any citizen, or another starter) still suppresses it.
         activated_pids = set()
         for pid, keys in self.game.harvest_consumed.items():
             if not keys:
@@ -366,21 +368,22 @@ class HarvestEngine:
             self.game.action_required["action"] = ""
 
     def _no_payout_starter_own_doubles_slot_keys(self, player):
-        """Slot keys produced by a player's no_payout starter's doubles leg.
+        """Slot keys produced by a `twice` no_payout starter's doubles leg.
 
-        A starter that triggers on both `doubles` and `no_payout` (the -1/-1
-        Herald/Margrave) fires its doubles leg in-band during the harvest scan,
-        which records a consumed slot key. That self-activation must not count
-        as "a card fired" when deciding whether the same starter's no_payout
-        leg should fire at end of harvest, so this returns exactly those keys
-        for the caller to ignore. Other starters/citizens are never excluded.
+        A -1/-1 starter that triggers on both `doubles` and `no_payout` fires
+        its doubles leg in-band during the harvest scan, which records a
+        consumed slot key. By default that self-activation counts as "a card
+        fired", so it suppresses the same starter's end-of-harvest no_payout
+        leg and the starter pays out AT MOST ONCE per harvest (Margrave,
+        Coxswain). This is the default for every -1/-1 starter.
 
-        The Coxswain (`doubles_or_no_payout_once`) is the exception: the rulebook
-        says it activates AT MOST ONCE even when both its doubles and no_payout
-        conditions are met. So its in-band doubles activation MUST count as "a
-        card fired" and suppress its own no_payout leg. We therefore do not add
-        its doubles slot key here. This applies in every game mode, not just
-        Crimson Seas, since nothing about this gate is preset-specific.
+        The Herald (`doubles_or_no_payout_twice`) is the sole exception: the
+        rulebook is explicit that on a doubles roll which activates no other
+        card it fires TWICE — once for doubles, once for no_payout. The `twice`
+        marker opts it out of the suppression by returning its doubles slot key
+        here for the caller to ignore. Other starters/citizens are never
+        excluded. This applies in every game mode; nothing about this gate is
+        preset-specific.
 
         The doubles leg always produces a single activation (index 0); see
         `_build_harvest_slots`, where a -1/-1 starter never roll-matches and the
@@ -393,7 +396,7 @@ class HarvestEngine:
             trig = (getattr(st, "activation_trigger", "") or "").lower()
             if "no_payout" not in trig or "doubles" not in trig:
                 continue
-            if "once" in trig:
+            if "twice" not in trig:
                 continue
             sid = int(getattr(st, "starter_id", -1))
             keys.add(f"starter:{sid}:{idx}:0")

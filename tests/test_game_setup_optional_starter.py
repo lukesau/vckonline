@@ -50,7 +50,7 @@ class OptionalStarterPredicateTests(unittest.TestCase):
         self.assertFalse(_is_optional_starter_row({"roll_match1": 6, "roll_match2": 0}))
 
     def test_optional_card_predicate(self):
-        herald = _make_starter(3, "Herald", -1, -1, activation_trigger="doubles_or_no_payout")
+        herald = _make_starter(3, "Herald", -1, -1, activation_trigger="doubles_or_no_payout_twice")
         peasant = _make_starter(1, "Peasant", 5, -1)
         self.assertTrue(_is_optional_starter(herald))
         self.assertFalse(_is_optional_starter(peasant))
@@ -59,7 +59,7 @@ class OptionalStarterPredicateTests(unittest.TestCase):
 class ChooseOptionalStarterTests(unittest.TestCase):
     def setUp(self):
         self.herald = _make_starter(3, "Herald", -1, -1, expansion="base",
-                                    activation_trigger="doubles_or_no_payout")
+                                    activation_trigger="doubles_or_no_payout_twice")
         self.margrave = _make_starter(4, "Margrave", -1, -1, expansion="margraves",
                                       activation_trigger="doubles_or_no_payout")
         self.pool = [self.herald, self.margrave]

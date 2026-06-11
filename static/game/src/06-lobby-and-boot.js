@@ -1,7 +1,7 @@
 // ── Lobby background ───────────────────────────────────────────────────────
-// `'collage'` = static overlapping card grid (original). `'bounce'` = one card, constant speed, specular wall bounces, new random card each bounce.
-const LOBBY_BACKGROUND_MODE = 'bounce';
-
+// One card at a time, constant speed, specular wall bounces, with a new random
+// card chosen on each bounce.
+//
 // Card faces for the background are expressed as inclusive id ranges per card
 // type and resolved through the shared `/card-image/{type}/{id}` endpoint, so
 // adding art only means widening a range (server is the source of truth via
@@ -14,7 +14,13 @@ const LOBBY_BG_FALLBACK_RANGES = {
   monster: [[1, 189]],
   duke: [[1, 21], [99, 102]],
   event: [[1, 36]],
+  noble: [[1, 16]],
 };
+
+// Crimson Seas Nobles are smaller cards with a taller/narrower proportion than
+// the standard 400×570 face. In the bounce background we draw them at ~75% of
+// a regular card's height; width then follows their own natural aspect ratio.
+const LOBBY_BG_NOBLE_HEIGHT_SCALE = 0.75;
 
 function lobbyBgCardUrl(type, id) {
   return `/card-image/${type}/${id}`;
@@ -44,22 +50,6 @@ function lobbyBgPickCardUrl(ranges) {
   return '';
 }
 
-// Every candidate URL across all sub-ranges (collage needs a finite tile deck).
-function lobbyBgExpandRanges(ranges) {
-  const urls = [];
-  for (const type of Object.keys(ranges || {})) {
-    const spans = ranges[type];
-    if (!Array.isArray(spans)) continue;
-    for (const s of spans) {
-      if (!Array.isArray(s) || s.length < 2) continue;
-      for (let id = s[0]; id <= s[1]; id++) {
-        urls.push(lobbyBgCardUrl(type, id));
-      }
-    }
-  }
-  return urls;
-}
-
 async function lobbyBgFetchRanges() {
   try {
     const res = await fetch('/api/lobby/background-cards');
@@ -82,6 +72,7 @@ const LOBBY_BG_TYPE_BORDERS = {
   duke: '#823956',
   starter: '#526263',
   event: '#A83524',
+  noble: '#423632',
 };
 
 function lobbyBgTypeFromUrl(url) {
@@ -102,132 +93,6 @@ function lobbyBgRoundRectPath(ctx, left, top, w, h, r) {
   ctx.arcTo(left, top + h, left, top, radius);
   ctx.arcTo(left, top, left + w, top, radius);
   ctx.closePath();
-}
-
-async function paintLobbyBackgroundCollage(canvas) {
-  const t0 = performance.now();
-  const overlay = canvas.closest('.lobby-overlay');
-  if (!overlay) return;
-  canvas.classList.remove('lobby-bg-canvas--fill');
-  const vw = Math.max(window.innerWidth || 0, 1024);
-  const vh = Math.max(window.innerHeight || 0, 640);
-  // One large bitmap, centered; window resizes clip it (no stretch).
-  const bw = Math.min(4096, Math.max(2880, Math.ceil(vw * 1.42)));
-  const bh = Math.min(2560, Math.max(1800, Math.ceil(vh * 1.42)));
-
-  const ranges = await lobbyBgFetchRanges();
-  const urls = lobbyBgExpandRanges(ranges);
-  if (!urls.length) return;
-
-  const tAfterList = performance.now();
-
-  // Staggered grid; wider spacing + less overlap than before (fewer tiles, less duplicate clutter).
-  const cellW = 218;
-  const cellH = 302;
-  const overlap = 1.2;
-  const tileCols = Math.ceil(bw / cellW) + 2;
-  const tileRows = Math.ceil(bh / cellH) + 2;
-  const tileCount = tileCols * tileRows;
-  const srcDeck = [];
-  while (srcDeck.length < tileCount) {
-    const pass = urls.slice();
-    for (let i = pass.length - 1; i > 0; i--) {
-      const j = (Math.random() * (i + 1)) | 0;
-      const t = pass[i];
-      pass[i] = pass[j];
-      pass[j] = t;
-    }
-    srcDeck.push(...pass);
-  }
-  const positions = [];
-  for (let row = 0; row < tileRows; row++) {
-    const brick = (row % 2) * (cellW * 0.5);
-    for (let col = 0; col < tileCols; col++) {
-      const cx =
-        brick +
-        (col + 0.5) * cellW +
-        (Math.random() - 0.5) * cellW * 0.2;
-      const cy = (row + 0.5) * cellH + (Math.random() - 0.5) * cellH * 0.18;
-      const scale = 0.96 + Math.random() * 0.12;
-      positions.push({
-        cx,
-        cy,
-        pw: cellW * scale * overlap,
-        ph: cellH * scale * overlap,
-        rot: (Math.random() - 0.5) * 0.42,
-        src: srcDeck[positions.length],
-      });
-    }
-  }
-
-  const imgPromiseBySrc = new Map();
-  function loadOneCached(src) {
-    let p = imgPromiseBySrc.get(src);
-    if (!p) {
-      p = new Promise(resolve => {
-        const img = new Image();
-        img.onload = () => resolve({ ok: true, img });
-        img.onerror = () => resolve({ ok: false });
-        img.src = src;
-      });
-      imgPromiseBySrc.set(src, p);
-    }
-    return p;
-  }
-
-  const loads = positions.map(p => loadOneCached(p.src).then(r => ({ ...p, ...r })));
-  const results = await Promise.all(loads);
-  const tAfterLoad = performance.now();
-
-  for (let i = results.length - 1; i > 0; i--) {
-    const j = (Math.random() * (i + 1)) | 0;
-    const t = results[i];
-    results[i] = results[j];
-    results[j] = t;
-  }
-
-  canvas.width = bw;
-  canvas.height = bh;
-  canvas.style.width = `${bw}px`;
-  canvas.style.height = `${bh}px`;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-
-  ctx.fillStyle = '#0a1610';
-  ctx.fillRect(0, 0, bw, bh);
-
-  let drawn = 0;
-  for (const r of results) {
-    if (!r.ok || !r.img) continue;
-    drawn += 1;
-    const img = r.img;
-    const ar = img.naturalWidth / img.naturalHeight;
-    let dw = r.pw;
-    let dh = dw / ar;
-    if (dh > r.ph) {
-      dh = r.ph;
-      dw = dh * ar;
-    }
-    ctx.save();
-    ctx.translate(r.cx, r.cy);
-    ctx.rotate(r.rot);
-    ctx.drawImage(img, -dw * 0.5, -dh * 0.5, dw, dh);
-    ctx.restore();
-  }
-
-  ctx.fillStyle = 'rgba(4, 10, 7, 0.4)';
-  ctx.fillRect(0, 0, bw, bh);
-
-  const tDone = performance.now();
-  console.info(
-    '[lobby-bg] list %sms  load+decode %sms  draw %sms  total %sms (%d tiles, %d drawn)',
-    (tAfterList - t0).toFixed(0),
-    (tAfterLoad - tAfterList).toFixed(0),
-    (tDone - tAfterLoad).toFixed(0),
-    (tDone - t0).toFixed(0),
-    positions.length,
-    drawn
-  );
 }
 
 function startLobbyBackgroundBounce(canvas) {
@@ -258,6 +123,7 @@ function startLobbyBackgroundBounce(canvas) {
   let vy = 0;
   let currentImg = null;
   let currentBorderColor = '#526263';
+  let currentSizeScale = 1;   // <1 shrinks smaller-format cards (e.g. Nobles)
   let nextCard = null;   // { url, img } — decoded and ready to show on the next bounce
   let preparing = false;
   let halfW = 60;
@@ -279,7 +145,9 @@ function startLobbyBackgroundBounce(canvas) {
   function measureCard(img) {
     if (!img || !img.naturalWidth) return { dw: halfW * 2, dh: halfH * 2 };
     const ar = img.naturalWidth / img.naturalHeight;
-    let dh = Math.min(cssH * CARD_MAX_H_FRAC, 240);
+    // Smaller-format cards (Nobles) are drawn shorter; width then follows their
+    // own natural aspect ratio so the narrower frame is preserved.
+    let dh = Math.min(cssH * CARD_MAX_H_FRAC, 240) * currentSizeScale;
     let dw = dh * ar;
     const maxW = cssW * 0.42;
     if (dw > maxW) {
@@ -330,6 +198,7 @@ function startLobbyBackgroundBounce(canvas) {
   function applyCard(card) {
     currentImg = card.img;
     currentBorderColor = lobbyBgBorderColor(card.url);
+    currentSizeScale = lobbyBgTypeFromUrl(card.url) === 'noble' ? LOBBY_BG_NOBLE_HEIGHT_SCALE : 1;
     const m = measureCard(currentImg);
     halfW = m.dw * 0.5;
     halfH = m.dh * 0.5;
@@ -497,10 +366,6 @@ function startLobbyBackgroundBounce(canvas) {
 }
 
 async function initLobbyBackgroundCanvas(canvas) {
-  if (LOBBY_BACKGROUND_MODE === 'collage') {
-    await paintLobbyBackgroundCollage(canvas);
-    return;
-  }
   await startLobbyBackgroundBounce(canvas);
 }
 

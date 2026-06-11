@@ -796,3 +796,46 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+
+/* ── Rulebooks tab ───────────────────────────────────────────────────── */
+.wiki-rulebooks {
+  list-style: none;
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.wiki-rulebook-item { margin: 0; }
+.wiki-rulebook-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 600;
+}
+.wiki-rulebook-link::before {
+  content: "PDF";
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  border: 1px solid var(--accent-soft);
+  border-radius: 3px;
+  padding: 2px 5px;
+}
+.wiki-rulebook-link:hover {
+  border-color: var(--border-strong);
+  text-decoration: none;
+  background: var(--bg-elevated);
+}
+.wiki-rulebooks-status {
+  text-align: center;
+  color: var(--muted);
+  padding: 32px 16px;
+}

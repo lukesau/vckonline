@@ -817,7 +817,7 @@ function syncBoardTabState(zoneCenter) {
   // No-op — carousel handles its own state via scroll sync
 }
 
-const RULEBOOK_PDF_URL = '/static/game/b0-valeria-card-kingdoms-rulebook.pdf';
+const RULEBOOK_PDF_URL = '/wiki';
 
 
 function makeResourceActionBar(state) {
@@ -964,7 +964,7 @@ function openDiceInfoModal(state) {
   const rulebook = document.createElement('a');
   rulebook.href = RULEBOOK_PDF_URL;
   rulebook.className = 'info-bar-rulebook-btn';
-  rulebook.textContent = 'Rulebook';
+  rulebook.textContent = 'Cards and Rules';
   rulebook.target = '_blank';
   rulebook.rel = 'noopener noreferrer';
   panel.appendChild(rulebook);

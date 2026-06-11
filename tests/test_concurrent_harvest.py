@@ -19,7 +19,7 @@ def make_herald_starter(starter_id):
         0, 0, 0, 0,
         True, True, "choose g 1 s 1 m 1", "choose g 1 s 1 m 1",
         "test",
-        "doubles_or_no_payout",
+        "doubles_or_no_payout_twice",
     )
 
 

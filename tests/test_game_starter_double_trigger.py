@@ -8,10 +8,13 @@ from game_models import Player
 def make_herald(starter_id, gold_on=1, gold_off=1):
     """A -1/-1 starter that fires on both `doubles` and `no_payout`.
 
-    Mirrors the real Herald/Margrave: roll_match1/2 = -1 (never roll-matches)
-    and activation_trigger = 'doubles_or_no_payout'. A flat gold payout keeps
-    the harvest non-interactive (no special-payout prompt) so the test can
-    drive straight to the end-of-harvest bonus gate.
+    Mirrors the real Herald: roll_match1/2 = -1 (never roll-matches) and
+    activation_trigger = 'doubles_or_no_payout_twice'. The `twice` marker is
+    what makes the doubles + no_payout legs stack into two activations on a
+    doubles roll that activates no other card — Herald is the only starter
+    that does this. A flat gold payout keeps the harvest non-interactive (no
+    special-payout prompt) so the test can drive straight to the
+    end-of-harvest bonus gate.
     """
     return Starter(
         starter_id, "Herald", -1, -1,
@@ -19,7 +22,7 @@ def make_herald(starter_id, gold_on=1, gold_off=1):
         0, 0, 0, 0,
         False, False, "", "",
         "test",
-        "doubles_or_no_payout",
+        "doubles_or_no_payout_twice",
     )
 
 
@@ -37,13 +40,15 @@ def make_margrave(starter_id):
 
 
 def make_coxswain(starter_id, gold_on=1, gold_off=1):
-    """A -1/-1 starter with the `doubles_or_no_payout_once` trigger.
+    """A -1/-1 starter with the default `doubles_or_no_payout` trigger.
 
     Mirrors the real Coxswain: it has both a `doubles` leg and a `no_payout`
-    leg, but the rulebook says it activates AT MOST ONCE per harvest even when
-    both conditions are met. The `once` marker makes the in-band doubles
-    activation suppress the end-of-harvest no_payout leg. A flat gold payout
-    keeps the harvest non-interactive.
+    leg, but activates AT MOST ONCE per harvest even when both conditions are
+    met. That single-activation behavior is now the default for every -1/-1
+    starter (the in-band doubles activation suppresses the end-of-harvest
+    no_payout leg), so Coxswain needs no special marker — only the Herald
+    overrides it with `twice`. A flat gold payout keeps the harvest
+    non-interactive.
     """
     return Starter(
         starter_id, "Coxswain", -1, -1,
@@ -51,7 +56,7 @@ def make_coxswain(starter_id, gold_on=1, gold_off=1):
         0, 0, 0, 0,
         False, False, "", "",
         "test",
-        "doubles_or_no_payout_once",
+        "doubles_or_no_payout",
     )
 
 
@@ -176,8 +181,30 @@ class HeraldDoubleTriggerTests(unittest.TestCase):
         self.assertEqual(game.action_required.get("action"), "")
 
 
+class MargraveOnceOnlyTests(unittest.TestCase):
+    """Margrave (default `doubles_or_no_payout`) fires at most once per harvest."""
+
+    def test_doubles_no_citizens_fires_once(self):
+        # Doubles roll, no dice-value citizens: the Margrave's in-band doubles
+        # leg fires and MUST suppress its own no_payout leg, so the active
+        # player's on-turn payout (1g/1s/1m) lands exactly once. Before the
+        # default flipped to single, the Margrave fired twice like the Herald.
+        game, players = make_doubles_harvest_game(
+            [{"herald": False}, {"herald": False}],
+            die=2,
+        )
+        players[0].owned_starters.append(make_margrave(4))
+
+        game.advance_tick()
+
+        self.assertEqual(players[0].gold_score, 1, "Margrave fires once on doubles+no_payout")
+        self.assertEqual(players[0].strength_score, 1, "Margrave fires once on doubles+no_payout")
+        self.assertEqual(players[0].magic_score, 1, "Margrave fires once on doubles+no_payout")
+        self.assertIsNone(game.concurrent_action)
+
+
 class CoxswainOnceOnlyTests(unittest.TestCase):
-    """Coxswain (`doubles_or_no_payout_once`) fires at most once per harvest."""
+    """Coxswain (default `doubles_or_no_payout`) fires at most once per harvest."""
 
     def test_doubles_no_citizens_fires_once(self):
         # Doubles roll, no dice-value citizens: the Coxswain's in-band doubles

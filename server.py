@@ -9,6 +9,7 @@ import random
 import time
 import uuid
 import asyncio
+import urllib.parse
 from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -38,6 +39,7 @@ _DEV_CLIENT_INDEX = _REPO_ROOT / "static" / "dev-client" / "index.html"
 _GAME_CLIENT_INDEX = _REPO_ROOT / "static" / "game" / "index.html"
 _COUNTER_INDEX = _REPO_ROOT / "static" / "counter" / "index.html"
 _WIKI_INDEX = _REPO_ROOT / "static" / "wiki" / "index.html"
+_RULEBOOKS_DIR = _REPO_ROOT / "static" / "rulebooks"
 
 # Cached wiki payload. Card data is static between server restarts; lazy-load on
 # first request and reuse forever (override with ?refresh=1).
@@ -70,6 +72,7 @@ _LOBBY_BG_CARD_RANGES = {
     "monster": [[1, 189]],
     "duke": [[1, 21], [99, 102]],
     "event": [[1, 36]],
+    "noble": [[1, 16]],
 }
 
 
@@ -2355,6 +2358,22 @@ async def wiki_cards(refresh: bool = False):
                 detail=f"Failed to load card data from database: {exc}",
             )
     return _wiki_cards_cache
+
+
+@app.get("/api/wiki/rulebooks")
+async def wiki_rulebooks():
+    """List the rulebook PDFs available under static/rulebooks/.
+
+    Scanned live on each request (a handful of files, changes rarely) so a
+    dropped-in PDF appears without a server restart. Returns each file's
+    display name (filename without the .pdf extension) and a static URL.
+    """
+    books = []
+    if _RULEBOOKS_DIR.is_dir():
+        for f in sorted(_RULEBOOKS_DIR.glob("*.pdf")):
+            url = "/static/rulebooks/" + urllib.parse.quote(f.name)
+            books.append({"name": f.stem, "url": url})
+    return {"rulebooks": books}
 
 
 # In-memory cache of preset previews. Card data is static between server

@@ -326,8 +326,8 @@ to regular harvest payouts once every player's steals have resolved.
 
 ### End-of-harvest `no_payout` bonus and the `doubles` interaction
 
-A -1/-1 starter (Herald, Margrave) carries `activation_trigger =
-'doubles_or_no_payout'`, i.e. two independent legs:
+A -1/-1 starter (Herald, Margrave, Coxswain) carries an `activation_trigger`
+with two independent legs:
 
 - **`doubles`** — fires in-band during the harvest scan whenever the final
   dice are a matching pair (`_build_harvest_slots`).
@@ -335,29 +335,29 @@ A -1/-1 starter (Herald, Margrave) carries `activation_trigger =
   that player's cards activated this harvest (`_harvest_complete_finalize`
   → `_activate_finalize_bonus_for`).
 
-The rulebook is explicit that on a doubles roll which does **not** activate
-any dice-value citizens, the starter activates **twice** — once for doubles,
-once for no_payout. So the `no_payout` suppression check must ignore the
-starter's *own* in-band doubles activation when deciding whether "a card
-fired". Every other activation (the Peasant on 5, the Knight on 6, any
-citizen, or any other starter) still suppresses `no_payout`.
+**Default: fires at most once per harvest.** By default a -1/-1 starter's own
+in-band doubles activation counts as "a card fired" and therefore suppresses
+its own end-of-harvest `no_payout` leg, so on a doubles roll that activates no
+other card the starter pays out exactly **once**. This is the behavior for the
+Margrave (`doubles_or_no_payout`) and the Crimson Seas Coxswain
+(`doubles_or_no_payout`) — the rulebook is explicit that the Coxswain "does not
+activate two times if both conditions are met". This gate is not
+preset-specific, so the once-only default applies in every game mode.
+
+**Herald exception (`doubles_or_no_payout_twice`).** The base-set Herald is the
+sole starter that fires **twice** — once for doubles, once for no_payout — on a
+doubles roll which does not activate any dice-value citizens. The `twice` marker
+makes the `no_payout` suppression check ignore the Herald's *own* in-band
+doubles activation when deciding whether "a card fired". Every other activation
+(the Peasant on 5, the Knight on 6, any citizen, or any other starter) still
+suppresses `no_payout`.
 
 `_harvest_complete_finalize` builds `activated_pids` by walking each player's
 consumed slot keys and skipping the keys returned by
-`_no_payout_starter_own_doubles_slot_keys` (that player's doubles-leg slot for
-their own no_payout starter). A player whose only activation was that doubles
-leg therefore still appears in the end-of-harvest bonus gate.
-
-**Coxswain exception (`doubles_or_no_payout_once`).** The Crimson Seas
-Coxswain has the same two legs, but the rulebook is equally explicit that it
-"does not activate two times if both conditions are met" — it fires **at most
-once** per harvest. Its trigger carries an extra `once` marker, and
-`_no_payout_starter_own_doubles_slot_keys` skips any starter whose trigger
-contains `once`. That means the Coxswain's in-band doubles activation is *not*
-ignored: it counts as "a card fired" and suppresses its own no_payout leg, so a
-doubles+no-citizens harvest yields a single Coxswain activation. This gate is
-not preset-specific, so the once-only behaviour applies in every game mode,
-including a `random` deal that happens to include the Coxswain.
+`_no_payout_starter_own_doubles_slot_keys` (which returns the doubles-leg slot
+only for a `twice` starter — i.e. the Herald). A Herald player whose only
+activation was that doubles leg therefore still appears in the end-of-harvest
+bonus gate; a Margrave/Coxswain player in the same situation does not.
 
 ### Deferred may-slay-a-Monster prompts
 

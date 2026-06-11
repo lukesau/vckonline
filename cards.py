@@ -71,9 +71,10 @@ class Starter(Card):
         self.special_payout_off_turn = special_payout_off_turn
         self.expansion = expansion
         # Non-dice activation gate. Empty string -> use roll_match. Substrings
-        # "doubles" and "no_payout" are recognized by the harvest engine. The
-        # extra "once" marker (Coxswain) means the doubles + no_payout legs fire
-        # at most once per harvest instead of stacking into two activations.
+        # "doubles" and "no_payout" are recognized by the harvest engine. A
+        # -1/-1 starter fires at most once per harvest by default (its doubles
+        # leg suppresses its own no_payout leg); the extra "twice" marker
+        # (Herald) opts out so both legs fire on a doubles + no_payout roll.
         self.activation_trigger = activation_trigger or ""
         # Starters are dealt directly to player tableaus and are always public.
         self.toggle_visibility(True)

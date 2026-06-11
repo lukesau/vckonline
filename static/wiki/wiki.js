@@ -36,8 +36,12 @@
     nobles:   "noble_id",
   };
 
+  // Special non-card tab: a flat list of rulebook PDFs (no DB, no card grid).
+  const RULEBOOKS_TAB = "rulebooks";
+
   const state = {
     raw: null,                  // full payload from /api/wiki/cards
+    rulebooks: null,            // cached list from /api/wiki/rulebooks
     activeType: "citizens",
     search: "",
     filters: {},                // { citizens: { role: 'shadow' }, monsters: { area: 'Forest' }, ... }
@@ -261,13 +265,16 @@
       el.status.classList.add("error");
       el.status.textContent = `Failed to load card data: ${err.message}. Is the DB tunnel up?`;
       el.grid.innerHTML = "";
+      // Card data failed, but rulebooks are static files served independently —
+      // keep that tab reachable so the rules are still browsable.
+      renderTabs();
     }
   }
 
   // ── tab bar ───────────────────────────────────────────────────────────
   function renderTabs() {
     el.tabs.innerHTML = "";
-    for (const type of TYPE_ORDER) {
+    for (const type of (state.raw ? TYPE_ORDER : [])) {
       const count = (state.raw.cards[type] || []).length;
       const tab = h("button", {
         class: "wiki-tab" + (type === state.activeType ? " active" : ""),
@@ -284,12 +291,30 @@
       });
       el.tabs.appendChild(tab);
     }
+
+    const rulebooksTab = h("button", {
+      class: "wiki-tab" + (state.activeType === RULEBOOKS_TAB ? " active" : ""),
+      dataset: { type: RULEBOOKS_TAB },
+    }, "Rulebooks");
+    rulebooksTab.addEventListener("click", () => {
+      state.activeType = RULEBOOKS_TAB;
+      renderTabs();
+      renderFilters();
+      render();
+    });
+    el.tabs.appendChild(rulebooksTab);
   }
 
   // ── per-type filter chips ─────────────────────────────────────────────
   function renderFilters() {
     el.filters.innerHTML = "";
     const type = state.activeType;
+    // The rulebooks tab is a plain link list — no search or filter chips.
+    if (type === RULEBOOKS_TAB) {
+      el.filtersWrap.hidden = true;
+      return;
+    }
+    el.filtersWrap.hidden = false;
     const cards = state.raw.cards[type] || [];
     const groups = buildFilterGroupsFor(type, cards);
     el.filters.hidden = groups.length === 0;
@@ -572,6 +597,10 @@
 
   // ── grid rendering ────────────────────────────────────────────────────
   function render() {
+    if (state.activeType === RULEBOOKS_TAB) {
+      renderRulebooks();
+      return;
+    }
     if (!state.raw) return;
     const cards = filteredCards();
     el.grid.innerHTML = "";
@@ -585,6 +614,45 @@
       frag.appendChild(renderGridCard(card));
     }
     el.grid.appendChild(frag);
+  }
+
+  // ── rulebooks tab ─────────────────────────────────────────────────────
+  async function loadRulebooks() {
+    try {
+      const res = await fetch("/api/wiki/rulebooks");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.json();
+      state.rulebooks = Array.isArray(body.rulebooks) ? body.rulebooks : [];
+    } catch (err) {
+      state.rulebooks = [];
+    }
+    if (state.activeType === RULEBOOKS_TAB) render();
+  }
+
+  function renderRulebooks() {
+    el.empty.hidden = true;
+    if (state.rulebooks === null) {
+      el.grid.innerHTML = "";
+      el.grid.appendChild(h("p", { class: "wiki-rulebooks-status" }, "Loading rulebooks..."));
+      loadRulebooks();
+      return;
+    }
+    el.grid.innerHTML = "";
+    if (!state.rulebooks.length) {
+      el.grid.appendChild(h("p", { class: "wiki-rulebooks-status" }, "No rulebooks available."));
+      return;
+    }
+    const list = h("ul", { class: "wiki-rulebooks" });
+    for (const book of state.rulebooks) {
+      list.appendChild(h("li", { class: "wiki-rulebook-item" },
+        h("a", {
+          class: "wiki-rulebook-link",
+          href: book.url,
+          target: "_blank",
+          rel: "noopener noreferrer",
+        }, book.name)));
+    }
+    el.grid.appendChild(list);
   }
 
   function renderGridCard(card) {
