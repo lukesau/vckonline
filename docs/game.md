@@ -402,6 +402,38 @@ goods/nobles machinery, two engine-level rule deltas are worth calling out:
   every other preset). Like the other end conditions, the game then plays out
   the rest of the round before `_finalize_game` runs.
 
+### Crimson Seas end-game scoring
+
+`_calculate_final_scores` adds three Crimson-Seas-only VP sources on top of
+base VP and the Duke (all gated on `crimson_seas_enabled()`), exposed on each
+score entry as `tome_vp` / `goods_vp` / `noble_vp` plus a
+`crimson_vp_breakdown` list of `{label, vp, detail}` lines for the
+scoring-details UI:
+
+- **Tomes** — 1 VP per owned Tome (`len(owned_tomes)`).
+- **Goods** — scored per type in four independent "waves" (one per
+  `game_setup.GOODS_TYPES`). Within a type the VP rises with count via
+  `GOODS_VP_BY_COUNT = (0, 2, 4, 7, 12, 18, 25)` (tokens cap at 6 per type).
+  Holding 2 of one type and 1 of another scores `4 + 2`, never tiered together.
+- **Nobles** — each owned Noble scores like a Duke (`_compute_noble_breakdown`):
+  a role/type/count multiplier (`shadow_multiplier` … `goods_multiplier`,
+  `monster/citizen/domain/boss/minion/beast/titan_multiplier`) or a
+  `special_duke_payout` string. Role-icon multipliers count icons across
+  Citizens, Domains, **and** Nobles — the rulebook's explicit scoring note —
+  which is why `Player.calc_roles` folds Nobles into the role pool (this also
+  means a Duke scoring on role icons counts your Nobles' icons in a Crimson
+  Seas game).
+
+  `special_duke_payout` grammar (resolved by `_noble_special_payout_vp`):
+  - `floor_div <gold|strength|magic> <divisor> <vp>` → `(resource // divisor) * vp`
+    (e.g. Mikal the Moneylender: `floor_div gold 3 1` = 1 VP per 3 gold).
+  - `wild_choose <divisor> <vp>` → choose your single best resource type;
+    `(best // divisor) * vp` (e.g. Dray: `wild_choose 2 1` = 1 VP per 2 of one
+    chosen resource).
+
+  Rescued Nobles are cards, so they also count toward the tie-break
+  `tableau_size`.
+
 ## Concurrent actions (non-ordered prompts)
 
 Some prompts are not turn-based: every participating player should be able to

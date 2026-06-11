@@ -112,6 +112,17 @@ class Player:
             holy_count = holy_count + domain.holy_count
             soldier_count = soldier_count + domain.soldier_count
             worker_count = worker_count + domain.worker_count
+        # Crimson Seas: rescued Nobles also carry Citizen Role icons. The
+        # rulebook's scoring note is explicit that role-icon tallies "include
+        # the Citizen Role icons found on your Citizens, Domains, and Nobles",
+        # so Nobles feed the same role pool that Dukes and Nobles score against.
+        # `owned_nobles` is empty in every non-Crimson-Seas game, so this is a
+        # no-op elsewhere.
+        for noble in getattr(self, "owned_nobles", []) or []:
+            shadow_count = shadow_count + noble.shadow_count
+            holy_count = holy_count + noble.holy_count
+            soldier_count = soldier_count + noble.soldier_count
+            worker_count = worker_count + noble.worker_count
         monster_counts = {key: 0 for key in _MONSTER_TYPE_COUNT_KEYS.values()}
         for monster in self.owned_monsters:
             count_key = _MONSTER_TYPE_COUNT_KEYS.get(monster.monster_type)

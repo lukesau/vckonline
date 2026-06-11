@@ -274,31 +274,195 @@ class EndgameEngine:
         table.sort(key=lambda e: (-e["total_vp"], str(e["name"])))
         return table
 
+    # Goods VP by how many of a single type you hold (Araby). Index == count;
+    # tokens cap at 6 per type so 6 is the top tier. Scored in four independent
+    # "waves", one per Goods type (see `_compute_crimson_scoring`).
+    GOODS_VP_BY_COUNT = (0, 2, 4, 7, 12, 18, 25)
+
+    @classmethod
+    def _goods_tier_vp(cls, count):
+        c = max(0, int(count or 0))
+        if c >= len(cls.GOODS_VP_BY_COUNT):
+            c = len(cls.GOODS_VP_BY_COUNT) - 1
+        return cls.GOODS_VP_BY_COUNT[c]
+
+    def _noble_special_payout_vp(self, player, spec):
+        """Resolve a Noble's `special_duke_payout` scoring string to VP.
+
+        Supported grammars (Crimson Seas Nobles):
+          floor_div <gold|strength|magic> <divisor> <vp>
+              -> (resource // divisor) * vp   (e.g. Mikal: 1 VP per 3 gold)
+          wild_choose <divisor> <vp>
+              -> choose your single best resource type; (best // divisor) * vp
+                 (e.g. Dray: 1 VP per 2 of one chosen resource)
+        Returns (vp, detail) where detail is a human-readable breakdown string,
+        or (0, None) when the spec is empty/unrecognized.
+        """
+        toks = (spec or "").strip().lower().split()
+        if not toks:
+            return 0, None
+        verb = toks[0]
+        if verb == "floor_div" and len(toks) >= 4:
+            res = toks[1]
+            try:
+                divisor, vp = int(toks[2]), int(toks[3])
+            except ValueError:
+                return 0, None
+            attr = {"gold": "gold_score", "strength": "strength_score", "magic": "magic_score"}.get(res)
+            if attr and divisor > 0:
+                amt = int(getattr(player, attr, 0) or 0)
+                return (amt // divisor) * vp, f"{amt} {res} \u00f7 {divisor} \u00d7 {vp}"
+        if verb == "wild_choose" and len(toks) >= 3:
+            try:
+                divisor, vp = int(toks[1]), int(toks[2])
+            except ValueError:
+                return 0, None
+            if divisor > 0:
+                pool = {
+                    "gold": int(player.gold_score or 0),
+                    "strength": int(player.strength_score or 0),
+                    "magic": int(player.magic_score or 0),
+                }
+                best_res = max(pool, key=lambda k: pool[k])
+                best = pool[best_res]
+                return (best // divisor) * vp, f"{best} {best_res} \u00f7 {divisor} \u00d7 {vp}"
+        return 0, None
+
+    def _compute_noble_breakdown(self, player, noble, roles, monster_attrs):
+        """How many VP a single owned Noble scores, plus a detail string.
+
+        A Noble scores like a Duke: a single multiplier or a `special_duke_payout`.
+        Role-icon multipliers count icons across Citizens + Domains + Nobles
+        (already folded into `roles` by `Player.calc_roles`).
+        """
+        components = []  # (vp, description)
+
+        for attr, key, label in (
+            ("shadow_multiplier", "shadow_count", "Shadow"),
+            ("holy_multiplier", "holy_count", "Holy"),
+            ("soldier_multiplier", "soldier_count", "Soldier"),
+            ("worker_multiplier", "worker_count", "Worker"),
+        ):
+            m = int(getattr(noble, attr, 0) or 0)
+            if m:
+                cnt = int(roles[key])
+                components.append((cnt * m, f"{cnt} {label} icon{'s' if cnt != 1 else ''} \u00d7 {m}"))
+
+        for attr, cnt, label in (
+            ("monster_multiplier", roles["owned_monsters"], "monsters"),
+            ("citizen_multiplier", roles["owned_citizens"], "citizens"),
+            ("domain_multiplier", roles["owned_domains"], "domains"),
+        ):
+            m = int(getattr(noble, attr, 0) or 0)
+            if m:
+                components.append((int(cnt) * m, f"{int(cnt)} {label} \u00d7 {m}"))
+
+        for attr, mkey, label in (
+            ("boss_multiplier", "Boss", "Bosses"),
+            ("minion_multiplier", "Minion", "Minions"),
+            ("beast_multiplier", "Beast", "Beasts"),
+            ("titan_multiplier", "Titan", "Titans"),
+        ):
+            m = int(getattr(noble, attr, 0) or 0)
+            if m:
+                cnt = int(monster_attrs.get(mkey, 0))
+                components.append((cnt * m, f"{cnt} {label} slain \u00d7 {m}"))
+
+        gm = int(getattr(noble, "goods_multiplier", 0) or 0)
+        if gm:
+            ng = len(getattr(player, "owned_goods", []) or [])
+            components.append((ng * gm, f"{ng} goods \u00d7 {gm}"))
+
+        if getattr(noble, "has_special_duke_payout", 0) and getattr(noble, "special_duke_payout", ""):
+            sp_vp, sp_desc = self._noble_special_payout_vp(player, noble.special_duke_payout)
+            if sp_desc:
+                components.append((sp_vp, sp_desc))
+
+        total = sum(vp for vp, _ in components)
+        detail = "; ".join(d for _, d in components) if components else None
+        return total, detail
+
+    def _compute_crimson_scoring(self, player, roles, monster_attrs):
+        """Crimson Seas end-game scoring: Tomes, Goods, and Nobles.
+
+        Returns (tome_vp, goods_vp, noble_vp, breakdown_lines) where each line is
+        a {label, vp, detail} dict for the scoring-details UI.
+        """
+        from game_setup import GOODS_TYPES
+
+        lines = []
+
+        ntome = len(getattr(player, "owned_tomes", []) or [])
+        tome_vp = ntome  # 1 VP per Tome
+        if ntome:
+            lines.append({
+                "label": "Tomes",
+                "vp": tome_vp,
+                "detail": f"{ntome} tome{'s' if ntome != 1 else ''} \u00d7 1",
+            })
+
+        goods = [str(g).strip().lower() for g in (getattr(player, "owned_goods", []) or [])]
+        goods_vp = 0
+        for gtype in GOODS_TYPES:
+            cnt = sum(1 for g in goods if g == gtype)
+            if cnt:
+                v = self._goods_tier_vp(cnt)
+                goods_vp += v
+                lines.append({
+                    "label": f"Goods: {gtype.capitalize()}",
+                    "vp": v,
+                    "detail": f"{cnt} {gtype} = {v} VP",
+                })
+
+        noble_vp = 0
+        for noble in (getattr(player, "owned_nobles", []) or []):
+            v, detail = self._compute_noble_breakdown(player, noble, roles, monster_attrs)
+            noble_vp += v
+            lines.append({
+                "label": f"Noble: {getattr(noble, 'name', 'Noble')}",
+                "vp": v,
+                "detail": detail,
+            })
+
+        return tome_vp, goods_vp, noble_vp, lines
+
     def _calculate_final_scores(self):
         """Compute final VP for each player including Duke multipliers. Returns ranked list."""
         self.game.unflip_all_citizens_for_final_scoring()
+        crimson = self.game.crimson_seas_enabled()
         scores = []
         for player in self.game.player_list:
+            roles = player.calc_roles()
+            monster_attrs = self.game.owned_monster_attributes(player.player_id)
             duke_vp = 0
             duke_summary = None
             duke_vp_breakdown = []
 
             if player.owned_dukes:
                 duke = player.owned_dukes[0]
-                duke_vp, duke_vp_breakdown = self._compute_duke_breakdown(player, duke)
+                duke_vp, duke_vp_breakdown = self._compute_duke_breakdown(
+                    player, duke, roles=roles, monster_attrs=monster_attrs
+                )
                 duke_summary = {
                     "duke_id": duke.duke_id,
                     "name": duke.name or "Duke",
                     "card": duke.to_dict(),
                 }
 
-            total_vp = int(player.victory_score) + duke_vp
+            tome_vp = goods_vp = noble_vp = 0
+            crimson_vp_breakdown = []
+            if crimson:
+                tome_vp, goods_vp, noble_vp, crimson_vp_breakdown = \
+                    self._compute_crimson_scoring(player, roles, monster_attrs)
+
+            total_vp = int(player.victory_score) + duke_vp + tome_vp + goods_vp + noble_vp
             tableau_size = (
                 len(player.owned_starters)
                 + len(player.owned_citizens)
                 + len(player.owned_domains)
                 + len(player.owned_monsters)
                 + len(player.owned_dukes)
+                + len(getattr(player, "owned_nobles", []) or [])
             )
             scores.append({
                 "player_id": player.player_id,
@@ -307,6 +471,10 @@ class EndgameEngine:
                 "duke_vp": duke_vp,
                 "duke": duke_summary,
                 "duke_vp_breakdown": duke_vp_breakdown,
+                "tome_vp": tome_vp,
+                "goods_vp": goods_vp,
+                "noble_vp": noble_vp,
+                "crimson_vp_breakdown": crimson_vp_breakdown,
                 "total_vp": total_vp,
                 "tableau_size": tableau_size,
             })
@@ -325,9 +493,18 @@ class EndgameEngine:
         if self.game.final_scores:
             for s in self.game.final_scores:
                 place = {1: "1st", 2: "2nd", 3: "3rd"}.get(s["rank"], f"{s['rank']}th")
+                parts = [f"{s['base_vp']} base"]
+                if int(s.get("duke_vp", 0) or 0):
+                    parts.append(f"{s['duke_vp']} Duke")
+                if int(s.get("tome_vp", 0) or 0):
+                    parts.append(f"{s['tome_vp']} Tomes")
+                if int(s.get("goods_vp", 0) or 0):
+                    parts.append(f"{s['goods_vp']} Goods")
+                if int(s.get("noble_vp", 0) or 0):
+                    parts.append(f"{s['noble_vp']} Nobles")
                 self.game._log_game_event(
                     f"{place}: {s['name']} — {s['total_vp']} VP "
-                    f"({s['base_vp']} base + {s['duke_vp']} Duke)."
+                    f"({' + '.join(parts)})."
                 )
             fr = self.game.final_result or {}
             headline = fr.get("headline") or f"Game over! {self.game.final_scores[0]['name']} wins!"

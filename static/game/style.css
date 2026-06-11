@@ -2308,6 +2308,14 @@ html, body {
   color: var(--muted);
   font-weight: 600;
 }
+.game-over-crimson-heading {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #c98a8a;
+  margin-top: 6px;
+}
 
 /* ── Lobby / rulebook links (in info bar next to dice; lobby hidden in tabbed / narrow layout) ── */
 .info-bar-lobby-btn,
@@ -3437,6 +3445,16 @@ select.lobby-input:disabled {
   align-items: center;
   gap: 4px;
   white-space: nowrap;
+}
+/* Build-requirement role chips: green when the acting player owns enough
+   matching icons (citizens + nobles), red when they're short. */
+.role-inline--met {
+  color: #8fe6a0;
+  font-weight: 600;
+}
+.role-inline--unmet {
+  color: #e87b5a;
+  font-weight: 600;
 }
 .player-detail-pill--role {
   align-items: center;

@@ -436,8 +436,39 @@ function fillGameOverDetailsBody(body, state, pageIndex) {
     body.appendChild(list);
   }
 
+  const crimsonLines = Array.isArray(s.crimson_vp_breakdown) ? s.crimson_vp_breakdown : [];
+  if (crimsonLines.length) {
+    const heading = mk('game-over-crimson-heading');
+    heading.textContent = 'Crimson Seas';
+    body.appendChild(heading);
+    const clist = mk('duke-vp-breakdown');
+    crimsonLines.forEach(line => {
+      const li = mk('duke-vp-line');
+      const top = mk('duke-vp-line-top');
+      const lbl = mk('duke-vp-line-label');
+      lbl.textContent = line.label || '';
+      const val = mk('duke-vp-line-vp');
+      val.textContent = `+${line.vp} VP`;
+      top.appendChild(lbl);
+      top.appendChild(val);
+      li.appendChild(top);
+      if (line.detail) {
+        const det = mk('duke-vp-line-detail');
+        det.textContent = line.detail;
+        li.appendChild(det);
+      }
+      clist.appendChild(li);
+    });
+    body.appendChild(clist);
+  }
+
   const summary = mk('score-vp-summary');
-  summary.textContent = `${s.base_vp} base + ${s.duke_vp} Duke = ${s.total_vp} VP`;
+  const sumParts = [`${s.base_vp} base`];
+  if (Number(s.duke_vp)) sumParts.push(`${s.duke_vp} Duke`);
+  if (Number(s.tome_vp)) sumParts.push(`${s.tome_vp} Tomes`);
+  if (Number(s.goods_vp)) sumParts.push(`${s.goods_vp} Goods`);
+  if (Number(s.noble_vp)) sumParts.push(`${s.noble_vp} Nobles`);
+  summary.textContent = `${sumParts.join(' + ')} = ${s.total_vp} VP`;
   body.appendChild(summary);
 
   if (Number(s.tableau_size) > 0 || s.tied_on_vp) {

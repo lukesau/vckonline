@@ -172,6 +172,25 @@ function citizenRoleCounts(card) {
   };
 }
 
+// Role icons a player can spend to satisfy a Domain's build prerequisites.
+// Per the Crimson Seas rules these come from BOTH owned Citizens and owned
+// Nobles (mirrors the backend `_player_build_role_totals`).
+function playerBuildRoleTotals(player) {
+  const totals = { shadow: 0, holy: 0, soldier: 0, worker: 0 };
+  if (!player) return totals;
+  const holders = []
+    .concat(Array.isArray(player.owned_citizens) ? player.owned_citizens : [])
+    .concat(Array.isArray(player.owned_nobles) ? player.owned_nobles : []);
+  holders.forEach((c) => {
+    const rc = citizenRoleCounts(c);
+    totals.shadow += rc.sn;
+    totals.holy += rc.hn;
+    totals.soldier += rc.son;
+    totals.worker += rc.wn;
+  });
+  return totals;
+}
+
 function formatHarvestGSM(card, onTurn) {
   const g = onTurn ? 'gold_payout_on_turn' : 'gold_payout_off_turn';
   const s = onTurn ? 'strength_payout_on_turn' : 'strength_payout_off_turn';
@@ -1249,19 +1268,34 @@ function appendMarketCompactStatLine(infoEl, card, ctx) {
   if (card.magic_reward)    items.push(makeSignedModalResource('magic', card.magic_reward, 'modal-mag', '+'));
 
   if (card.domain_id != null) {
+    // Annotate each required role with how many matching icons the acting
+    // player currently owns (Citizens + Nobles), so they can see at a glance
+    // whether they meet the gate before clicking Build. When no one is acting
+    // (e.g. between turns) we omit the have/req comparison and just list the
+    // requirement.
+    const have = ctx && ctx.actingPlayer ? playerBuildRoleTotals(ctx.actingPlayer) : null;
     const reqRoles = [
-      ['shadow',  'Shadow',  card.shadow_count],
-      ['holy',    'Holy',    card.holy_count],
-      ['soldier', 'Soldier', card.soldier_count],
-      ['worker',  'Worker',  card.worker_count],
+      ['shadow',  'Shadow',  card.shadow_count,  have ? have.shadow : null],
+      ['holy',    'Holy',    card.holy_count,    have ? have.holy : null],
+      ['soldier', 'Soldier', card.soldier_count, have ? have.soldier : null],
+      ['worker',  'Worker',  card.worker_count,  have ? have.worker : null],
     ].filter(([, , n]) => n);
     if (reqRoles.length) {
       const el = document.createElement('span');
       el.className = 'market-stat-inline-text';
       el.append('Requires ');
-      reqRoles.forEach(([role, label, n], i) => {
+      reqRoles.forEach(([role, label, n, hv], i) => {
         if (i > 0) el.append(', ');
-        el.appendChild(makeRoleInlineEl(role, `${n} ${label}`));
+        const text = hv == null ? `${n} ${label}` : `${label} ${hv}/${n}`;
+        const roleEl = makeRoleInlineEl(role, text);
+        if (hv != null) {
+          const met = hv >= n;
+          roleEl.classList.add(met ? 'role-inline--met' : 'role-inline--unmet');
+          roleEl.title = met
+            ? `You have ${hv} of ${n} required ${label} role icon${n === 1 ? '' : 's'} (citizens + nobles).`
+            : `You have only ${hv} of ${n} required ${label} role icon${n === 1 ? '' : 's'} (citizens + nobles).`;
+        }
+        el.appendChild(roleEl);
       });
       items.push(el);
     }
