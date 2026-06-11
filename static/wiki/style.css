@@ -800,10 +800,10 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
 /* ── Rulebooks tab ───────────────────────────────────────────────────── */
 .wiki-rulebooks {
   list-style: none;
-  max-width: 640px;
   margin: 0 auto;
   display: flex;
-  flex-direction: column;
+  flex-flow: row wrap;
+  justify-content: center;
   gap: 10px;
 }
 .wiki-rulebook-item { margin: 0; }
