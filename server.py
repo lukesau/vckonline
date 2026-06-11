@@ -44,6 +44,11 @@ _RULEBOOKS_DIR = _REPO_ROOT / "static" / "rulebooks"
 # static/rulebooks/. Files are named rule_card_<front|back>_<slug>.<ext> and are
 # grouped into a front/back pair per slug.
 _RULE_CARD_RE = re.compile(r"^rule_card_(front|back)_(.+)\.(?:png|jpg|jpeg)$", re.IGNORECASE)
+# Display-name overrides for slugs whose titles can't be derived from the
+# filename (apostrophes, special casing, etc.). Keyed by the file slug.
+_RULE_CARD_NAME_OVERRIDES = {
+    "kings_guard": "King's Guard",
+}
 
 # Cached wiki payload. Card data is static between server restarts; lazy-load on
 # first request and reuse forever (override with ?refresh=1).
@@ -2397,7 +2402,7 @@ async def wiki_rulebooks():
     for slug in sorted(pairs):
         sides = pairs[slug]
         rule_cards.append({
-            "name": slug.replace("_", " ").title(),
+            "name": _RULE_CARD_NAME_OVERRIDES.get(slug, slug.replace("_", " ").title()),
             "slug": slug,
             "front_url": sides.get("front"),
             "back_url": sides.get("back"),
