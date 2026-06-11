@@ -141,7 +141,7 @@ class BuyGoodsTomeTests(unittest.TestCase):
         p.gold_score = 3
         map_before = int(p.map_score)
 
-        game.buy_goods(p.player_id, [0], tome_payment={"gold": 3})
+        game.buy_goods(p.player_id, [0], gp=6, tome_payment={"gold": 3})
 
         self.assertEqual(int(p.gold_score), 0)            # 3 + 3(tome) - 6
         self.assertEqual(int(p.map_score), map_before - 1)
@@ -155,7 +155,7 @@ class BuyGoodsTomeTests(unittest.TestCase):
         p.gold_score = 5
         p.magic_score = 0
 
-        game.buy_goods(p.player_id, [0], tome_payment={"magic": 1})
+        game.buy_goods(p.player_id, [0], gp=5, mp=1, tome_payment={"magic": 1})
 
         self.assertEqual(int(p.gold_score), 0)            # 5 - 5 treasury gold
         self.assertEqual(int(p.magic_score), 0)           # +1 redeemed, -1 spent
@@ -169,7 +169,7 @@ class BuyGoodsTomeTests(unittest.TestCase):
         p.gold_score = 1
         p.magic_score = 5
 
-        game.buy_goods(p.player_id, [0])
+        game.buy_goods(p.player_id, [0], gp=1, mp=5)
 
         self.assertEqual(int(p.gold_score), 0)
         self.assertEqual(int(p.magic_score), 0)
@@ -182,19 +182,19 @@ class BuyGoodsTomeTests(unittest.TestCase):
         p.gold_score = 0
         p.magic_score = 10
         with self.assertRaises(ValueError):
-            game.buy_goods(p.player_id, [2])
+            game.buy_goods(p.player_id, [2], gp=0, mp=2)
 
     def test_strength_tomes_rejected_for_goods(self):
         # Strength is not wild for the gold cost.
         game, players = make_game(tomes=[Tome("strength")])
         with self.assertRaises(ValueError):
-            game.buy_goods(players[0].player_id, [0], tome_payment={"strength": 1})
+            game.buy_goods(players[0].player_id, [0], gp=6, tome_payment={"strength": 1})
 
     def test_more_tomes_than_cost_rejected(self):
         game, players = make_game(tomes=[Tome("gold")] * 8)
-        # Slot 2 costs 2 gold; can't apply 3 gold tomes.
+        # Slot 2 costs 2 gold; can't attribute 3 gold tomes to a 2-gold payment.
         with self.assertRaises(ValueError):
-            game.buy_goods(players[0].player_id, [2], tome_payment={"gold": 3})
+            game.buy_goods(players[0].player_id, [2], gp=2, tome_payment={"gold": 3})
 
 
 class BuyTomesTomeTests(unittest.TestCase):
@@ -203,7 +203,7 @@ class BuyTomesTomeTests(unittest.TestCase):
         game, players = make_game(tomes=[Tome("gold"), Tome("gold")])
         p = players[0]
         p.gold_score = 1
-        game.buy_tomes(p.player_id, [2], tome_payment={"gold": 2})
+        game.buy_tomes(p.player_id, [2], gp=3, tome_payment={"gold": 2})
         self.assertEqual(int(p.gold_score), 0)            # 1 + 2(tome) - 3
         self.assertEqual(face_up(p, "gold"), 0)
         # Bought a strength tome (slot 2) into the tableau as a Tome object.
@@ -217,7 +217,7 @@ class BuyTomesTomeTests(unittest.TestCase):
         p.gold_score = 2
         map_before = int(p.map_score)
 
-        game.buy_tomes(p.player_id, [2])
+        game.buy_tomes(p.player_id, [2], gp=2)
 
         self.assertEqual(int(p.gold_score), 0)
         self.assertEqual(int(p.map_score), map_before - 1)
@@ -230,7 +230,7 @@ class BuyTomesTomeTests(unittest.TestCase):
         p.owned_domains.append(make_browncoat())
         p.gold_score = 8
 
-        game.buy_tomes(p.player_id, [0, 2])
+        game.buy_tomes(p.player_id, [0, 2], gp=8)
 
         self.assertEqual(int(p.gold_score), 0)
         self.assertEqual(len(p.owned_tomes), 2)
@@ -241,7 +241,7 @@ class BuyTomesTomeTests(unittest.TestCase):
         p = players[0]
         p.owned_domains.append(make_browncoat())
         with self.assertRaises(ValueError):
-            game.buy_tomes(p.player_id, [2], tome_payment={"gold": 3})
+            game.buy_tomes(p.player_id, [2], gp=2, tome_payment={"gold": 3})
 
     def test_browncoat_discount_waits_until_after_build_turn(self):
         game, players = make_game()
@@ -250,10 +250,10 @@ class BuyTomesTomeTests(unittest.TestCase):
         d.acquired_turn_number = int(game.turn_number)
         p.owned_domains.append(d)
         p.gold_score = 2
-        p.magic_score = 0  # no wild fallback, so the full cost must bite
-        # Slot 2 still costs 3 on the turn Browncoat's Sanctum was bought.
+        # Slot 2 still costs 3 on the turn Browncoat's Sanctum was bought, so a
+        # 2-gold payment (the discounted price) won't match the real cost.
         with self.assertRaises(ValueError):
-            game.buy_tomes(p.player_id, [2])
+            game.buy_tomes(p.player_id, [2], gp=2)
 
 
 class BuyGoodsDiscountTests(unittest.TestCase):
@@ -265,7 +265,7 @@ class BuyGoodsDiscountTests(unittest.TestCase):
         p.gold_score = 5
         map_before = int(p.map_score)
 
-        game.buy_goods(p.player_id, [0])
+        game.buy_goods(p.player_id, [0], gp=5)
 
         self.assertEqual(int(p.gold_score), 0)
         self.assertEqual(int(p.map_score), map_before - 1)
@@ -278,7 +278,7 @@ class BuyGoodsDiscountTests(unittest.TestCase):
         p.owned_domains.append(make_port_of_drake())
         p.gold_score = 6
 
-        game.buy_goods(p.player_id, [0, 2])
+        game.buy_goods(p.player_id, [0, 2], gp=6)
 
         self.assertEqual(int(p.gold_score), 0)
         self.assertEqual(len(p.owned_goods), 2)
@@ -289,7 +289,7 @@ class BuyGoodsDiscountTests(unittest.TestCase):
         p = players[0]
         p.owned_domains.append(make_port_of_drake())
         with self.assertRaises(ValueError):
-            game.buy_goods(p.player_id, [2], tome_payment={"gold": 2})
+            game.buy_goods(p.player_id, [2], gp=1, tome_payment={"gold": 2})
 
     def test_port_of_drake_discount_waits_until_after_build_turn(self):
         game, players = make_game()
@@ -298,10 +298,10 @@ class BuyGoodsDiscountTests(unittest.TestCase):
         d.acquired_turn_number = int(game.turn_number)
         p.owned_domains.append(d)
         p.gold_score = 5
-        p.magic_score = 0  # no wild fallback, so the full cost must bite
-        # Slot 0 still costs 6 on the turn Port of Drake was bought.
+        # Slot 0 still costs 6 on the turn Port of Drake was bought, so a 5-gold
+        # payment (the discounted price) won't match the real cost.
         with self.assertRaises(ValueError):
-            game.buy_goods(p.player_id, [0])
+            game.buy_goods(p.player_id, [0], gp=5)
 
 
 class RescueNobleTomeTests(unittest.TestCase):

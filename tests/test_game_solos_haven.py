@@ -127,7 +127,7 @@ class SolosHavenReuseComboTests(unittest.TestCase):
 
         # --- Reuse the refreshed tomes to buy Goods (slot 2 costs 2) in the
         # same turn, paying with 2 gold tomes again. ---
-        pa.buy_goods(p.player_id, [2], tome_payment={"gold": 2, "strength": 0, "magic": 0})
+        pa.buy_goods(p.player_id, [2], gp=2, tome_payment={"gold": 2, "strength": 0, "magic": 0})
 
         self.assertEqual(len(p.owned_goods), 1)
         self.assertEqual(int(p.gold_score), 0)

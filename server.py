@@ -1924,8 +1924,10 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 raise HTTPException(status_code=400, detail="slot_indices required")
             if not game.consume_player_action(request.player_id, action_type="buy_goods"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
+            g, _s, m = resolve_action_payment(request)
             try:
-                game.buy_goods(request.player_id, list(request.slot_indices), tome_payment=resolve_tome_payment(request))
+                game.buy_goods(request.player_id, list(request.slot_indices), g, m,
+                               tome_payment=resolve_tome_payment(request))
             except ValueError as e:
                 _rollback_consumed_action(game)
                 raise HTTPException(status_code=400, detail=str(e))
@@ -1941,8 +1943,10 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                 raise HTTPException(status_code=400, detail="slot_indices required")
             if not game.consume_player_action(request.player_id, action_type="buy_tomes"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
+            g, _s, m = resolve_action_payment(request)
             try:
-                game.buy_tomes(request.player_id, list(request.slot_indices), tome_payment=resolve_tome_payment(request))
+                game.buy_tomes(request.player_id, list(request.slot_indices), g, m,
+                               tome_payment=resolve_tome_payment(request))
             except ValueError as e:
                 _rollback_consumed_action(game)
                 raise HTTPException(status_code=400, detail=str(e))

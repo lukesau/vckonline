@@ -340,11 +340,11 @@ class Game:
     def take_resource(self, player_id, resource):
         return self.player_actions.take_resource(player_id, resource)
 
-    def buy_goods(self, player_id, slot_indices, tome_payment=None):
-        return self.player_actions.buy_goods(player_id, slot_indices, tome_payment=tome_payment)
+    def buy_goods(self, player_id, slot_indices, gp=0, mp=0, tome_payment=None):
+        return self.player_actions.buy_goods(player_id, slot_indices, gp=gp, mp=mp, tome_payment=tome_payment)
 
-    def buy_tomes(self, player_id, slot_indices, tome_payment=None):
-        return self.player_actions.buy_tomes(player_id, slot_indices, tome_payment=tome_payment)
+    def buy_tomes(self, player_id, slot_indices, gp=0, mp=0, tome_payment=None):
+        return self.player_actions.buy_tomes(player_id, slot_indices, gp=gp, mp=mp, tome_payment=tome_payment)
 
     def sail_exekratys(self, player_id, resource):
         return self.player_actions.sail_exekratys(player_id, resource)

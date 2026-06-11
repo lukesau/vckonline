@@ -113,7 +113,7 @@ class CrimsonSeasEndConditionTests(unittest.TestCase):
         game, p = make_game(goods=list(FULL_GOODS), goods_supply=[],
                             tomes=FULL_TOMES, nobles=full_nobles())
         self.assertIsNone(game.endgame._check_end_game_condition())
-        game.player_actions.buy_goods("p1", [2])
+        game.player_actions.buy_goods("p1", [2], gp=2)
         self.assertIn(None, game.goods_slots)
         self.assertEqual(game.endgame._check_end_game_condition(), "goods supply exhausted")
 

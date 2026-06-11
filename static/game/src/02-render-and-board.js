@@ -1545,6 +1545,11 @@ function openSailShopModal(cfg) {
   // "used" (tome-first); the player clicks a chip to save it for later.
   const savedGoldTomes = new Set();
   const savedMagicTomes = new Set();
+  // Manual gold/magic payment overrides (null => use the suggested gold-first
+  // split). Cleared whenever the selection or tome toggles change so the
+  // suggestion re-computes against the new cost / usable tomes.
+  const payOverride = { gold: null, magic: null };
+  function resetPayOverride() { payOverride.gold = null; payOverride.magic = null; }
 
   const overlay = document.createElement('div');
   overlay.id = 'card-modal-overlay';
@@ -1601,6 +1606,7 @@ function openSailShopModal(cfg) {
       item.appendChild(check);
       item.addEventListener('click', () => {
         if (selected.has(i)) selected.delete(i); else selected.add(i);
+        resetPayOverride();
         render();
       });
       list.appendChild(item);
@@ -1617,24 +1623,16 @@ function openSailShopModal(cfg) {
     const playerMagic = Number(player && player.magic_score || 0);
 
     // Tomes the player can spend toward the gold cost (tome-first). Gold tomes
-    // pay gold directly; Magic tomes pay as wild. Tomes are applied first, then
-    // treasury gold, then treasury magic (so at least 1 gold is paid whenever
-    // possible, matching the hire/build "magic is wild" rule).
+    // pay gold directly; Magic tomes pay as wild. A "used" tome raises the
+    // matching pay field's max (treasury + usable tomes) and is attributed from
+    // that field on submit, exactly like the hire/build market panel.
     const tomeCounts = faceUpTomeCountsForPlayer(player);
     const availGoldTomes = tomeCounts.gold;
     const availMagicTomes = tomeCounts.magic;
     const usedGoldTomes = Math.max(0, availGoldTomes - savedGoldTomes.size);
     const usedMagicTomes = Math.max(0, availMagicTomes - savedMagicTomes.size);
-
-    const tomeGoldApplied = Math.min(usedGoldTomes, totalGold);
-    const tomeMagicApplied = Math.min(usedMagicTomes, totalGold - tomeGoldApplied);
-    const afterTomes = Math.max(0, totalGold - tomeGoldApplied - tomeMagicApplied);
-    const treasuryGold = Math.min(playerGold, afterTomes);
-    const treasuryMagic = afterTomes - treasuryGold;
-    const goldPortion = tomeGoldApplied + treasuryGold;
-    const magicPortion = tomeMagicApplied + treasuryMagic;
-    const needsMinGold = magicPortion > 0 && goldPortion < 1;
-    const canCover = treasuryMagic <= playerMagic && !needsMinGold;
+    const effGold = playerGold + usedGoldTomes;
+    const effMagic = playerMagic + usedMagicTomes;
 
     function renderTomeRow(label, count, savedSet, imgSrc, alt) {
       if (count <= 0) return;
@@ -1658,6 +1656,7 @@ function openSailShopModal(cfg) {
         chip.addEventListener('click', e => {
           e.stopPropagation();
           if (savedSet.has(i)) savedSet.delete(i); else savedSet.add(i);
+          resetPayOverride();
           render();
         });
         tchips.appendChild(chip);
@@ -1669,33 +1668,36 @@ function openSailShopModal(cfg) {
     renderTomeRow('Gold tomes', availGoldTomes, savedGoldTomes, SAIL_TOME_IMAGES.gold, 'gold tome');
     renderTomeRow('Magic tomes', availMagicTomes, savedMagicTomes, SAIL_TOME_IMAGES.magic, 'magic tome');
 
+    // Suggested gold-first split (used until the player edits a field).
+    const suggGold = Math.min(effGold, totalGold);
+    const suggMagic = totalGold - suggGold;
+    const goldVal = payOverride.gold != null
+      ? clampPayInt(payOverride.gold, 0, effGold) : suggGold;
+    const magicVal = payOverride.magic != null
+      ? clampPayInt(payOverride.magic, 0, effMagic) : suggMagic;
+
+    const payRow = mk('market-pay-row sail-shop-pay-row');
+    payRow.appendChild(
+      mkPayField('Gold', 'pay-g', 0, effGold, goldVal, !canAct, 'Gold to spend (includes used Gold tomes)', 'gold', playerGold));
+    payRow.appendChild(
+      mkPayField('Magic', 'pay-m', 0, effMagic, magicVal, !canAct, 'Magic to spend as wild (includes used Magic tomes)', 'magic', playerMagic));
+    modal.appendChild(payRow);
+
     const footer = mk('sail-shop-footer');
     const total = mk('sail-shop-total');
-    if (selected.size) {
-      const parts = [];
-      if (tomeGoldApplied) parts.push(`${tomeGoldApplied} gold tome${tomeGoldApplied > 1 ? 's' : ''}`);
-      if (treasuryGold) parts.push(`${treasuryGold} treasury gold`);
-      if (tomeMagicApplied) parts.push(`${tomeMagicApplied} magic tome${tomeMagicApplied > 1 ? 's' : ''}`);
-      if (treasuryMagic) parts.push(`${treasuryMagic} treasury magic`);
-      total.textContent = parts.length > 1
-        ? `Total: ${totalGold} gold (${parts.join(', ')}) + 1 map`
-        : `Total: ${totalGold} gold + 1 map`;
-    } else {
-      total.textContent = `Select ${nounLower} to buy`;
-    }
     footer.appendChild(total);
 
-    const canBuy = canAct && selected.size > 0 && canCover && playerMap >= 1;
     const buyBtn = promptButton('Buy', () => {
-      if (!canBuy) return;
-      const action = { player_id: PLAYER_ID, action_type: cfg.actionType, slot_indices: [...selected] };
-      if (tomeGoldApplied > 0 || tomeMagicApplied > 0) {
-        action.tome_payment = { gold: tomeGoldApplied, strength: 0, magic: tomeMagicApplied };
+      if (buyBtn.disabled) return;
+      const { gp, mp, tGold, tMagic } = readPay();
+      const action = { player_id: PLAYER_ID, action_type: cfg.actionType, slot_indices: [...selected],
+        payment: { gold: gp, strength: 0, magic: mp } };
+      if (tGold > 0 || tMagic > 0) {
+        action.tome_payment = { gold: tGold, strength: 0, magic: tMagic };
       }
       postGameAction(action);
       dismissCardInspectModal();
     });
-    buyBtn.disabled = !canBuy;
     const cancelBtn = promptButton('Cancel', () => dismissCardInspectModal(), true);
     const actions = mk('sail-shop-actions');
     actions.appendChild(cancelBtn);
@@ -1703,16 +1705,63 @@ function openSailShopModal(cfg) {
     footer.appendChild(actions);
     modal.appendChild(footer);
 
-    let noteText = '';
-    if (!canAct) noteText = `You can buy ${nounLower} on your turn during the action phase.`;
-    else if (selected.size && needsMinGold) noteText = 'You must pay at least 1 gold to use magic as wild.';
-    else if (selected.size && treasuryMagic > playerMagic) noteText = 'Not enough gold or magic for this selection.';
-    else if (selected.size && playerMap < 1) noteText = 'You need 1 map to sail.';
-    if (noteText) {
-      const note = mk('sail-shop-note');
-      note.textContent = noteText;
-      modal.appendChild(note);
+    const note = mk('sail-shop-note');
+    modal.appendChild(note);
+
+    const goldInput = payRow.querySelector('.pay-g');
+    const magicInput = payRow.querySelector('.pay-m');
+
+    function readPay() {
+      const gp = goldInput ? clampPayInt(goldInput.value, 0, effGold) : 0;
+      const mp = magicInput ? clampPayInt(magicInput.value, 0, effMagic) : 0;
+      const tGold = Math.min(usedGoldTomes, gp);
+      const tMagic = Math.min(usedMagicTomes, mp);
+      return { gp, mp, tGold, tMagic };
     }
+
+    // Live update of the total line / note / Buy button as the player types,
+    // without rebuilding the modal (which would steal input focus).
+    function syncPay() {
+      const { gp, mp, tGold, tMagic } = readPay();
+      const sum = gp + mp;
+      const needsMinGold = mp > 0 && gp < 1;
+      const covered = selected.size > 0 && sum === totalGold && !needsMinGold;
+
+      if (selected.size) {
+        const parts = [];
+        if (tGold) parts.push(`${tGold} gold tome${tGold > 1 ? 's' : ''}`);
+        if (gp - tGold) parts.push(`${gp - tGold} treasury gold`);
+        if (tMagic) parts.push(`${tMagic} magic tome${tMagic > 1 ? 's' : ''}`);
+        if (mp - tMagic) parts.push(`${mp - tMagic} treasury magic`);
+        total.textContent = parts.length
+          ? `Paying: ${parts.join(', ')} (need ${totalGold} gold) + 1 map`
+          : `Total: ${totalGold} gold + 1 map`;
+      } else {
+        total.textContent = `Select ${nounLower} to buy`;
+      }
+
+      let noteText = '';
+      if (!canAct) noteText = `You can buy ${nounLower} on your turn during the action phase.`;
+      else if (selected.size && needsMinGold) noteText = 'You must pay at least 1 gold to use magic as wild.';
+      else if (selected.size && sum !== totalGold) noteText = `Gold + magic must total ${totalGold}.`;
+      else if (selected.size && playerMap < 1) noteText = 'You need 1 map to sail.';
+      note.textContent = noteText;
+      note.style.display = noteText ? '' : 'none';
+
+      buyBtn.disabled = !(canAct && covered && playerMap >= 1);
+    }
+
+    function onPayInput(e) {
+      const el = e.target;
+      const val = clampPayInt(el.value, 0, el === goldInput ? effGold : effMagic);
+      if (el === goldInput) payOverride.gold = val;
+      else payOverride.magic = val;
+      syncPay();
+    }
+    if (goldInput) goldInput.addEventListener('input', onPayInput);
+    if (magicInput) magicInput.addEventListener('input', onPayInput);
+
+    syncPay();
   }
 
   overlay._refreshFromLiveState = render;
