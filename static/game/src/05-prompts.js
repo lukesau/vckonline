@@ -460,7 +460,7 @@ function parseChooseCommand(cmd) {
 
 function resourceSpecLabel(spec) {
   const raw = (spec || '').toString().trim().toLowerCase();
-  const m = /^(g|s|m|v|vp)\s*:\s*(\d+)$/.exec(raw);
+  const m = /^(g|s|m|v|vp|p)\s*:\s*(\d+)$/.exec(raw);
   if (!m) return raw || '';
   const n = Number(m[2]);
   const k = m[1] === 'vp' ? 'v' : m[1];
@@ -2296,8 +2296,69 @@ function renderEventSlayCostPrompt(state) {
 }
 
 // "May slay a Monster" prompt — stage 2: collect payment for the monster picked
-// in stage 1, then submit `slay_pay <g> <s> <m>`. Gold is only allowed when an
-// event added an exact gold slay cost.
+// in stage 1, then submit `slay_pay <g> <s> <m> [tg ts tm]`. Gold is only
+// allowed when an event added an exact gold slay cost. Tome chips default to
+// "used" and are appended as the optional trailing tome portion.
+// Per-prompt "saved" (toggled-off) tome indices, keyed so the choice survives
+// the live-state re-render that rebuilds the prompt body. Shared by the slay
+// and Ararmartin-Ridge build payment prompts.
+const promptPaymentSavedTomes = {};
+
+function immediateSlayPromptKey(prc) {
+  if (!prc) return 'unknown';
+  if (prc.event_id != null) return `event:${prc.event_id}`;
+  if (prc.monster_id != null) return `monster:${prc.monster_id}`;
+  return (prc.monster_name || 'monster').toString();
+}
+
+function promptSavedTomeSets(key) {
+  if (!promptPaymentSavedTomes[key]) {
+    promptPaymentSavedTomes[key] = { gold: new Set(), strength: new Set(), magic: new Set() };
+  }
+  return promptPaymentSavedTomes[key];
+}
+
+// Append tome chips (one per face-up tome of each listed type) to a prompt
+// body. Chips default to "used" (tome-first); clicking saves/uses a tome and
+// re-renders. Mirrors the market modal's tome UI.
+function appendPromptTomeChips(body, savedTomes, tomeAvail, types, onToggle) {
+  const total = types.reduce((n, t) => n + (tomeAvail[t] || 0), 0);
+  if (total <= 0) return;
+  const trow = mk('market-tome-row');
+  const tlbl = mk('market-tome-label');
+  tlbl.textContent = 'Tomes';
+  trow.appendChild(tlbl);
+
+  const chips = mk('market-tome-chips');
+  types.forEach(type => {
+    for (let i = 0; i < (tomeAvail[type] || 0); i++) {
+      const used = !savedTomes[type].has(i);
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = `market-tome-chip market-tome-chip--${type} ${used ? 'is-used' : 'is-saved'}`;
+      const img = document.createElement('img');
+      img.src = SAIL_TOME_IMAGES[type] || '';
+      img.alt = `${type} tome`;
+      chip.appendChild(img);
+      chip.title = used
+        ? `${type} tome — used to pay (click to save)`
+        : `${type} tome — saved (click to use)`;
+      chip.addEventListener('click', e => {
+        e.stopPropagation();
+        if (savedTomes[type].has(i)) savedTomes[type].delete(i);
+        else savedTomes[type].add(i);
+        onToggle();
+      });
+      chips.appendChild(chip);
+    }
+  });
+  trow.appendChild(chips);
+  const hint = mk('market-tome-hint');
+  hint.textContent = 'Used tomes pay before treasury and flip back face-up at end of your turn.';
+  trow.appendChild(hint);
+  body.appendChild(trow);
+}
+
 function renderImmediateSlayPayment(state) {
   const req = state?.action_required || {};
   const reqId = (req?.id || '').toString();
@@ -2325,9 +2386,17 @@ function renderImmediateSlayPayment(state) {
   }
 
   const me = playerById(state, PLAYER_ID) || {};
-  const gMax = Number(me?.gold_score || 0);
-  const sMax = Number(me?.strength_score || 0);
-  const mMax = Number(me?.magic_score || 0);
+  const promptKey = `slay:${immediateSlayPromptKey(prc)}`;
+  const savedTomes = promptSavedTomeSets(promptKey);
+  const tomeAvail = crimsonSeasEnabled(state) ? faceUpTomeCountsForPlayer(me) : { gold: 0, strength: 0, magic: 0 };
+  const tomeUse = {
+    gold: Math.max(0, tomeAvail.gold - savedTomes.gold.size),
+    strength: Math.max(0, tomeAvail.strength - savedTomes.strength.size),
+    magic: Math.max(0, tomeAvail.magic - savedTomes.magic.size),
+  };
+  const gMax = Number(me?.gold_score || 0) + tomeUse.gold;
+  const sMax = Number(me?.strength_score || 0) + tomeUse.strength;
+  const mMax = Number(me?.magic_score || 0) + tomeUse.magic;
 
   // Suggested payment: prefer using magic as the wild resource so the player only spends 1 strength
   // (the validator minimum to use magic-as-wild). Fall back to spending more strength when the player
@@ -2378,14 +2447,22 @@ function renderImmediateSlayPayment(state) {
   fields.appendChild(payWrap);
   body.appendChild(fields);
 
+  appendPromptTomeChips(body, savedTomes, tomeAvail, ['gold', 'strength', 'magic'],
+    () => renderPromptModal(latestGameState || state));
+
   const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
   foot.appendChild(promptButton(`Slay ${monsterName}`, () => {
     const p = readMarketPayRow(payWrap);
+    const tomePay = {
+      gold: Math.min(tomeUse.gold, p.gold),
+      strength: Math.min(tomeUse.strength, p.strength),
+      magic: Math.min(tomeUse.magic, p.magic),
+    };
     confirmAndPostGameAction(
       {
         player_id: PLAYER_ID,
         action_type: 'act_on_required_action',
-        action: `slay_pay ${p.gold} ${p.strength} ${p.magic}`,
+        action: `slay_pay ${p.gold} ${p.strength} ${p.magic} ${tomePay.gold} ${tomePay.strength} ${tomePay.magic}`,
       },
       {
         title: 'Slay monster?',
@@ -2432,7 +2509,10 @@ function renderImmediateSlayPayment(state) {
 function chooseOwnedCardCopy(prc, state) {
   const kind = (prc?.kind || '').toString();
   const cardKind = (prc?.card_kind || '').toString().toLowerCase();
-  const noun = cardKind === 'monster' ? 'monster' : cardKind === 'domain' ? 'domain' : 'citizen';
+  const noun = cardKind === 'monster' ? 'monster'
+    : cardKind === 'domain' ? 'domain'
+    : cardKind === 'noble' ? 'noble'
+    : 'citizen';
 
   if (kind === 'domain_return_owned') {
     const dn = (prc?.domain_name || 'Domain').toString();
@@ -2467,14 +2547,17 @@ function chooseOwnedCardCopy(prc, state) {
   }
 
   if (kind === 'banish_center_card') {
+    // Nobles live in the Amarynth slots, not a center grid.
+    const where = cardKind === 'noble' ? 'Amarynth' : 'the center stacks';
+    const placeAdj = cardKind === 'noble' ? 'face-up Amarynth' : 'center-stack';
     return {
-      title: `Banish a center-stack ${noun}`,
-      explain: `Choose one of the available ${noun}s from the center stacks. It is removed from play permanently (sent to the banish pile).`,
-      waiting: (label) => `Waiting on ${label} to banish a center-stack ${noun}.`,
-      confirmTitle: `Banish center-stack ${noun}?`,
-      confirmMessage: (nm) => `Permanently banish center-stack ${noun} "${nm}" to the banish pile.`,
+      title: `Banish a ${placeAdj} ${noun}`,
+      explain: `Choose one of the available ${noun}s from ${where}. It is removed from play permanently (sent to the banish pile)${cardKind === 'noble' ? ', and the slot refills from the noble deck' : ''}.`,
+      waiting: (label) => `Waiting on ${label} to banish a ${placeAdj} ${noun}.`,
+      confirmTitle: `Banish ${placeAdj} ${noun}?`,
+      confirmMessage: (nm) => `Permanently banish ${placeAdj} ${noun} "${nm}" to the banish pile.`,
       skipLabel: 'Skip (optional)',
-      skipMessage: `Skip banishing a center-stack ${noun}.`,
+      skipMessage: `Skip banishing a ${placeAdj} ${noun}.`,
       tableauOwner: 'center',
     };
   }
@@ -2701,6 +2784,11 @@ function chooseOptionButtonLabel(opt, idx, state) {
   if (tl === 'noble.choice') {
     const name = (opt?.name ?? '').toString().trim();
     return name ? `Gain Noble ${name} (free)` : 'Gain 1 Noble (free)';
+  }
+  if (tl === 'goods.choice') {
+    const gtype = (opt?.goods_type ?? '').toString().trim();
+    const gLabel = gtype ? gtype.charAt(0).toUpperCase() + gtype.slice(1) : 'Goods';
+    return `Gain ${gLabel} Goods (free)`;
   }
   if (tl === 'citizens_chain') {
     return `Gain ${prettyAmt} citizens`;
@@ -3028,6 +3116,81 @@ function renderGrantDomainRewardPrompt(state) {
   });
 }
 
+// Dampiar's Workshop "you may Sail": offer one free Sail (no regular action
+// spent; the sail still pays its own gold/map cost, funded by the +1 Map this
+// domain grants). Each button opens the matching Sail modal; the prompt is
+// minimizable so the player can instead click a specific target on the mat
+// (e.g. a particular noble). Declining resumes the turn.
+function renderMaySailPrompt(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+
+  const body = mk('prompt-modal-body');
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — may Sail (Dampiar's Workshop).`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({
+      title: "Dampiar's Workshop: may Sail",
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const sub = mk('prompt-modal-note');
+  sub.textContent = 'Take one free Sail action (you still pay its gold/map cost). '
+    + 'Pick a destination, or minimize this prompt to click a specific target on the Sail mat. Or decline.';
+  body.appendChild(sub);
+  appendPromptResourcesPanel(body, state);
+
+  const goods = Array.isArray(state?.goods_slots) ? state.goods_slots : [];
+  const tomes = Array.isArray(state?.tome_slots) ? state.tome_slots : [];
+  const nobles = Array.isArray(state?.noble_slots) ? state.noble_slots : [];
+  const pool = state?.exekratys_resources || {};
+  const firstNobleSlot = nobles.findIndex(n => !!n);
+  const poolTotal = Number(pool.gold || 0) + Number(pool.strength || 0) + Number(pool.magic || 0);
+
+  const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
+  const openVia = (fn) => () => { removePromptOverlay(); fn(); };
+
+  if (goods.some(g => !!g)) {
+    foot.appendChild(promptButton('Araby (buy Goods)', openVia(openArabyGoodsModal)));
+  }
+  if (tomes.some(t => !!t)) {
+    foot.appendChild(promptButton('Nae Aerie (buy Tomes)', openVia(openNaeAerieTomesModal)));
+  }
+  if (poolTotal > 0) {
+    foot.appendChild(promptButton('Exekratys (take resources)', openVia(openExekratysSailModal)));
+  }
+  if (firstNobleSlot >= 0) {
+    foot.appendChild(promptButton('Amarynth (rescue Noble)', openVia(() => openAmarynthNobleModal(firstNobleSlot))));
+  }
+
+  foot.appendChild(promptButton('Decline (skip)', () => confirmAndPostGameAction(
+    {
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: 'skip',
+    },
+    {
+      title: 'Skip Sail?',
+      message: "Decline the free Sail from Dampiar's Workshop.",
+      confirmLabel: 'Skip',
+    },
+  ), true));
+
+  openPromptOverlayShell({
+    title: "Dampiar's Workshop: may Sail",
+    dismissible: true,
+    bodyEl: body,
+    footerEl: foot,
+  });
+}
+
 function renderBuildDomainPrompt(state) {
   const req = state?.action_required || {};
   const reqId = (req?.id || '').toString();
@@ -3051,7 +3214,7 @@ function renderBuildDomainPrompt(state) {
   }
 
   const sub = mk('prompt-modal-note');
-  sub.textContent = 'Choose a domain to build (paying its Gold cost), or decline.';
+  sub.textContent = 'Choose a domain to build, then set its payment (Magic can cover the Gold cost as wild). Or decline.';
   body.appendChild(sub);
   appendPromptResourcesPanel(body, state);
 
@@ -3067,8 +3230,8 @@ function renderBuildDomainPrompt(state) {
         action: `build_domain_pick ${idx + 1}`,
       },
       {
-        title: 'Build domain?',
-        message: gc > 0 ? `Build "${nm}" for ${gc} Gold.` : `Build "${nm}" for free.`,
+        title: 'Build this domain?',
+        message: gc > 0 ? `Set payment for "${nm}" (cost ${gc} Gold) next.` : `Build "${nm}" for free.`,
       },
     )));
   });
@@ -3088,6 +3251,120 @@ function renderBuildDomainPrompt(state) {
 
   openPromptOverlayShell({
     title: 'Ararmartin Ridge: may build a Domain',
+    dismissible: false,
+    bodyEl: body,
+    footerEl: foot,
+  });
+}
+
+// Ararmartin Ridge build — stage 2: collect payment for the domain picked in
+// stage 1, then submit `build_pay <g> <m> [tg ts tm]`. This is a full build
+// action: Magic covers the Gold cost as a wild (pay at least 1 gold when using
+// magic), and face-up Gold/Magic tomes can help.
+function renderBuildDomainPayment(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const domainName = (prc?.domain_name || 'Domain').toString();
+  const goldCost = Number(prc?.gold_cost || 0);
+
+  const body = mk('prompt-modal-body');
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — paying to build "${domainName}".`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({
+      title: 'Ararmartin Ridge: pay to build',
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const me = playerById(state, PLAYER_ID) || {};
+  const promptKey = `build:${prc?.domain_id ?? 'x'}`;
+  const savedTomes = promptSavedTomeSets(promptKey);
+  const tomeAvail = crimsonSeasEnabled(state) ? faceUpTomeCountsForPlayer(me) : { gold: 0, strength: 0, magic: 0 };
+  const tomeUse = {
+    gold: Math.max(0, tomeAvail.gold - savedTomes.gold.size),
+    strength: 0,
+    magic: Math.max(0, tomeAvail.magic - savedTomes.magic.size),
+  };
+  const gMax = Number(me?.gold_score || 0) + tomeUse.gold;
+  const mMax = Number(me?.magic_score || 0) + tomeUse.magic;
+
+  // Suggested split via the shared magic-as-wild affordability (effective pool
+  // folds in the tomes the player intends to use).
+  const effPlayer = { ...me, gold_score: gMax, magic_score: mMax };
+  const suggestion = canAffordCost(effPlayer, { gold: goldCost, strength: 0, magicMin: 0 });
+
+  const sub = mk('prompt-modal-note');
+  sub.textContent = `Build "${domainName}" — Gold cost ${goldCost}. Magic can cover the cost as a wild (pay at least 1 gold when using magic).`;
+  body.appendChild(sub);
+  appendPromptResourcesPanel(body, state);
+
+  const payWrap = mk('market-pay-row');
+  payWrap.appendChild(mkPayField('', 'pay-g', 0, gMax, suggestion.payGold ?? 0, false, 'Gold payment', 'gold', gMax));
+  payWrap.appendChild(mkPayField('', 'pay-s', 0, 0, 0, true, 'Domains use gold and magic', 'strength'));
+  payWrap.appendChild(mkPayField('', 'pay-m', 0, mMax, suggestion.payMagic ?? 0, false, 'Magic payment (wild)', 'magic', mMax));
+
+  const fields = mk('market-pay-fields');
+  fields.appendChild(payWrap);
+  body.appendChild(fields);
+
+  appendPromptTomeChips(body, savedTomes, tomeAvail, ['gold', 'magic'],
+    () => renderPromptModal(latestGameState || state));
+
+  const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
+  foot.appendChild(promptButton(`Build ${domainName}`, () => {
+    const p = readMarketPayRow(payWrap);
+    const tomePay = {
+      gold: Math.min(tomeUse.gold, p.gold),
+      strength: 0,
+      magic: Math.min(tomeUse.magic, p.magic),
+    };
+    confirmAndPostGameAction(
+      {
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: `build_pay ${p.gold} ${p.magic} ${tomePay.gold} ${tomePay.strength} ${tomePay.magic}`,
+      },
+      {
+        title: 'Build domain?',
+        message: `Build "${domainName}" using ${p.gold} gold and ${p.magic} magic.`,
+      },
+    );
+  }));
+  foot.appendChild(promptButton('Back (pick a different domain)', () => confirmAndPostGameAction(
+    {
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: 'back',
+    },
+    {
+      title: 'Back to domain list?',
+      message: 'Return to the domain selection step.',
+      confirmLabel: 'Back',
+    },
+  ), true));
+  foot.appendChild(promptButton('Decline (skip)', () => confirmAndPostGameAction(
+    {
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: 'skip',
+    },
+    {
+      title: 'Skip domain build?',
+      message: 'Decline the optional domain build from Ararmartin Ridge.',
+      confirmLabel: 'Skip',
+    },
+  ), true));
+
+  openPromptOverlayShell({
+    title: `Ararmartin Ridge: pay to build "${domainName}"`,
     dismissible: false,
     bodyEl: body,
     footerEl: foot,
@@ -3232,8 +3509,22 @@ function renderPromptModal(state) {
     return;
   }
 
+  if (reqAction === 'may_sail') {
+    // While a Sail modal is open (launched from this prompt or the mat), don't
+    // re-stack the prompt on top of it. The prompt re-renders once the modal
+    // closes without completing the bonus sail.
+    if (document.getElementById('card-modal-overlay')) return;
+    renderMaySailPrompt(state);
+    return;
+  }
+
   if (reqAction === 'choose_domain_to_build') {
     renderBuildDomainPrompt(state);
+    return;
+  }
+
+  if (reqAction === 'build_domain_payment') {
+    renderBuildDomainPayment(state);
     return;
   }
 

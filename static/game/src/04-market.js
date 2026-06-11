@@ -247,6 +247,15 @@ function normalizedPassiveEffects(player, turnNumber) {
     if (name.includes('pratchett') || (text.includes('1gp less') && text.includes('domain'))) {
       out.push('action.pratchettsplateau');
     }
+    if (name.includes('browncoat') || (text.includes('tomes cost') && text.includes('1 gold less'))) {
+      out.push('action.browncoatssanctum');
+    }
+    if (name.includes('port of drake') || (text.includes('goods cost') && text.includes('1 gold less'))) {
+      out.push('action.portofdrake');
+    }
+    if (name.includes('murat reis') || (text.replace(/\s+/g, '').includes('+wild') && text.includes('rescuing a noble'))) {
+      out.push('action.muratreis');
+    }
   });
   return out;
 }
@@ -554,6 +563,25 @@ function evaluateMarketCardContext(card, state) {
   const players = state?.player_list || [];
   const actingPlayer = players.find(p => idsMatch(p.player_id, reqId)) || null;
 
+  // Crimson Seas: fold the player's "used" (not saved) face-up tomes into an
+  // effective resource pool so affordability + the suggested split account for
+  // them. The original `actingPlayer` is never mutated (state stays pristine).
+  const tomeAvail = (actingPlayer && crimsonSeasEnabled(state))
+    ? faceUpTomeCountsForPlayer(actingPlayer)
+    : { gold: 0, strength: 0, magic: 0 };
+  const tomeUse = (actingPlayer && crimsonSeasEnabled(state))
+    ? tomeUsageForCard(card, tomeAvail)
+    : { gold: 0, strength: 0, magic: 0 };
+  let effectivePlayer = actingPlayer;
+  if (actingPlayer && (tomeUse.gold || tomeUse.strength || tomeUse.magic)) {
+    effectivePlayer = {
+      ...actingPlayer,
+      gold_score: Number(actingPlayer.gold_score || 0) + tomeUse.gold,
+      strength_score: Number(actingPlayer.strength_score || 0) + tomeUse.strength,
+      magic_score: Number(actingPlayer.magic_score || 0) + tomeUse.magic,
+    };
+  }
+
   const tn = Number(state?.turn_number);
   const emeraldActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.emeraldstronghold', tn) : false;
   const pratchettActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.pratchettsplateau', tn) : false;
@@ -597,9 +625,9 @@ function evaluateMarketCardContext(card, state) {
       scaledCost = baseCost + surcharge;
       if (defiantActive) scaledCost = Math.max(0, scaledCost - 1);
       if (shilinaActive) {
-        const G = Number(actingPlayer?.gold_score || 0);
-        const S = Number(actingPlayer?.strength_score || 0);
-        const M = Number(actingPlayer?.magic_score || 0);
+        const G = Number(effectivePlayer?.gold_score || 0);
+        const S = Number(effectivePlayer?.strength_score || 0);
+        const M = Number(effectivePlayer?.magic_score || 0);
         const ok = G + S + M >= scaledCost;
         const payGold = Math.min(G, scaledCost);
         const rem1 = scaledCost - payGold;
@@ -607,7 +635,7 @@ function evaluateMarketCardContext(card, state) {
         const payMagic = Math.max(0, scaledCost - payGold - payStrength);
         evalRes = { ok, payGold, payStrength, payMagic };
       } else {
-        evalRes = canAffordCost(actingPlayer, { gold: scaledCost, strength: 0, magicMin: 0 });
+        evalRes = canAffordCost(effectivePlayer, { gold: scaledCost, strength: 0, magicMin: 0 });
       }
       dupHint = surcharge ? `base ${baseCost}g + ${surcharge} duplicate(s)` : '';
       emeraldHint = (!surcharge && emeraldActive) ? 'Emerald Stronghold: no duplicate surcharge.' : '';
@@ -615,12 +643,12 @@ function evaluateMarketCardContext(card, state) {
     } else if (card.domain_id != null) {
       baseCost = Number(top.gold_cost || 0);
       effectiveGold = Math.max(0, baseCost - (pratchettActive ? 1 : 0));
-      evalRes = canAffordCost(actingPlayer, { gold: effectiveGold, strength: 0, magicMin: 0 });
+      evalRes = canAffordCost(effectivePlayer, { gold: effectiveGold, strength: 0, magicMin: 0 });
       pratchettHint = pratchettActive && baseCost !== effectiveGold ? `base ${baseCost}g − 1 (Pratchett's Plateau)` : '';
     } else if (card.monster_id != null) {
       const ownedSame = top?.has_special_cost ? ownedMonsterNameCount(actingPlayer, top.name) : 0;
       const rawStr = Number(top.strength_cost || 0) + Number(top.extra_strength_cost || 0);
-      evalRes = canAffordMonsterCost(actingPlayer, {
+      evalRes = canAffordMonsterCost(effectivePlayer, {
         gold:     Number(top.extra_gold_cost || 0),
         strength: Math.max(0, rawStr - (fortskylerActive ? 1 : 0)),
         magicMin: Number(top.magic_cost || 0) + Number(top.extra_magic_cost || 0),
@@ -628,7 +656,7 @@ function evaluateMarketCardContext(card, state) {
       fortskylerHint = fortskylerActive && rawStr > 0 ? 'Fort Skyler: −1 monster strength cost.' : '';
       scalingHint = ownedSame ? `+${ownedSame} duplicate(s) slain` : '';
     } else if (card.event_id != null) {
-      evalRes = canAffordMonsterCost(actingPlayer, {
+      evalRes = canAffordMonsterCost(effectivePlayer, {
         gold:     Number(top.extra_gold_cost     || 0),
         strength: Number(top.strength_cost       || 0) + Number(top.extra_strength_cost || 0),
         magicMin: Number(top.magic_cost          || 0) + Number(top.extra_magic_cost    || 0),
@@ -649,6 +677,9 @@ function evaluateMarketCardContext(card, state) {
     isYourTurn,
     actionsRemaining,
     actingPlayer,
+    effectivePlayer,
+    tomeAvail,
+    tomeUse,
     reqId,
     emeraldActive,
     pratchettActive,
@@ -809,6 +840,115 @@ function mkPayField(label, cls, minV, maxV, value, disabled, title, resourceIcon
   return lab;
 }
 
+// ── Crimson Seas tome payment (market modals) ──────────────────────────────
+// A face-up Tome can be flipped to pay 1 of its resource type. The client shows
+// the player's face-up tomes as chips (default "used", tome-first); the player
+// clicks a chip to save it. On submit we attribute as much of the payment as
+// possible to used tomes (`tome_payment`), and the backend redeems them into the
+// treasury before spending (so the pay fields stay a plain total).
+
+function faceUpTomeCountsForPlayer(player) {
+  const out = { gold: 0, strength: 0, magic: 0 };
+  const tomes = Array.isArray(player?.owned_tomes) ? player.owned_tomes : [];
+  for (const t of tomes) {
+    if (t && typeof t === 'object') {
+      if (t.is_flipped) continue;
+      if (out[t.tome_type] !== undefined) out[t.tome_type] += 1;
+    } else if (typeof t === 'string' && out[t] !== undefined) {
+      out[t] += 1;  // legacy bare-string tome (face-up)
+    }
+  }
+  return out;
+}
+
+function tomeUsageKeyForCard(card) {
+  if (!card) return null;
+  if (card.citizen_id != null) return `citizen:${card.citizen_id}`;
+  if (card.domain_id != null) return `domain:${card.domain_id}`;
+  if (card.monster_id != null) return `monster:${card.monster_id}`;
+  if (card.event_id != null) return `event:${card.event_id}`;
+  return null;
+}
+
+// Saved (toggled-off) tome indices per type, persisted on the open overlay so
+// the choice survives the live-state re-render that rebuilds the panel.
+function tomeSavedSetsForCard(card) {
+  const overlay = document.getElementById('card-modal-overlay');
+  const key = tomeUsageKeyForCard(card);
+  if (!overlay || !key) return { gold: new Set(), strength: new Set(), magic: new Set() };
+  if (!overlay._tomeUsage) overlay._tomeUsage = {};
+  if (!overlay._tomeUsage[key]) {
+    overlay._tomeUsage[key] = { gold: new Set(), strength: new Set(), magic: new Set() };
+  }
+  return overlay._tomeUsage[key];
+}
+
+function tomeUsageForCard(card, avail) {
+  const saved = tomeSavedSetsForCard(card);
+  return {
+    gold: Math.max(0, (avail.gold || 0) - saved.gold.size),
+    strength: Math.max(0, (avail.strength || 0) - saved.strength.size),
+    magic: Math.max(0, (avail.magic || 0) - saved.magic.size),
+  };
+}
+
+// Attribute as much of `payment` as possible to used tomes (tome-first), capped
+// per type by the amount actually being paid. Returns null if no tomes apply.
+function tomePaymentForSubmit(ctx, payment) {
+  const use = ctx.tomeUse || { gold: 0, strength: 0, magic: 0 };
+  const tp = {
+    gold: Math.min(use.gold || 0, Number(payment.gold || 0)),
+    strength: Math.min(use.strength || 0, Number(payment.strength || 0)),
+    magic: Math.min(use.magic || 0, Number(payment.magic || 0)),
+  };
+  return (tp.gold || tp.strength || tp.magic) ? tp : null;
+}
+
+function appendTomePaymentUI(panel, card, ctx) {
+  if (!crimsonSeasEnabled(latestGameState)) return;
+  const avail = ctx.tomeAvail || { gold: 0, strength: 0, magic: 0 };
+  if ((avail.gold + avail.strength + avail.magic) <= 0) return;
+  const saved = tomeSavedSetsForCard(card);
+
+  const row = mk('market-tome-row');
+  const lbl = mk('market-tome-label');
+  lbl.textContent = 'Tomes';
+  row.appendChild(lbl);
+
+  const chips = mk('market-tome-chips');
+  ['gold', 'strength', 'magic'].forEach(type => {
+    for (let i = 0; i < (avail[type] || 0); i++) {
+      const used = !saved[type].has(i);
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = `market-tome-chip market-tome-chip--${type} ${used ? 'is-used' : 'is-saved'}`;
+      chip.disabled = !ctx.standardActionPhase;
+      const img = document.createElement('img');
+      img.src = SAIL_TOME_IMAGES[type] || '';
+      img.alt = `${type} tome`;
+      chip.appendChild(img);
+      chip.title = used
+        ? `${type} tome — used to pay (click to save)`
+        : `${type} tome — saved (click to use)`;
+      chip.addEventListener('click', e => {
+        e.stopPropagation();
+        if (saved[type].has(i)) saved[type].delete(i);
+        else saved[type].add(i);
+        const overlay = document.getElementById('card-modal-overlay');
+        if (overlay && overlay._refreshFromLiveState) overlay._refreshFromLiveState();
+      });
+      chips.appendChild(chip);
+    }
+  });
+  row.appendChild(chips);
+
+  const hint = mk('market-tome-hint');
+  hint.textContent = 'Used tomes pay before treasury and flip back face-up at end of your turn.';
+  row.appendChild(hint);
+
+  panel.appendChild(row);
+}
+
 function appendMarketActionUI(infoEl, card, ctx) {
   // Suppress the entire pay-fields/action panel while the player has a
   // prompt pending (visible or minimized via "Peek board"). Without this,
@@ -856,9 +996,10 @@ function appendMarketActionUI(infoEl, card, ctx) {
   }
 
   const payWrap = mk('market-pay-row');
-  const Gmax = Number(ctx.actingPlayer?.gold_score || 0);
-  const Smax = Number(ctx.actingPlayer?.strength_score || 0);
-  const Mmax = Number(ctx.actingPlayer?.magic_score || 0);
+  const effPlayer = ctx.effectivePlayer || ctx.actingPlayer;
+  const Gmax = Number(effPlayer?.gold_score || 0);
+  const Smax = Number(effPlayer?.strength_score || 0);
+  const Mmax = Number(effPlayer?.magic_score || 0);
   const pay = ctx.evalRes;
   const inputsDisabled = !ctx.standardActionPhase;
 
@@ -902,6 +1043,7 @@ function appendMarketActionUI(infoEl, card, ctx) {
   fieldsRow.appendChild(payWrap);
   panel.appendChild(fieldsRow);
   trackMarketPayEdits(payWrap);
+  appendTomePaymentUI(panel, card, ctx);
 
   const btnRow = mk('market-primary-actions');
 
@@ -919,13 +1061,16 @@ function appendMarketActionUI(infoEl, card, ctx) {
   if (card.citizen_id != null) {
     attachPrimary(promptButton('Hire', () => {
       const p = readMarketPayRow(payWrap);
+      const action = {
+        player_id: PLAYER_ID,
+        action_type: 'hire_citizen',
+        citizen_id: Number(card.citizen_id),
+        payment: { gold: p.gold, strength: p.strength, magic: p.magic },
+      };
+      const tp = tomePaymentForSubmit(ctx, p);
+      if (tp) action.tome_payment = tp;
       confirmAndPostGameAction(
-        {
-          player_id: PLAYER_ID,
-          action_type: 'hire_citizen',
-          citizen_id: Number(card.citizen_id),
-          payment: { gold: p.gold, strength: p.strength, magic: p.magic },
-        },
+        action,
         {
           title: 'Hire citizen?',
           message: `Hire ${cardLabel} using the gold and magic amounts set in this panel.`,
@@ -936,13 +1081,16 @@ function appendMarketActionUI(infoEl, card, ctx) {
   } else if (card.domain_id != null) {
     attachPrimary(promptButton('Build', () => {
       const p = readMarketPayRow(payWrap);
+      const action = {
+        player_id: PLAYER_ID,
+        action_type: 'build_domain',
+        domain_id: Number(card.domain_id),
+        payment: { gold: p.gold, strength: p.strength, magic: p.magic },
+      };
+      const tp = tomePaymentForSubmit(ctx, p);
+      if (tp) action.tome_payment = tp;
       confirmAndPostGameAction(
-        {
-          player_id: PLAYER_ID,
-          action_type: 'build_domain',
-          domain_id: Number(card.domain_id),
-          payment: { gold: p.gold, strength: p.strength, magic: p.magic },
-        },
+        action,
         {
           title: 'Build domain?',
           message: `Build ${cardLabel} using the gold and magic amounts set in this panel.`,
@@ -960,6 +1108,8 @@ function appendMarketActionUI(infoEl, card, ctx) {
       };
       if (card.monster_id != null) action.monster_id = Number(card.monster_id);
       if (card.event_id   != null) action.event_id   = Number(card.event_id);
+      const tp = tomePaymentForSubmit(ctx, p);
+      if (tp) action.tome_payment = tp;
       confirmAndPostGameAction(
         action,
         {

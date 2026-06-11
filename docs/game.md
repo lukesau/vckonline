@@ -348,6 +348,17 @@ consumed slot keys and skipping the keys returned by
 their own no_payout starter). A player whose only activation was that doubles
 leg therefore still appears in the end-of-harvest bonus gate.
 
+**Coxswain exception (`doubles_or_no_payout_once`).** The Crimson Seas
+Coxswain has the same two legs, but the rulebook is equally explicit that it
+"does not activate two times if both conditions are met" — it fires **at most
+once** per harvest. Its trigger carries an extra `once` marker, and
+`_no_payout_starter_own_doubles_slot_keys` skips any starter whose trigger
+contains `once`. That means the Coxswain's in-band doubles activation is *not*
+ignored: it counts as "a card fired" and suppresses its own no_payout leg, so a
+doubles+no-citizens harvest yields a single Coxswain activation. This gate is
+not preset-specific, so the once-only behaviour applies in every game mode,
+including a `random` deal that happens to include the Coxswain.
+
 ### Deferred may-slay-a-Monster prompts
 
 Bare-verb `slay` payouts (see `docs/effect-strings.md`) opened by citizen
@@ -364,6 +375,32 @@ distinguished by `pending_required_choice.resume_kind = "harvest_pending_slay"`
 so the post-resolve hook resumes the queue drain instead of the action-phase
 follow-up. Silent batch harvest (`harvest_phase()`) skips and clears any
 queued entries since there is no UI to prompt against.
+
+## Crimson Seas rule deltas
+
+The Crimson Seas expansion changes a few base rules. Beyond the maps/tomes/
+goods/nobles machinery, two engine-level rule deltas are worth calling out:
+
+- **Nobles count toward Domain build prerequisites.** "Build a Domain" now
+  reads "the Citizens *and/or* Nobles in your tableau must have Citizen Role
+  icons that match those on the Domain card." Nobles carry the same
+  shadow/holy/soldier/worker counts as Citizens, so
+  `Game._player_build_role_totals` sums both `owned_citizens` and
+  `owned_nobles`. This single helper backs both the direct `build_domain`
+  gate and the Ararmartin Ridge "may build" offer
+  (`_execute_build_domain_activation_payout`). Outside Crimson Seas a player
+  has no Nobles, so the tally is unchanged in every other mode.
+
+- **Three new end-game conditions.** In addition to "all monsters slain",
+  "all domains built", and "exhausted stacks filled",
+  `_check_end_game_condition` ends a Crimson Seas game when a Goods, Tome, or
+  Noble slot row "must be replenished, but there are not enough tokens to fill
+  in all 3 slots." After a take, `_packed_island_slots` (Goods/Tomes) and the
+  direct Noble refill leave an unfillable slot as `None`, so a falsy entry in a
+  3-slot row is the signal that a required replenish could not complete. These
+  checks are gated on `crimson_seas_enabled()` (the slot rows are empty in
+  every other preset). Like the other end conditions, the game then plays out
+  the rest of the round before `_finalize_game` runs.
 
 ## Concurrent actions (non-ordered prompts)
 

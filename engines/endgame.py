@@ -46,6 +46,28 @@ class EndgameEngine:
             return "all domains built"
         if int(self.game.exhausted_count) >= len(self.game.player_list) * 2:
             return "exhausted stacks filled"
+
+        # Crimson Seas adds three end conditions: the game ends if a Goods,
+        # Tome, or Noble slot row needed replenishing but the supply ran out, so
+        # the three face-up slots can no longer all be filled. After a take, an
+        # unfillable slot is left empty (None), so a falsy entry in a slot row
+        # means a required replenish couldn't complete. These slot lists are
+        # empty outside Crimson Seas, so this is a no-op in every other mode.
+        if self.game.crimson_seas_enabled():
+            def _cannot_refill(slots, slot_count):
+                return sum(1 for s in (slots or []) if s) < slot_count
+
+            from game_setup import (
+                GOODS_SLOT_COUNT,
+                TOME_SLOT_COUNT,
+                NOBLE_SLOT_COUNT,
+            )
+            if _cannot_refill(self.game.goods_slots, GOODS_SLOT_COUNT):
+                return "goods supply exhausted"
+            if _cannot_refill(self.game.tome_slots, TOME_SLOT_COUNT):
+                return "tome supply exhausted"
+            if _cannot_refill(self.game.noble_slots, NOBLE_SLOT_COUNT):
+                return "noble supply exhausted"
         return None
 
     def _build_final_result(self, scores):

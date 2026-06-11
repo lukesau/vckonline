@@ -110,19 +110,55 @@ function makeCrimsonSeasTableauSection(player) {
 
 function makeCrimsonSeasItem(kind, item) {
   const wrap = mk(`cs-item cs-item-${kind}`);
-  const img = document.createElement('img');
-  img.className = 'cs-item-img';
   if (kind === 'goods') {
+    const img = document.createElement('img');
+    img.className = 'cs-item-img';
     img.src = SAIL_GOODS_IMAGES[item] || '';
     img.alt = item;
+    wrap.appendChild(img);
   } else if (kind === 'tomes') {
-    img.src = SAIL_TOME_IMAGES[item] || '';
-    img.alt = item;
+    // Tomes are Tome card objects ({tome_type, is_flipped}); tolerate a legacy
+    // bare type string. A flipped (spent-this-turn) tome reuses the shared card
+    // cross-fade flip stage: tome back rests, the face peeks through.
+    const ttype = (item && typeof item === 'object') ? item.tome_type : item;
+    const flipped = !!(item && typeof item === 'object' && item.is_flipped);
+    const frontUrl = SAIL_TOME_IMAGES[ttype] || '';
+    const frame = mk('cs-tome-frame');
+    if (flipped) {
+      wrap.classList.add('flipped');
+      const stage = mk('card-flip-stage');
+      const inner = mk('card-flip-inner');
+      const back = mk('card-flip-face card-flip-back');
+      const backImg = document.createElement('img');
+      backImg.className = 'card-img';
+      backImg.alt = '';
+      backImg.src = SAIL_TOME_BACK_IMAGE;
+      back.appendChild(backImg);
+      const front = mk('card-flip-face card-flip-front');
+      const frontImg = document.createElement('img');
+      frontImg.className = 'card-img';
+      frontImg.alt = '';
+      frontImg.src = frontUrl;
+      front.appendChild(frontImg);
+      inner.appendChild(back);
+      inner.appendChild(front);
+      stage.appendChild(inner);
+      frame.appendChild(stage);
+    } else {
+      const img = document.createElement('img');
+      img.className = 'cs-item-img';
+      img.src = frontUrl;
+      img.alt = (item && item.name) || `${ttype} tome`;
+      frame.appendChild(img);
+    }
+    wrap.appendChild(frame);
   } else {
+    const img = document.createElement('img');
+    img.className = 'cs-item-img';
     img.src = `/card-image/noble/${item.noble_id}`;
     img.alt = item.name || 'Noble';
+    wrap.appendChild(img);
   }
-  wrap.appendChild(img);
   return wrap;
 }
 
@@ -781,6 +817,20 @@ function canOfferTakeResourceAction(state) {
   return Number(state.actions_remaining || 0) > 0;
 }
 
+// Crimson Seas "you may Sail" bonus (Dampiar's Workshop): one free Sail is
+// available while the may_sail prompt is open for this player, even with 0
+// regular actions remaining. Sail modals enable on this in addition to the
+// normal action-phase check.
+function canOfferBonusSail(state) {
+  if (!PLAYER_ID || !state) return false;
+  if ((state.phase || '').toString() !== 'action') return false;
+  const req = state.action_required || {};
+  if ((req.action || '').toString() !== 'may_sail') return false;
+  const reqId = req.id || '';
+  if (!reqId || idsMatch(reqId, state.game_id)) return false;
+  return idsMatch(reqId, PLAYER_ID);
+}
+
 function activeTurnNamePart(state) {
   const active = (state.player_list || []).find(p => p.player_id === state.active_player_id);
   if (!active) return { hasActive: false, isMe: false, displayName: '' };
@@ -1033,6 +1083,9 @@ const SAIL_TOME_IMAGES = {
   strength: '/images/tome_strength.jpg',
 };
 
+// Tome back, shown for a flipped (spent-this-turn) tome in the tableau.
+const SAIL_TOME_BACK_IMAGE = '/images/tome_back.jpg';
+
 // Gold cost per Nae Aerie tome slot, top→bottom. Must match game_setup.TOME_SLOT_COSTS.
 const SAIL_TOME_SLOT_COSTS = [7, 5, 3];
 
@@ -1166,6 +1219,11 @@ function openArabyGoodsModal() {
     actionType: 'buy_goods',
     slotsKey: 'goods_slots',
     costs: SAIL_GOODS_SLOT_COSTS,
+    costsForPlayer: (player, state) => {
+      const tn = Number(state?.turn_number ?? 0);
+      const discounted = player && hasActionEffectFlag(player, 'action.portofdrake', tn);
+      return discounted ? SAIL_GOODS_SLOT_COSTS.map(c => Math.max(0, c - 1)) : SAIL_GOODS_SLOT_COSTS;
+    },
     images: SAIL_GOODS_IMAGES,
     label: t => t.charAt(0).toUpperCase() + t.slice(1),
   });
@@ -1180,6 +1238,11 @@ function openNaeAerieTomesModal() {
     actionType: 'buy_tomes',
     slotsKey: 'tome_slots',
     costs: SAIL_TOME_SLOT_COSTS,
+    costsForPlayer: (player, state) => {
+      const tn = Number(state?.turn_number ?? 0);
+      const discounted = player && hasActionEffectFlag(player, 'action.browncoatssanctum', tn);
+      return discounted ? SAIL_TOME_SLOT_COSTS.map(c => Math.max(0, c - 1)) : SAIL_TOME_SLOT_COSTS;
+    },
     images: SAIL_TOME_IMAGES,
     label: t => `${t.charAt(0).toUpperCase() + t.slice(1)} Tome`,
   });
@@ -1199,6 +1262,8 @@ function openAmarynthNobleModal(slotIndex) {
 
   const labels = { gold: 'Gold', strength: 'Strength', magic: 'Magic' };
   const scoreKey = { gold: 'gold_score', strength: 'strength_score', magic: 'magic_score' };
+  // Saved (toggled-off) tome indices per type; default is "used" (tome-first).
+  const savedTomes = { gold: new Set(), strength: new Set(), magic: new Set() };
 
   function render() {
     modal.innerHTML = '';
@@ -1207,8 +1272,19 @@ function openAmarynthNobleModal(slotIndex) {
     const player = (state.player_list || []).find(p => idsMatch(p.player_id, PLAYER_ID)) || null;
     const ownedNobles = (player && Array.isArray(player.owned_nobles)) ? player.owned_nobles.length : 0;
     const playerMap = Number(player && player.map_score || 0);
-    const canAct = canOfferTakeResourceAction(state);
-    const cost = 9 + ownedNobles;
+    const canAct = canOfferTakeResourceAction(state) || canOfferBonusSail(state);
+    // Murat Reis (Domain 73) waives the "+Wild" surcharge (+1 per owned Noble),
+    // leaving a flat 9 of one resource type.
+    const tn = Number(state?.turn_number ?? 0);
+    const muratReis = player && hasActionEffectFlag(player, 'action.muratreis', tn);
+    const surcharge = muratReis ? 0 : ownedNobles;
+    const cost = 9 + surcharge;
+    const tomeAvail = faceUpTomeCountsForPlayer(player);
+    const tomeUsed = {
+      gold: Math.max(0, tomeAvail.gold - savedTomes.gold.size),
+      strength: Math.max(0, tomeAvail.strength - savedTomes.strength.size),
+      magic: Math.max(0, tomeAvail.magic - savedTomes.magic.size),
+    };
 
     const heading = document.createElement('h2');
     heading.className = 'modal-card-name';
@@ -1228,12 +1304,16 @@ function openAmarynthNobleModal(slotIndex) {
 
       const sub = mk('sail-shop-sub');
       sub.textContent = `Rescue costs ${cost} of one resource type + 1 map`
-        + (ownedNobles ? ` (9 + ${ownedNobles} noble${ownedNobles === 1 ? '' : 's'} in your tableau).` : '.');
+        + (muratReis && ownedNobles
+          ? ` (Murat Reis: flat 9, +Wild surcharge waived).`
+          : (ownedNobles ? ` (9 + ${ownedNobles} noble${ownedNobles === 1 ? '' : 's'} in your tableau).` : '.'));
       modal.appendChild(sub);
 
       const list = mk('sail-shop-list');
       SAIL_EXEKRATYS_RESOURCES.forEach(res => {
         const have = Number(player && player[scoreKey[res]] || 0);
+        const tomeApplied = Math.min(tomeUsed[res] || 0, cost);
+        const bankNeeded = Math.max(0, cost - tomeApplied);
         const item = mk('sail-shop-item sail-exe-item');
         const icon = document.createElement('img');
         icon.className = 'sail-shop-item-img';
@@ -1243,16 +1323,20 @@ function openAmarynthNobleModal(slotIndex) {
         const nm = mk('sail-shop-item-name');
         nm.textContent = `Pay with ${labels[res]}`;
         const cst = mk('sail-shop-item-cost');
-        cst.textContent = `${cost} ${labels[res]} (have ${have}) + 1 map`;
+        cst.textContent = tomeApplied
+          ? `${cost} ${labels[res]} (${tomeApplied} from tomes, ${bankNeeded} treasury; have ${have}) + 1 map`
+          : `${cost} ${labels[res]} (have ${have}) + 1 map`;
         meta.appendChild(nm);
         meta.appendChild(cst);
         item.appendChild(icon);
         item.appendChild(meta);
-        const enabled = canAct && have >= cost && playerMap >= 1;
+        const enabled = canAct && have >= bankNeeded && playerMap >= 1;
         if (enabled) {
           item.classList.add('sail-clickable');
           item.addEventListener('click', () => {
-            postGameAction({ player_id: PLAYER_ID, action_type: 'rescue_noble', slot_index: slotIndex, resource: res });
+            const action = { player_id: PLAYER_ID, action_type: 'rescue_noble', slot_index: slotIndex, resource: res };
+            if (tomeApplied > 0) action.tome_payment = { gold: 0, strength: 0, magic: 0, [res]: tomeApplied };
+            postGameAction(action);
             dismissCardInspectModal();
           });
         } else {
@@ -1261,6 +1345,38 @@ function openAmarynthNobleModal(slotIndex) {
         list.appendChild(item);
       });
       modal.appendChild(list);
+
+      // Tome chips (one per face-up tome, grouped by type). A tome is spent
+      // only if you pay the matching resource type; default is "used".
+      if ((tomeAvail.gold + tomeAvail.strength + tomeAvail.magic) > 0) {
+        const trow = mk('market-tome-row');
+        const tlbl = mk('market-tome-label');
+        tlbl.textContent = 'Tomes';
+        trow.appendChild(tlbl);
+        const tchips = mk('market-tome-chips');
+        ['gold', 'strength', 'magic'].forEach(type => {
+          for (let i = 0; i < (tomeAvail[type] || 0); i++) {
+            const used = !savedTomes[type].has(i);
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = `market-tome-chip market-tome-chip--${type} ${used ? 'is-used' : 'is-saved'}`;
+            chip.disabled = !canAct;
+            const cimg = document.createElement('img');
+            cimg.src = SAIL_TOME_IMAGES[type] || '';
+            cimg.alt = `${type} tome`;
+            chip.appendChild(cimg);
+            chip.title = used ? `${type} tome — used if you pay ${labels[type]} (click to save)` : `${type} tome — saved (click to use)`;
+            chip.addEventListener('click', e => {
+              e.stopPropagation();
+              if (savedTomes[type].has(i)) savedTomes[type].delete(i); else savedTomes[type].add(i);
+              render();
+            });
+            tchips.appendChild(chip);
+          }
+        });
+        trow.appendChild(tchips);
+        modal.appendChild(trow);
+      }
     }
 
     const footer = mk('sail-shop-footer');
@@ -1307,7 +1423,7 @@ function openExekratysSailModal() {
     const pool = state.exekratys_resources || {};
     const player = (state.player_list || []).find(p => idsMatch(p.player_id, PLAYER_ID)) || null;
     const playerMap = Number(player && player.map_score || 0);
-    const canAct = canOfferTakeResourceAction(state);
+    const canAct = canOfferTakeResourceAction(state) || canOfferBonusSail(state);
 
     const heading = document.createElement('h2');
     heading.className = 'modal-card-name';
@@ -1380,6 +1496,9 @@ function openSailShopModal(cfg) {
   if (document.getElementById('card-modal-overlay')) return;
 
   const selected = new Set();
+  // Saved (toggled-off) Gold tome indices. Goods/Tomes cost gold, so only Gold
+  // tomes apply; default is "used" (tome-first).
+  const savedGoldTomes = new Set();
 
   const overlay = document.createElement('div');
   overlay.id = 'card-modal-overlay';
@@ -1396,7 +1515,10 @@ function openSailShopModal(cfg) {
     const player = (state.player_list || []).find(p => idsMatch(p.player_id, PLAYER_ID)) || null;
     const playerGold = Number(player && player.gold_score || 0);
     const playerMap = Number(player && player.map_score || 0);
-    const canAct = canOfferTakeResourceAction(state);
+    const canAct = canOfferTakeResourceAction(state) || canOfferBonusSail(state);
+    const costs = typeof cfg.costsForPlayer === 'function'
+      ? cfg.costsForPlayer(player, state)
+      : cfg.costs;
 
     const heading = document.createElement('h2');
     heading.className = 'modal-card-name';
@@ -1412,7 +1534,7 @@ function openSailShopModal(cfg) {
     slots.forEach((type, i) => {
       if (!type) return;
       anyAvail = true;
-      const cost = cfg.costs[i] != null ? cfg.costs[i] : 0;
+      const cost = costs[i] != null ? costs[i] : 0;
       const isSel = selected.has(i);
       const item = mk('sail-shop-item' + (isSel ? ' is-selected' : ''));
       const img = document.createElement('img');
@@ -1445,19 +1567,57 @@ function openSailShopModal(cfg) {
     modal.appendChild(list);
 
     const totalGold = [...selected].reduce(
-      (sum, i) => sum + (cfg.costs[i] != null ? cfg.costs[i] : 0), 0);
+      (sum, i) => sum + (costs[i] != null ? costs[i] : 0), 0);
+
+    // Gold tomes the player can spend toward the gold cost (tome-first).
+    const availGoldTomes = faceUpTomeCountsForPlayer(player).gold;
+    const usedGoldTomes = Math.max(0, availGoldTomes - savedGoldTomes.size);
+    const tomeGoldApplied = Math.min(usedGoldTomes, totalGold);
+    const bankGoldNeeded = Math.max(0, totalGold - tomeGoldApplied);
+
+    if (availGoldTomes > 0) {
+      const trow = mk('market-tome-row');
+      const tlbl = mk('market-tome-label');
+      tlbl.textContent = 'Gold tomes';
+      trow.appendChild(tlbl);
+      const tchips = mk('market-tome-chips');
+      for (let i = 0; i < availGoldTomes; i++) {
+        const used = !savedGoldTomes.has(i);
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = `market-tome-chip market-tome-chip--gold ${used ? 'is-used' : 'is-saved'}`;
+        chip.disabled = !canAct;
+        const cimg = document.createElement('img');
+        cimg.src = SAIL_TOME_IMAGES.gold;
+        cimg.alt = 'gold tome';
+        chip.appendChild(cimg);
+        chip.title = used ? 'Gold tome — used to pay (click to save)' : 'Gold tome — saved (click to use)';
+        chip.addEventListener('click', e => {
+          e.stopPropagation();
+          if (savedGoldTomes.has(i)) savedGoldTomes.delete(i); else savedGoldTomes.add(i);
+          render();
+        });
+        tchips.appendChild(chip);
+      }
+      trow.appendChild(tchips);
+      modal.appendChild(trow);
+    }
 
     const footer = mk('sail-shop-footer');
     const total = mk('sail-shop-total');
     total.textContent = selected.size
-      ? `Total: ${totalGold} gold + 1 map`
+      ? (tomeGoldApplied
+          ? `Total: ${totalGold} gold (${tomeGoldApplied} from tomes, ${bankGoldNeeded} treasury) + 1 map`
+          : `Total: ${totalGold} gold + 1 map`)
       : `Select ${nounLower} to buy`;
     footer.appendChild(total);
 
-    const canBuy = canAct && selected.size > 0 && playerGold >= totalGold && playerMap >= 1;
+    const canBuy = canAct && selected.size > 0 && playerGold >= bankGoldNeeded && playerMap >= 1;
     const buyBtn = promptButton('Buy', () => {
       if (!canBuy) return;
-      postGameAction({ player_id: PLAYER_ID, action_type: cfg.actionType, slot_indices: [...selected] });
+      const action = { player_id: PLAYER_ID, action_type: cfg.actionType, slot_indices: [...selected] };
+      if (tomeGoldApplied > 0) action.tome_payment = { gold: tomeGoldApplied, strength: 0, magic: 0 };
+      postGameAction(action);
       dismissCardInspectModal();
     });
     buyBtn.disabled = !canBuy;
@@ -1470,7 +1630,7 @@ function openSailShopModal(cfg) {
 
     let noteText = '';
     if (!canAct) noteText = `You can buy ${nounLower} on your turn during the action phase.`;
-    else if (selected.size && playerGold < totalGold) noteText = 'Not enough gold for this selection.';
+    else if (selected.size && playerGold < bankGoldNeeded) noteText = 'Not enough gold for this selection.';
     else if (selected.size && playerMap < 1) noteText = 'You need 1 map to sail.';
     if (noteText) {
       const note = mk('sail-shop-note');

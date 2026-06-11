@@ -13,8 +13,23 @@ Two behaviors are covered:
 
 import unittest
 
+from cards import Domain
 from game import Game
 from game_models import Player
+
+
+def make_avery_hollow():
+    """Domain #67 Avery Hollow: owner is exempt from the Exekratys 6-roll loss."""
+    return Domain(
+        67, "Avery Hollow", 5,
+        0, 1, 3, 0,                       # role requirements
+        1,                                # vp_reward
+        0, 1,                             # has_activation / has_passive
+        "roll.exekratys_immune",          # passive_effect flag
+        None,                             # activation_effect
+        "During your Roll Phase, you don't lose Wild on a 6.",
+        "crimsonseas",
+    )
 
 
 def make_game(*, preset="crimsonseas", rolled=(1, 6), exekratys=None):
@@ -128,6 +143,43 @@ class ExekratysRollSixOfferingTests(unittest.TestCase):
         game.advance_tick()
         self.assertEqual(game.pending_exekratys_offerings, 0)
         self.assertNotEqual(game.action_required.get("action"), "exekratys_offering")
+
+
+class AveryHollowExemptionTests(unittest.TestCase):
+    def test_owner_is_exempt_from_offering(self):
+        game, players = make_game(rolled=(6, 6))  # two 6s would owe two placements
+        players[0].owned_domains.append(make_avery_hollow())
+        game.finalize_roll(players[0].player_id)
+        game.advance_tick()
+        # Avery Hollow protects the roller: no obligation, no prompt, resources kept.
+        self.assertEqual(game.pending_exekratys_offerings, 0)
+        self.assertNotEqual(game.action_required.get("action"), "exekratys_offering")
+        self.assertEqual(int(players[0].gold_score), 5)
+        self.assertEqual(int(players[0].strength_score), 5)
+        self.assertEqual(int(players[0].magic_score), 5)
+
+    def test_only_protects_the_roller_not_opponents(self):
+        # The opponent owns Avery Hollow, but the active roller does not, so the
+        # roller still owes the offering.
+        game, players = make_game(rolled=(1, 6))
+        players[1].owned_domains.append(make_avery_hollow())
+        game.finalize_roll(players[0].player_id)
+        game.advance_tick()
+        self.assertEqual(game.pending_exekratys_offerings, 1)
+        self.assertEqual(game.action_required.get("action"), "exekratys_offering")
+        self.assertEqual(game.action_required.get("id"), players[0].player_id)
+
+    def test_exempt_on_build_turn_cooldown_still_owes(self):
+        # A domain bought THIS turn is on the recurring-passive cooldown, so its
+        # protection does not apply yet (mirrors other roll passives).
+        game, players = make_game(rolled=(1, 6))
+        d = make_avery_hollow()
+        d.acquired_turn_number = int(game.turn_number)
+        players[0].owned_domains.append(d)
+        game.finalize_roll(players[0].player_id)
+        game.advance_tick()
+        self.assertEqual(game.pending_exekratys_offerings, 1)
+        self.assertEqual(game.action_required.get("action"), "exekratys_offering")
 
 
 class SailToExekratysTests(unittest.TestCase):

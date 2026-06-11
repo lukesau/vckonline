@@ -375,6 +375,13 @@ class HarvestEngine:
         leg should fire at end of harvest, so this returns exactly those keys
         for the caller to ignore. Other starters/citizens are never excluded.
 
+        The Coxswain (`doubles_or_no_payout_once`) is the exception: the rulebook
+        says it activates AT MOST ONCE even when both its doubles and no_payout
+        conditions are met. So its in-band doubles activation MUST count as "a
+        card fired" and suppress its own no_payout leg. We therefore do not add
+        its doubles slot key here. This applies in every game mode, not just
+        Crimson Seas, since nothing about this gate is preset-specific.
+
         The doubles leg always produces a single activation (index 0); see
         `_build_harvest_slots`, where a -1/-1 starter never roll-matches and the
         doubles leg sets `n = 1`.
@@ -385,6 +392,8 @@ class HarvestEngine:
         for idx, st in enumerate(getattr(player, "owned_starters", []) or []):
             trig = (getattr(st, "activation_trigger", "") or "").lower()
             if "no_payout" not in trig or "doubles" not in trig:
+                continue
+            if "once" in trig:
                 continue
             sid = int(getattr(st, "starter_id", -1))
             keys.add(f"starter:{sid}:{idx}:0")

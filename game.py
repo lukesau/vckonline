@@ -143,6 +143,12 @@ class Game:
         # for leg N, legs N+1.. are stashed here so they fire after the prompt
         # resolves. None when nothing is pending.
         self.pending_payout_continuation = game_state.get('pending_payout_continuation')
+        # Crimson Seas "you may Sail" bonus (Dampiar's Workshop). Holds the
+        # player_id who has one free Sail available while the `may_sail` prompt is
+        # open: consume_player_action lets a single sail action run without
+        # spending a regular action, and resolving the sail clears this + resumes
+        # the domain activation follow-up. None when no bonus sail is pending.
+        self.pending_bonus_sail = game_state.get('pending_bonus_sail')
         self.end_game_triggered = game_state.get('end_game_triggered', False)
         self.final_scores = game_state.get('final_scores', None)
         self.final_result = game_state.get('final_result', None)
@@ -284,6 +290,9 @@ class Game:
     def finish_turn_if_no_actions_remaining(self):
         return self.lifecycle.finish_turn_if_no_actions_remaining()
 
+    def resolve_bonus_sail_if_consumed(self):
+        return self.lifecycle.resolve_bonus_sail_if_consumed()
+
     def finalize_roll(self, player_id, die_one=None, die_two=None):
         return self.lifecycle.finalize_roll(player_id, die_one=die_one, die_two=die_two)
 
@@ -331,17 +340,23 @@ class Game:
     def take_resource(self, player_id, resource):
         return self.player_actions.take_resource(player_id, resource)
 
-    def buy_goods(self, player_id, slot_indices):
-        return self.player_actions.buy_goods(player_id, slot_indices)
+    def buy_goods(self, player_id, slot_indices, tome_payment=None):
+        return self.player_actions.buy_goods(player_id, slot_indices, tome_payment=tome_payment)
 
-    def buy_tomes(self, player_id, slot_indices):
-        return self.player_actions.buy_tomes(player_id, slot_indices)
+    def buy_tomes(self, player_id, slot_indices, tome_payment=None):
+        return self.player_actions.buy_tomes(player_id, slot_indices, tome_payment=tome_payment)
 
     def sail_exekratys(self, player_id, resource):
         return self.player_actions.sail_exekratys(player_id, resource)
 
-    def rescue_noble(self, player_id, slot_index, resource):
-        return self.player_actions.rescue_noble(player_id, slot_index, resource)
+    def rescue_noble(self, player_id, slot_index, resource, tome_payment=None):
+        return self.player_actions.rescue_noble(player_id, slot_index, resource, tome_payment=tome_payment)
+
+    def redeem_tomes_to_score(self, player_id, tome_payment):
+        return self.player_actions.redeem_tomes_to_score(player_id, tome_payment)
+
+    def refund_tomes_from_score(self, player_id, counts):
+        return self.player_actions.refund_tomes_from_score(player_id, counts)
 
     def _owned_citizen_count_for_role_selector(self, player, role_selector):
         role = (role_selector or "").strip().lower()
@@ -675,9 +690,20 @@ class Game:
             deltas[resource] += total
         return deltas
 
-    def _player_citizen_role_totals(self, player):
+    def _player_build_role_totals(self, player):
+        """Role-icon totals usable to satisfy a Domain's build prerequisites.
+
+        Per the Crimson Seas rules, both Citizens AND Nobles in your tableau
+        contribute their Citizen Role icons toward a Domain's required roles.
+        Nobles carry the same shadow/holy/soldier/worker counts as Citizens, so
+        they are summed alongside them here. Starters and owned Domains never
+        count. Outside Crimson Seas a player simply has no Nobles, so this is
+        equivalent to the old citizen-only tally in every other mode.
+        """
         totals = {"shadow": 0, "holy": 0, "soldier": 0, "worker": 0}
-        for c in list(getattr(player, "owned_citizens", []) or []):
+        role_holders = list(getattr(player, "owned_citizens", []) or []) \
+            + list(getattr(player, "owned_nobles", []) or [])
+        for c in role_holders:
             totals["shadow"] += int(getattr(c, "shadow_count", 0) or 0)
             totals["holy"] += int(getattr(c, "holy_count", 0) or 0)
             totals["soldier"] += int(getattr(c, "soldier_count", 0) or 0)
@@ -730,6 +756,21 @@ class Game:
                     added = effect[len("effect.add "):].strip()
                     if added == target:
                         return True
+            if target == "action.browncoatssanctum":
+                if name == "browncoat's sanctum" or (
+                    "tomes cost" in text and "1 gold less" in text
+                ):
+                    return True
+            if target == "action.portofdrake":
+                if name == "port of drake" or (
+                    "goods cost" in text and "1 gold less" in text
+                ):
+                    return True
+            if target == "action.muratreis":
+                if name == "murat reis" or (
+                    "+wild" in text.replace(" ", "") and "rescuing a noble" in text
+                ):
+                    return True
         return False
 
 

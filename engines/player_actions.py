@@ -411,6 +411,26 @@ class PlayerActionsEngine:
                 self.game.domain_effects._resume_after_domain_activation_follow_up()
                 return
 
+            # Crimson Seas "you may Sail" (Dampiar's Workshop). The actual sail
+            # runs through the normal sail action_types (buy_goods / buy_tomes /
+            # rescue_noble / sail_exekratys), consuming the bonus instead of a
+            # regular action; here we only handle declining the opportunity.
+            if current_required == "may_sail":
+                prc_ms = getattr(self.game, "pending_required_choice", None) or {}
+                if prc_ms.get("kind") != "sail_opportunity" or prc_ms.get("player_id") != player_id:
+                    return
+                act_ms = (action or "").strip().lower()
+                if act_ms in ("skip", "decline", "no", "pass"):
+                    self.game.pending_required_choice = None
+                    self.game.pending_bonus_sail = None
+                    self.game.action_required["action"] = ""
+                    self.game.action_required["id"] = self.game.game_id
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} declined to Sail (Dampiar's Workshop)."
+                    )
+                    self.game.domain_effects._resume_after_domain_activation_follow_up()
+                return
+
             if current_required == "choose_domain_to_build":
                 prc_db = getattr(self.game, "pending_required_choice", None) or {}
                 if prc_db.get("kind") != "domain_build_opportunity" or prc_db.get("player_id") != player_id:
@@ -435,12 +455,100 @@ class PlayerActionsEngine:
                 if sel_db < 0 or sel_db >= len(opts_db):
                     return
                 chosen = opts_db[sel_db]
-                domain_id_db = chosen["domain_id"]
-                gold_cost_db = int(chosen.get("gold_cost", 0))
+                # Stage 2: collect payment. The build behaves like a real build
+                # action — Magic covers the Gold cost as a wild and face-up tomes
+                # can help — so we hand off to a payment prompt rather than
+                # spending an exact gold amount here.
+                self.game.pending_required_choice = {
+                    "kind": "domain_build_opportunity",
+                    "stage": "pay",
+                    "player_id": player_id,
+                    "options": opts_db,
+                    "domain_id": int(chosen["domain_id"]),
+                    "domain_name": chosen.get("name", "Domain"),
+                    "gold_cost": int(chosen.get("gold_cost", 0)),
+                }
+                self.game.action_required["action"] = "build_domain_payment"
+                self.game.action_required["id"] = player_id
+                return
+
+            if current_required == "build_domain_payment":
+                prc_b = getattr(self.game, "pending_required_choice", None) or {}
+                if prc_b.get("kind") != "domain_build_opportunity" or prc_b.get("player_id") != player_id:
+                    return
+                act_b = (action or "").strip().lower()
+                if act_b == "back":
+                    self.game.pending_required_choice = {
+                        "kind": "domain_build_opportunity",
+                        "player_id": player_id,
+                        "options": list(prc_b.get("options") or []),
+                    }
+                    self.game.action_required["action"] = "choose_domain_to_build"
+                    self.game.action_required["id"] = player_id
+                    return
+                if act_b == "skip":
+                    self.game.pending_required_choice = None
+                    self.game.action_required["action"] = ""
+                    self.game.action_required["id"] = self.game.game_id
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} declined to build a domain (Ararmartin Ridge)."
+                    )
+                    self.game.domain_effects._resume_after_domain_activation_follow_up()
+                    return
+                if not act_b.startswith("build_pay "):
+                    return
+                parts_b = act_b.split()
+                if len(parts_b) < 3:
+                    return
+                try:
+                    gp = int(parts_b[1])
+                    mp = int(parts_b[2])
+                except (TypeError, ValueError):
+                    return
+                # `gp`/`mp` are TOTAL payment (treasury + tomes). The optional
+                # trailing `tg ts tm` are the tome portion: `build_pay g m tg ts tm`.
+                build_tome_payment = None
+                if len(parts_b) >= 6:
+                    try:
+                        build_tome_payment = self._sanitize_tome_payment({
+                            "gold": int(parts_b[3]),
+                            "strength": int(parts_b[4]),
+                            "magic": int(parts_b[5]),
+                        })
+                    except (TypeError, ValueError):
+                        build_tome_payment = None
+                domain_name_b = prc_b.get("domain_name", "Domain")
+                if build_tome_payment and (
+                    build_tome_payment["gold"] > gp
+                    or build_tome_payment["strength"] > 0
+                    or build_tome_payment["magic"] > mp
+                ):
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} could not build "
+                        f"\"{domain_name_b}\" (Ararmartin Ridge): tome payment exceeds the amount being paid."
+                    )
+                    return
+                domain_id_b = int(prc_b.get("domain_id"))
                 self.game.pending_required_choice = None
                 self.game.action_required["action"] = ""
                 self.game.action_required["id"] = self.game.game_id
-                self.build_domain(player_id, domain_id_db, gp=gold_cost_db)
+                redeemed = None
+                try:
+                    if build_tome_payment and any(build_tome_payment.values()):
+                        redeemed = self.redeem_tomes_to_score(player_id, build_tome_payment)
+                    self.build_domain(player_id, domain_id_b, gp=gp, mp=mp)
+                except ValueError as e:
+                    if redeemed:
+                        self.refund_tomes_from_score(player_id, redeemed)
+                    # Keep the payment prompt open so the player can retry.
+                    self.game.pending_required_choice = prc_b
+                    self.game.action_required["action"] = "build_domain_payment"
+                    self.game.action_required["id"] = player_id
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} could not build "
+                        f"\"{domain_name_b}\" (Ararmartin Ridge): {e}"
+                    )
+                    return
                 if not (self.game.action_required.get("action") and self.game.action_required.get("id") != self.game.game_id):
                     self.game.domain_effects._resume_after_domain_activation_follow_up()
                 return
@@ -516,6 +624,31 @@ class PlayerActionsEngine:
                     mp = int(parts[3])
                 except (TypeError, ValueError):
                     return
+                # `gp`/`sp`/`mp` are TOTAL payment (treasury + tomes). The optional
+                # trailing `tg ts tm` are the tome portion: `slay_pay gp sp mp tg ts tm`.
+                # We redeem those tomes into the treasury up front, then run the
+                # unchanged slay payment (which then simply spends them).
+                slay_tome_payment = None
+                if len(parts) >= 7:
+                    try:
+                        slay_tome_payment = self._sanitize_tome_payment({
+                            "gold": int(parts[4]),
+                            "strength": int(parts[5]),
+                            "magic": int(parts[6]),
+                        })
+                    except (TypeError, ValueError):
+                        slay_tome_payment = None
+                if slay_tome_payment and (
+                    slay_tome_payment["gold"] > gp
+                    or slay_tome_payment["strength"] > sp
+                    or slay_tome_payment["magic"] > mp
+                ):
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} could not slay "
+                        f"\"{prc0.get('monster_name', '?')}\" via \"{source_label}\": "
+                        f"tome payment exceeds the amount being paid."
+                    )
+                    return
                 event_id_opt = prc0.get("event_id")
                 monster_id = int(prc0.get("monster_id", -1)) if event_id_opt is None else None
                 if event_id_opt is None and monster_id < 0:
@@ -526,12 +659,17 @@ class PlayerActionsEngine:
                 # special_reward opened a follow-up prompt (e.g. Warg's "choose
                 # m 3 <citizens where name==Peasant>") that we must NOT clobber.
                 _prior_concurrent = getattr(self.game, "concurrent_action", None)
+                redeemed = None
                 try:
+                    if slay_tome_payment and any(slay_tome_payment.values()):
+                        redeemed = self.redeem_tomes_to_score(player_id, slay_tome_payment)
                     self.slay_monster(player_id, monster_id, sp, mp, gp, event_id=event_id_opt)
                 except ValueError as e:
                     # Payment didn't validate; surface in the log so the player
                     # sees why nothing happened, but keep the prompt open so they
                     # can retry with a corrected payment.
+                    if redeemed:
+                        self.refund_tomes_from_score(player_id, redeemed)
                     self.game._log_game_event(
                         f"{self.game._player_label(player_id)} could not slay "
                         f"\"{prc0.get('monster_name', '?')}\" via \"{source_label}\": {e}"
@@ -1181,6 +1319,8 @@ class PlayerActionsEngine:
                     banished = self.game.payouts._banish_center_monster(stack_idx)
                 elif card_kind == "domain":
                     banished = self.game.payouts._banish_center_domain(stack_idx)
+                elif card_kind == "noble":
+                    banished = self.game.payouts._banish_center_noble(stack_idx)
                 else:
                     banished = None
                 if not banished:
@@ -1472,6 +1612,8 @@ class PlayerActionsEngine:
         known on the tableau, but do not count for duplicate citizen costs.
 
         Payment is (gold, magic, strength); only gold and magic may be used (strength must be 0).
+        Tomes are redeemed into the player's score before this runs (see
+        `redeem_tomes_to_score`), so they appear here as ordinary resources.
         """
         gp, sp, mp = _n(gp), _n(sp), _n(mp)
 
@@ -1708,9 +1850,10 @@ class PlayerActionsEngine:
             if not player:
                 raise ValueError("Player not found.")
 
-            # Domain role prerequisites must be satisfied by owned citizens.
-            # Starters and already-owned domains do not count toward this gate.
-            have = self.game._player_citizen_role_totals(player)
+            # Domain role prerequisites must be satisfied by owned Citizens
+            # and/or Nobles (Crimson Seas). Starters and already-owned domains
+            # do not count toward this gate.
+            have = self.game._player_build_role_totals(player)
             req_shadow = int(getattr(top, "shadow_count", 0) or 0)
             req_holy = int(getattr(top, "holy_count", 0) or 0)
             req_soldier = int(getattr(top, "soldier_count", 0) or 0)
@@ -1726,7 +1869,7 @@ class PlayerActionsEngine:
                 missing.append(f"worker {have['worker']}/{req_worker}")
             if missing:
                 raise ValueError(
-                    "Domain role requirements not met (citizens only): " + ", ".join(missing)
+                    "Domain role requirements not met (citizens and/or nobles): " + ", ".join(missing)
                 )
 
             gold_cost = int(getattr(top, "gold_cost", 0) or 0)
@@ -1765,7 +1908,20 @@ class PlayerActionsEngine:
 
         raise ValueError("Domain not available to purchase.")
 
-    def buy_goods(self, player_id, slot_indices):
+    def _validate_gold_tome_portion(self, player, tome_payment, gold_cost, what):
+        """Goods/Tomes cost gold specifically (no substitution), so only Gold
+        tomes apply. Validate the requested Gold-tome count is legal and
+        available (without flipping anything yet) and return it."""
+        tome_counts = self._sanitize_tome_payment(tome_payment)
+        if tome_counts["strength"] or tome_counts["magic"]:
+            raise ValueError(f"Only Gold tomes can pay for {what}.")
+        tg = tome_counts["gold"]
+        if tg > gold_cost:
+            raise ValueError("Too many tomes for this purchase.")
+        self._verify_tome_payment_available(player, {"gold": tg, "strength": 0, "magic": 0})
+        return tg
+
+    def buy_goods(self, player_id, slot_indices, tome_payment=None):
         """Sail to Araby and buy Goods tokens in one Sail action.
 
         A single Sail (costing 1 Map total) may buy ANY subset of the 3 face-up
@@ -1773,6 +1929,9 @@ class PlayerActionsEngine:
         the purchase the board refreshes per the rulebook: the unbought tokens
         cascade down to the cheapest (bottom) slots preserving order, and new
         tokens are drawn from the supply to fill the emptied top slots.
+
+        `tome_payment` optionally funds part of the gold cost with face-up Gold
+        tomes (flipped face-down here, refreshed at end of turn).
         """
         from game_setup import GOODS_SLOT_COSTS
 
@@ -1801,15 +1960,18 @@ class PlayerActionsEngine:
         if not player:
             raise ValueError("Player not found.")
 
-        gold_cost = sum(int(GOODS_SLOT_COSTS[i]) for i in indices)
+        goods_discount = 1 if self.game._player_has_action_effect_flag(player, "action.portofdrake") else 0
+        gold_cost = sum(max(0, int(GOODS_SLOT_COSTS[i]) - goods_discount) for i in indices)
         map_cost = 1
-        if int(getattr(player, "gold_score", 0)) < gold_cost:
+        tg = self._validate_gold_tome_portion(player, tome_payment, gold_cost, "goods")
+        if int(getattr(player, "gold_score", 0)) + tg < gold_cost:
             raise ValueError(f"Need {gold_cost} gold to buy the selected goods.")
         if int(getattr(player, "map_score", 0)) < map_cost:
             raise ValueError("Need 1 map to sail.")
 
         bought = [slots[i] for i in indices]
         before = self.game._player_scores_line(player)
+        redeemed = self.redeem_tomes_to_score(player_id, {"gold": tg}) if tg else None
         player.gold_score = int(player.gold_score) - gold_cost
         player.map_score = int(player.map_score) - map_cost
         player.owned_goods.extend(bought)
@@ -1818,18 +1980,22 @@ class PlayerActionsEngine:
             self.game.goods_slots, self.game.goods_supply, indices)
 
         after = self.game._player_scores_line(player)
+        suffix = self._tome_pay_log_suffix(redeemed) if redeemed else ""
         self.game._log_game_event(
             f"{self.game._player_label(player_id)} sailed to Araby and bought "
-            f"{', '.join(bought)} for {gold_cost} gold + 1 map; scores {before} -> {after}"
+            f"{', '.join(bought)} for {gold_cost} gold + 1 map{suffix}; scores {before} -> {after}"
         )
 
-    def buy_tomes(self, player_id, slot_indices):
+    def buy_tomes(self, player_id, slot_indices, tome_payment=None):
         """Sail to Nae Aerie and buy Tome tokens in one Sail action.
 
         Mirrors `buy_goods`: a single Sail (1 Map total) may buy any subset of
         the 3 face-up Tome slots, each at its printed gold price
         (TOME_SLOT_COSTS). Afterwards the board refreshes — unbought tomes
         cascade down to the cheapest slots and fresh tomes fill the top.
+
+        `tome_payment` optionally funds part of the gold cost with face-up Gold
+        tomes (redeemed up front, refreshed at end of turn).
         """
         from game_setup import TOME_SLOT_COSTS
 
@@ -1857,35 +2023,42 @@ class PlayerActionsEngine:
         if not player:
             raise ValueError("Player not found.")
 
-        gold_cost = sum(int(TOME_SLOT_COSTS[i]) for i in indices)
+        tome_discount = 1 if self.game._player_has_action_effect_flag(player, "action.browncoatssanctum") else 0
+        gold_cost = sum(max(0, int(TOME_SLOT_COSTS[i]) - tome_discount) for i in indices)
         map_cost = 1
-        if int(getattr(player, "gold_score", 0)) < gold_cost:
+        tg = self._validate_gold_tome_portion(player, tome_payment, gold_cost, "tomes")
+        if int(getattr(player, "gold_score", 0)) + tg < gold_cost:
             raise ValueError(f"Need {gold_cost} gold to buy the selected tomes.")
         if int(getattr(player, "map_score", 0)) < map_cost:
             raise ValueError("Need 1 map to sail.")
 
         bought = [slots[i] for i in indices]
         before = self.game._player_scores_line(player)
+        redeemed = self.redeem_tomes_to_score(player_id, {"gold": tg}) if tg else None
         player.gold_score = int(player.gold_score) - gold_cost
         player.map_score = int(player.map_score) - map_cost
-        player.owned_tomes.extend(bought)
+        player.owned_tomes.extend(Tome(t) for t in bought)
 
         self.game.tome_slots = self._packed_island_slots(
             self.game.tome_slots, self.game.tome_supply, indices)
 
         after = self.game._player_scores_line(player)
+        suffix = self._tome_pay_log_suffix(redeemed) if redeemed else ""
         self.game._log_game_event(
             f"{self.game._player_label(player_id)} sailed to Nae Aerie and bought "
-            f"{', '.join(bought)} for {gold_cost} gold + 1 map; scores {before} -> {after}"
+            f"{', '.join(bought)} for {gold_cost} gold + 1 map{suffix}; scores {before} -> {after}"
         )
 
-    def rescue_noble(self, player_id, slot_index, resource):
+    def rescue_noble(self, player_id, slot_index, resource, tome_payment=None):
         """Sail to Amarynth and rescue 1 Noble from a face-up slot.
 
         Costs 1 Map plus 9 of a single chosen Resource type (Wild), with an
         additional 1 of that same resource for each Noble already in the
         player's tableau. Only one noble may be rescued per visit. The emptied
         slot is refilled directly from the Noble deck (no cascade).
+
+        `tome_payment` optionally funds part of the cost with face-up Tomes of
+        the chosen resource type (redeemed up front, refreshed at end of turn).
         """
         if not self.game.crimson_seas_enabled():
             raise ValueError("Nobles are only available in the Crimson Seas preset.")
@@ -1908,14 +2081,30 @@ class PlayerActionsEngine:
             raise ValueError("Player not found.")
 
         owned = len(getattr(player, "owned_nobles", []) or [])
-        cost = 9 + owned
-        if int(getattr(player, attr, 0) or 0) < cost:
+        # Murat Reis (Domain 73) waives the "+Wild" surcharge — the +1 per Noble
+        # already in your tableau — so the rescue stays a flat 9 of one resource.
+        surcharge = 0 if self.game._player_has_action_effect_flag(player, "action.muratreis") else owned
+        cost = 9 + surcharge
+
+        # The rescue is paid in a single resource type, so only tomes of that
+        # same type may help (they spend as that resource).
+        tome_counts = self._sanitize_tome_payment(tome_payment)
+        for k in ("gold", "strength", "magic"):
+            if k != res and tome_counts[k]:
+                raise ValueError(f"Only {res} tomes can pay for this rescue.")
+        tr = tome_counts[res]
+        if tr > cost:
+            raise ValueError("Too many tomes for this rescue.")
+        self._verify_tome_payment_available(player, tome_counts)
+
+        if int(getattr(player, attr, 0) or 0) + tr < cost:
             raise ValueError(f"Need {cost} {res} to rescue this noble.")
         if int(getattr(player, "map_score", 0)) < 1:
             raise ValueError("Need 1 map to sail.")
 
         noble = slots[idx]
         before = self.game._player_scores_line(player)
+        redeemed = self.redeem_tomes_to_score(player_id, {res: tr}) if tr else None
         setattr(player, attr, int(getattr(player, attr)) - cost)
         player.map_score = int(player.map_score) - 1
         try:
@@ -1935,9 +2124,10 @@ class PlayerActionsEngine:
         self.game.noble_slots[idx] = new_noble
 
         after = self.game._player_scores_line(player)
+        suffix = self._tome_pay_log_suffix(redeemed) if redeemed else ""
         self.game._log_game_event(
             f"{self.game._player_label(player_id)} sailed to Amarynth and rescued "
-            f"\"{getattr(noble, 'name', 'Noble')}\" for {cost} {res} + 1 map; scores {before} -> {after}"
+            f"\"{getattr(noble, 'name', 'Noble')}\" for {cost} {res} + 1 map{suffix}; scores {before} -> {after}"
         )
 
     def sail_exekratys(self, player_id, resource):
@@ -2003,9 +2193,35 @@ class PlayerActionsEngine:
         player = self.game._player_by_id(player_id)
         if not player:
             return False
-        player.owned_tomes.append(slots[idx])
+        player.owned_tomes.append(Tome(slots[idx]))
         self.game.tome_slots = self._packed_island_slots(
             self.game.tome_slots, self.game.tome_supply, [idx])
+        return True
+
+    def take_goods_from_slot(self, player_id, slot_index):
+        """Take 1 face-up Goods for free (e.g. a 'take 1 Goods' reward), then refresh.
+
+        Unlike `buy_goods` this costs no gold and no map — the player takes the
+        chosen face-up goods into their tableau and the Araby row refreshes
+        (cascade down + redraw) like any other take.
+        """
+        slots = self.game.goods_slots
+        try:
+            idx = int(slot_index)
+        except (TypeError, ValueError):
+            return False
+        if idx < 0 or idx >= len(slots) or not slots[idx]:
+            return False
+        player = self.game._player_by_id(player_id)
+        if not player:
+            return False
+        goods = slots[idx]
+        player.owned_goods.append(goods)
+        self.game.goods_slots = self._packed_island_slots(
+            self.game.goods_slots, self.game.goods_supply, [idx])
+        self.game._log_game_event(
+            f"{self.game._player_label(player_id)} gained Goods \"{goods}\" (free reward)."
+        )
         return True
 
     def take_noble_from_slot(self, player_id, slot_index):
@@ -2044,6 +2260,127 @@ class PlayerActionsEngine:
             f"\"{getattr(noble, 'name', 'Noble')}\" (free reward)."
         )
         return True
+
+    # ── Tome payment (Crimson Seas) ─────────────────────────────────────────
+    # A face-up Tome can be flipped face-down to pay 1 of its resource type
+    # (gold/strength/magic) for a market/sail action, refreshing at end of turn.
+    # Rather than thread a tome split through every cost validator, we convert
+    # the chosen tomes into ordinary treasury resources up front
+    # (`redeem_tomes_to_score`): flip them face-down and credit their value to
+    # the player's score, so the existing unchanged payment paths simply spend
+    # them. The only invariant is that every redeemed unit is actually consumed
+    # by the action (callers redeem at most as much per type as the action
+    # spends); otherwise the leftover credit would be free resources.
+
+    @staticmethod
+    def _face_up_tome_counts(player):
+        counts = {"gold": 0, "strength": 0, "magic": 0}
+        for t in getattr(player, "owned_tomes", None) or []:
+            if getattr(t, "is_flipped", False):
+                continue
+            ttype = getattr(t, "tome_type", None)
+            if ttype in counts:
+                counts[ttype] += 1
+        return counts
+
+    @staticmethod
+    def _sanitize_tome_payment(tome_payment):
+        tp = tome_payment or {}
+        out = {}
+        for k in ("gold", "strength", "magic"):
+            try:
+                v = int(tp.get(k, 0) or 0)
+            except (TypeError, ValueError):
+                v = 0
+            out[k] = max(0, v)
+        return out
+
+    def _verify_tome_payment_available(self, player, counts):
+        avail = self._face_up_tome_counts(player)
+        for k in ("gold", "strength", "magic"):
+            if counts[k] > avail[k]:
+                raise ValueError(
+                    f"Not enough face-up {k} tomes (need {counts[k]}, have {avail[k]})."
+                )
+
+    def _spend_tomes(self, player, counts):
+        """Flip `counts[type]` face-up tomes of each type face-down. Assumes
+        `_verify_tome_payment_available` already passed."""
+        for k in ("gold", "strength", "magic"):
+            need = int(counts.get(k, 0) or 0)
+            if need <= 0:
+                continue
+            for t in getattr(player, "owned_tomes", None) or []:
+                if need <= 0:
+                    break
+                if getattr(t, "tome_type", None) == k and not getattr(t, "is_flipped", False):
+                    t.is_flipped = True
+                    need -= 1
+
+    def _unspend_tomes(self, player, counts):
+        """Inverse of `_spend_tomes`: flip `counts[type]` face-down tomes back
+        face-up (used to refund a redeem when an action then fails)."""
+        for k in ("gold", "strength", "magic"):
+            need = int(counts.get(k, 0) or 0)
+            if need <= 0:
+                continue
+            for t in getattr(player, "owned_tomes", None) or []:
+                if need <= 0:
+                    break
+                if getattr(t, "tome_type", None) == k and getattr(t, "is_flipped", False):
+                    t.is_flipped = False
+                    need -= 1
+
+    @staticmethod
+    def _tome_pay_log_suffix(counts):
+        parts = []
+        for k, short in (("gold", "g"), ("strength", "s"), ("magic", "m")):
+            n = int(counts.get(k, 0) or 0)
+            if n:
+                parts.append(f"{n}{short}")
+        return f" [tomes: {' '.join(parts)}]" if parts else ""
+
+    def redeem_tomes_to_score(self, player_id, tome_payment):
+        """Convert chosen face-up tomes into ordinary treasury resources so the
+        normal (unchanged) payment paths can spend them: flip them face-down and
+        credit their value to the player's score. Returns the applied
+        {gold,strength,magic} counts (pass them to `refund_tomes_from_score` if
+        the action then fails). Raises ValueError if the player lacks that many
+        face-up tomes.
+
+        Callers MUST ensure the action will spend at least the redeemed amount of
+        each resource type — leftover credit would become free resources.
+        """
+        counts = self._sanitize_tome_payment(tome_payment)
+        if not any(counts.values()):
+            return counts
+        player = self.game._player_by_id(player_id)
+        if not player:
+            raise ValueError("Player not found.")
+        self._verify_tome_payment_available(player, counts)
+        self._spend_tomes(player, counts)
+        player.gold_score = int(player.gold_score) + counts["gold"]
+        player.strength_score = int(player.strength_score) + counts["strength"]
+        player.magic_score = int(player.magic_score) + counts["magic"]
+        self.game._log_game_event(
+            f"{self.game._player_label(player_id)} flipped tomes to spend"
+            f"{self._tome_pay_log_suffix(counts)}."
+        )
+        return counts
+
+    def refund_tomes_from_score(self, player_id, counts):
+        """Undo `redeem_tomes_to_score` after a failed action: flip the tomes
+        back face-up and remove the credited resources from the score."""
+        counts = self._sanitize_tome_payment(counts)
+        if not any(counts.values()):
+            return
+        player = self.game._player_by_id(player_id)
+        if not player:
+            return
+        self._unspend_tomes(player, counts)
+        player.gold_score = int(player.gold_score) - counts["gold"]
+        player.strength_score = int(player.strength_score) - counts["strength"]
+        player.magic_score = int(player.magic_score) - counts["magic"]
 
     def take_resource(self, player_id, resource):
         """

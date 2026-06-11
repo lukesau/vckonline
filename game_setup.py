@@ -302,6 +302,12 @@ def load_game_data(
     # aren't implemented yet, so exclude them here until they ship rather than
     # letting them leak in.
     exclude_domain_expansions = ()
+    # Expansion whose entire domain set is force-included in the deal before the
+    # remaining slots are filled at random. Set by the crimsonseas preset so all
+    # of its domains always appear on the board; the fill pool is whatever
+    # domain_query/domain_expansion_filters resolve to (minus this expansion,
+    # which is already guaranteed).
+    guaranteed_domain_expansion = None
     # Preset-baked fixed selections (parallel to draft_selections but hard-coded
     # in the preset definition). When set, the citizen pool is narrowed to these
     # ids and the board is dealt exactly these 5 monster areas.
@@ -434,9 +440,15 @@ def load_game_data(
         case "crimsonseas":
             # Crimson Seas expansion preset:
             # - monsters/citizens: expansion = "crimsonseas"
-            # - domains: expansion in ("crimsonseas", "base")
-            # - dukes: all dukes (random across every expansion; default query)
-            # - events: every expansion (default all-events pool)
+            # - domains: always all of the Crimson Seas domains, then the
+            #   remaining slots filled at random. In "All" mode (default) the
+            #   fill pool is the full implemented domain pool; "Expansion" mode
+            #   (expansion_only) narrows the fill to base domains only (below).
+            # - dukes: Crimson Seas ships no dukes, so always use the full
+            #   cross-expansion pool for both All and Expansion modes.
+            # - events: every expansion (default all-events pool); the
+            #   expansion_only option scopes them to Crimson Seas like the other
+            #   expansion presets.
             # - starters: core Peasant/Knight plus the Crimson Seas -1/-1 starter
             #   (Coxswain; see `_choose_optional_starter`). The default starter
             #   query already loads all starters. If Crimson Seas has no -1/-1
@@ -444,7 +456,10 @@ def load_game_data(
             # Banned cards are still filtered by the shared domain/duke deal.
             monster_expansion_filters = ("crimsonseas",)
             citizen_expansion_filters = ("crimsonseas",)
-            domain_expansion_filters = ("crimsonseas", "base")
+            domain_query = "select_random_domains"
+            domain_expansion_filters = None
+            exclude_domain_expansions = ()
+            guaranteed_domain_expansion = "crimsonseas"
             duke_query = "select_random_dukes"
             choose_one_citizen_per_roll = True
             optional_starter_expansion = "crimsonseas"
@@ -495,6 +510,13 @@ def load_game_data(
             exclude_domain_expansions = ()
             duke_expansion_filters = ("base", "shadowvale")
             event_expansion_filters = ("shadowvale",)
+        elif preset == "crimsonseas":
+            # Still guarantee every Crimson Seas domain (guaranteed_domain_expansion
+            # stays set); only the fill pool changes, narrowing to base domains.
+            # Dukes stay on the full pool — Crimson Seas has none of its own.
+            domain_expansion_filters = ("crimsonseas", "base")
+            exclude_domain_expansions = ()
+            event_expansion_filters = ("crimsonseas",)
     try:
         my_connect = mariadb.connect(
             user="vckonline", password="vckonline", host="127.0.0.1", database="vckonline", port=3306
@@ -609,6 +631,28 @@ def load_game_data(
         # 20 valid domains.
         domain_stack_depth = 4 if len(player_list_from_lobby) == 5 else 3
         domains_needed = 5 * domain_stack_depth
+        # Crimson Seas seats its entire domain set every game; the leftover slots
+        # are topped up at random from whatever else survived filtering (the All
+        # pool is every implemented domain, the Expansion pool is base domains
+        # only). Pull the guaranteed rows out first so they can't be crowded out
+        # of the random deal, then fill the rest.
+        if guaranteed_domain_expansion:
+            guaranteed_rows = [
+                r for r in results
+                if (r.get("expansion") or "") == guaranteed_domain_expansion
+            ]
+            fill_rows = [
+                r for r in results
+                if (r.get("expansion") or "") != guaranteed_domain_expansion
+            ]
+            random.shuffle(guaranteed_rows)
+            random.shuffle(fill_rows)
+            fill_needed = domains_needed - len(guaranteed_rows)
+            if fill_needed <= 0:
+                results = guaranteed_rows[:domains_needed]
+            else:
+                results = guaranteed_rows + fill_rows[:fill_needed]
+            random.shuffle(results)
         if len(results) < domains_needed:
             hints = []
             if banned_domain_ids():
@@ -1119,6 +1163,7 @@ def load_game_data(
             "exhausted_stack": exhausted_stack,
             "banish_pile": [],
             "pending_payout_continuation": None,
+            "pending_bonus_sail": None,
             "end_game_triggered": False,
             "final_scores": None,
             "final_result": None,

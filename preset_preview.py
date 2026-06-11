@@ -70,6 +70,7 @@ def _preset_config(preset, expansion_only):
         "domain_query": "select_random_domains",
         "domain_expansion_filters": None,
         "exclude_domain_expansions": (),
+        "guaranteed_domain_expansion": None,
         "duke_query": "select_random_dukes",
         "duke_expansion_filters": None,
         "event_query": "select_all_events",
@@ -119,7 +120,10 @@ def _preset_config(preset, expansion_only):
         cfg.update(
             monster_expansion_filters=("crimsonseas",),
             citizen_expansion_filters=("crimsonseas",),
-            domain_expansion_filters=("crimsonseas", "base"),
+            domain_query="select_random_domains",
+            domain_expansion_filters=None,
+            exclude_domain_expansions=(),
+            guaranteed_domain_expansion="crimsonseas",
             choose_one_citizen_per_roll=True,
             optional_starter_expansion="crimsonseas",
         )
@@ -157,6 +161,12 @@ def _preset_config(preset, expansion_only):
             cfg["exclude_domain_expansions"] = ()
             cfg["duke_expansion_filters"] = ("base", "shadowvale")
             cfg["event_expansion_filters"] = ("shadowvale",)
+        elif preset == "crimsonseas":
+            # Crimson Seas domains stay guaranteed; only the fill pool narrows
+            # to base. Dukes keep the full pool (Crimson Seas ships none).
+            cfg["domain_expansion_filters"] = ("crimsonseas", "base")
+            cfg["exclude_domain_expansions"] = ()
+            cfg["event_expansion_filters"] = ("crimsonseas",)
 
     return cfg
 
@@ -327,11 +337,20 @@ def _preview_domains(cur, cfg, players):
     ]
     rows.sort(key=lambda r: int(r["id_domains"]))
     cards = [_card("domain", r["id_domains"], r["name"], r.get("expansion")) for r in rows]
+    guaranteed = cfg.get("guaranteed_domain_expansion")
+    if guaranteed:
+        guaranteed_label = _PRESET_LABELS.get(guaranteed, guaranteed)
+        note = (
+            f"All {guaranteed_label} domains are always dealt; the remaining slots "
+            "(5 at 2-4 players, 10 at 5 players) are filled at random from the rest of this pool."
+        )
+    else:
+        note = "5 stacks of 3 domains (4 each in 5-player games) are dealt at random from this pool."
     return {
         "key": "domains",
         "title": "Domains",
         "selection": "random",
-        "note": "5 stacks of 3 domains (4 each in 5-player games) are dealt at random from this pool.",
+        "note": note,
         "cards": cards,
     }
 

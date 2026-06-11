@@ -82,9 +82,18 @@ class DomainEffectsEngine:
         if not can_pay:
             return [-9999, 0, 0, 0]
         idx = {"g": 0, "s": 1, "m": 2, "v": 3}
-        pi, gi = idx[pay_k], idx[gain_k]
+        pi = idx[pay_k]
         payout[pi] -= pay_n
-        payout[gi] += gain_n
+        if gain_k == "p":
+            target = self.game._player_by_id(player.player_id)
+            if not target:
+                payout[0] = -9999
+                return payout
+            target.map_score = int(getattr(target, "map_score", 0)) + gain_n
+            self.game.harvest._bump_harvest_delta(target, 0, 0, 0, 0, gain_n)
+        else:
+            gi = idx[gain_k]
+            payout[gi] += gain_n
         return payout
 
     def _execute_manipulate_resources_self_convert_payout(self, raw, player_id):
@@ -154,6 +163,9 @@ class DomainEffectsEngine:
         elif gain_k == "v":
             player.victory_score = int(getattr(player, "victory_score", 0)) + gain_n
             self.game.harvest._bump_harvest_delta(player, 0, 0, 0, gain_n)
+        elif gain_k == "p":
+            player.map_score = int(getattr(player, "map_score", 0)) + gain_n
+            self.game.harvest._bump_harvest_delta(player, 0, 0, 0, 0, gain_n)
 
     def _parse_manipulate_action_end(self, passive_text):
         s = (passive_text or "").strip()

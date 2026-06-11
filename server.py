@@ -1094,6 +1094,15 @@ class ResourcePayment(BaseModel):
     magic: int = 0
 
 
+class TomePayment(BaseModel):
+    """How many face-up Tome tokens (per resource type) the client flips to help
+    pay an action (Crimson Seas). Counts are validated server-side against the
+    player's available face-up tomes; the flipped tomes refresh at end of turn."""
+    gold: int = 0
+    strength: int = 0
+    magic: int = 0
+
+
 class GameActionRequest(BaseModel):
     player_id: str
     action_type: str  # "hire_citizen", "build_domain", "slay_monster", "take_resource", "act_on_required_action", "submit_concurrent_action"
@@ -1113,6 +1122,8 @@ class GameActionRequest(BaseModel):
     magic_cost: Optional[int] = None
     # Preferred: explicit payment split (gold/strength/magic). If set, overrides legacy *_cost fields for that action.
     payment: Optional[ResourcePayment] = None
+    # Optional Crimson Seas tome contribution (per-type counts) toward the cost.
+    tome_payment: Optional[TomePayment] = None
     action: Optional[str] = None  # For act_on_required_action
     harvest_slot_key: Optional[str] = None  # harvest_card: e.g. "citizen:3:0"
     # submit_concurrent_action: which non-ordered prompt this responds to,
@@ -1131,6 +1142,31 @@ def _rollback_consumed_action(game):
         return
     game.actions_remaining = int(getattr(game, "actions_remaining", 0)) + 1
     game.tick_id = int(getattr(game, "tick_id", 0)) - 1
+
+
+def resolve_tome_payment(req: GameActionRequest):
+    if req.tome_payment is None:
+        return None
+    return {
+        "gold": int(req.tome_payment.gold or 0),
+        "strength": int(req.tome_payment.strength or 0),
+        "magic": int(req.tome_payment.magic or 0),
+    }
+
+
+def _redeem_payment_tomes(game, req: GameActionRequest, g, s, m):
+    """For hire/build/slay: convert the requested face-up Tomes into treasury
+    resources up front so the normal payment path spends them. `g/s/m` is the
+    TOTAL payment (treasury + tomes), so each tome count must not exceed its
+    matching total (otherwise the leftover credit would be free resources).
+    Returns the redeemed counts (pass to `refund_tomes_from_score` on failure)
+    or None. Raises ValueError on an illegal/unavailable request."""
+    tome = resolve_tome_payment(req)
+    if tome is None or not any(tome.values()):
+        return None
+    if tome["gold"] > int(g or 0) or tome["strength"] > int(s or 0) or tome["magic"] > int(m or 0):
+        raise ValueError("Tome payment exceeds the amount being paid.")
+    return game.redeem_tomes_to_score(req.player_id, tome)
 
 
 def resolve_action_payment(req: GameActionRequest):
@@ -1792,12 +1828,18 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             if not game.consume_player_action(request.player_id, action_type="hire_citizen"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             g, s, m = resolve_action_payment(request)
+            redeemed = None
             try:
+                redeemed = _redeem_payment_tomes(game, request, g, s, m)
                 game.hire_citizen(request.player_id, request.citizen_id, g, m, s)
             except ValueError as e:
+                if redeemed:
+                    game.refund_tomes_from_score(request.player_id, redeemed)
                 _rollback_consumed_action(game)
                 raise HTTPException(status_code=400, detail=str(e))
             except Exception:
+                if redeemed:
+                    game.refund_tomes_from_score(request.player_id, redeemed)
                 _rollback_consumed_action(game)
                 raise
             game.finish_turn_if_no_actions_remaining()
@@ -1811,12 +1853,18 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             if not game.consume_player_action(request.player_id, action_type="build_domain"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             g, s, m = resolve_action_payment(request)
+            redeemed = None
             try:
+                redeemed = _redeem_payment_tomes(game, request, g, s, m)
                 game.build_domain(request.player_id, request.domain_id, g, m, s)
             except ValueError as e:
+                if redeemed:
+                    game.refund_tomes_from_score(request.player_id, redeemed)
                 _rollback_consumed_action(game)
                 raise HTTPException(status_code=400, detail=str(e))
             except Exception:
+                if redeemed:
+                    game.refund_tomes_from_score(request.player_id, redeemed)
                 _rollback_consumed_action(game)
                 raise
             game.finish_turn_if_no_actions_remaining()
@@ -1830,7 +1878,9 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             if not game.consume_player_action(request.player_id, action_type="slay_monster"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             g, s, m = resolve_action_payment(request)
+            redeemed = None
             try:
+                redeemed = _redeem_payment_tomes(game, request, g, s, m)
                 game.slay_monster(
                     request.player_id,
                     request.monster_id,
@@ -1838,9 +1888,13 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                     event_id=request.event_id,
                 )
             except ValueError as e:
+                if redeemed:
+                    game.refund_tomes_from_score(request.player_id, redeemed)
                 _rollback_consumed_action(game)
                 raise HTTPException(status_code=400, detail=str(e))
             except Exception:
+                if redeemed:
+                    game.refund_tomes_from_score(request.player_id, redeemed)
                 _rollback_consumed_action(game)
                 raise
             game.finish_turn_if_no_actions_remaining()
@@ -1871,14 +1925,15 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             if not game.consume_player_action(request.player_id, action_type="buy_goods"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             try:
-                game.buy_goods(request.player_id, list(request.slot_indices))
+                game.buy_goods(request.player_id, list(request.slot_indices), tome_payment=resolve_tome_payment(request))
             except ValueError as e:
                 _rollback_consumed_action(game)
                 raise HTTPException(status_code=400, detail=str(e))
             except Exception:
                 _rollback_consumed_action(game)
                 raise
-            game.finish_turn_if_no_actions_remaining()
+            if not game.resolve_bonus_sail_if_consumed():
+                game.finish_turn_if_no_actions_remaining()
             should_snapshot = True
 
         elif request.action_type == "buy_tomes":
@@ -1887,14 +1942,15 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             if not game.consume_player_action(request.player_id, action_type="buy_tomes"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             try:
-                game.buy_tomes(request.player_id, list(request.slot_indices))
+                game.buy_tomes(request.player_id, list(request.slot_indices), tome_payment=resolve_tome_payment(request))
             except ValueError as e:
                 _rollback_consumed_action(game)
                 raise HTTPException(status_code=400, detail=str(e))
             except Exception:
                 _rollback_consumed_action(game)
                 raise
-            game.finish_turn_if_no_actions_remaining()
+            if not game.resolve_bonus_sail_if_consumed():
+                game.finish_turn_if_no_actions_remaining()
             should_snapshot = True
 
         elif request.action_type == "sail_exekratys":
@@ -1913,7 +1969,8 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             except Exception:
                 _rollback_consumed_action(game)
                 raise
-            game.finish_turn_if_no_actions_remaining()
+            if not game.resolve_bonus_sail_if_consumed():
+                game.finish_turn_if_no_actions_remaining()
             should_snapshot = True
 
         elif request.action_type == "rescue_noble":
@@ -1927,14 +1984,15 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             if not game.consume_player_action(request.player_id, action_type="rescue_noble"):
                 raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             try:
-                game.rescue_noble(request.player_id, int(request.slot_index), r)
+                game.rescue_noble(request.player_id, int(request.slot_index), r, tome_payment=resolve_tome_payment(request))
             except ValueError as e:
                 _rollback_consumed_action(game)
                 raise HTTPException(status_code=400, detail=str(e))
             except Exception:
                 _rollback_consumed_action(game)
                 raise
-            game.finish_turn_if_no_actions_remaining()
+            if not game.resolve_bonus_sail_if_consumed():
+                game.finish_turn_if_no_actions_remaining()
             should_snapshot = True
 
         elif request.action_type == "act_on_required_action":

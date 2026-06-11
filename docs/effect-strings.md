@@ -34,6 +34,11 @@ This document covers how effect strings work across the three card tables (citiz
 | Cloudrider's Camp | `s 3 + choose <citizens where role==soldier and gold_cost<=2>` | Gain 3s; prompt: take a soldier citizen worth ≤2g |
 | Wisborg | `manipulate_resources mode=self_convert pay=g:3 gain=v:3 optional=true` | Optionally pay 3g to gain 3vp |
 | Eye of Asteraten | `s 5 + slay` | Gain 5s, then prompt to slay an accessible monster (with normal payment) or pass |
+| Barbarossa Castle | `banish_center noble + choose g 3 s 3 m 3` | Crimson Seas: prompt to banish one face-up Amarynth Noble (the slot refills from the noble deck), then choose 3 Wild (gold / strength / magic). Compound legs can't lead with `choose`, so banish is listed first; resolution order doesn't matter. |
+| Brigand's Bay | `choose <goods>` | Crimson Seas: prompt to take any 1 face-up Araby Goods for free (no gold, no map); Araby then refreshes (cascade + redraw). `<goods>` expands to one pick per filled Araby slot, like `<noble>` / `t 1`. |
+| Daak Harbor | `choose t 1` | Crimson Seas: prompt to take any 1 face-up Nae Aerie Tome for free (no gold, no map); Nae Aerie then refreshes (cascade + redraw). |
+| Solo's Haven | `refresh_tomes` | Crimson Seas: flip all of the owner's spent (face-down) Tomes back face-up, so Tomes used earlier this turn can be reused immediately (e.g. pay for Solo's Haven with Tomes, then reuse them to buy something else the same turn). Bare verb; applies immediately with no prompt. |
+| Dampiar's Workshop | `g 3 + p 1 + sail` | Crimson Seas: gain 3 Gold + 1 Map, then a `may_sail` prompt offers one **free Sail** (buy goods / buy tomes / rescue noble / sail to Exekratys). The bonus sail spends no regular action but still pays its own gold/map cost (the +1 Map funds it). `sail` is a bare verb (like `slay` / `build_domain`) and must be the tail of the compound. Declining resumes the turn. |
 
 ### Domains — `passive_effect`
 
@@ -51,6 +56,11 @@ This document covers how effect strings work across the three card tables (citiz
 | Castle of the Seven Suns | `immunity.take` | Opponents cannot take resources or cards from the holder. Covers `steal`, `take_from_player`, and `take_owned`; does NOT cover `banish` / `flip` / event `all_lose`. The legacy string `immunity.steal` is also accepted for back-compat. |
 | The Violet Thorn | `action.slay manipulate_resources mode=gain gain=m:1` | Action phase: when **you** slay a Monster, gain 1 Magic (slayer-only; routes through `action.<verb>` gain passives) |
 | Raven's Outpost | `action.on_opponent_slay s 1` | Action phase: when an **opponent** slays a Monster, gain 1 Strength (every owner except the slayer). The sibling verb `action.on_any_slay <r> <n>` fires for every owner including the slayer. |
+| Avery Hollow | `roll.exekratys_immune` | Crimson Seas flag: the owner is exempt from the Exekratys 6-roll offering during **their own** Roll Phase (they keep their Wild instead of placing one in the pool). Subject to the recurring-passive build-turn cooldown. |
+| Browncoat's Sanctum | `effect.add action.browncoatssanctum` | Crimson Seas flag: Tomes cost the owner 1 gold less per Tome when buying from Nae Aerie. Subject to the recurring-passive build-turn cooldown. |
+| Port of Drake | `effect.add action.portofdrake` | Crimson Seas flag: Goods cost the owner 1 gold less per Goods when buying from Araby. Subject to the recurring-passive build-turn cooldown. |
+| Murat Reis | `effect.add action.muratreis` | Crimson Seas flag: when rescuing a Noble from Amarynth, the owner ignores the "+Wild" surcharge (+1 per Noble already in their tableau), paying a flat 9 of one resource type (+ 1 map). The noble-rescue analog of Emerald Stronghold's citizen `+` waiver. Subject to the recurring-passive build-turn cooldown. |
+| Tabula Tower | `action.end manipulate_resources mode=self_convert pay=g:1 gain=p:1 optional=true` | Crimson Seas end-of-action optional trade: the owner may pay 1 Gold to gain 1 Map. Uses the generic `domain_self_convert` prompt; `p` is Map. Subject to the recurring-passive build-turn cooldown. |
 
 ### Events — `activation_effect` / `passive_effect`
 
@@ -269,8 +279,9 @@ choose m 2 p 1                              # pick one: +2 magic or +1 map (Crim
 `g` = gold, `s` = strength, `m` = magic, `v`/`vp` = victory points, and `p` =
 **map** (the Crimson Seas "sail" resource). `m` was already magic, so maps use
 `p`. Maps are tracked on `Player.map_score`, surface in `harvest_delta["map"]`,
-and render with `/images/map.png`. There is currently no way to *spend* maps —
-they are only earned (citizen payouts, the `+1 Map` standard action) and shown.
+and render with `/images/map.png`. Maps are earned through `choose`/payout legs
+and can be spent by Sail actions; `manipulate_resources mode=self_convert`
+also supports `gain=p:N` for Tabula Tower-style trades.
 
 `t` = **tome**, another Crimson Seas resource. It appears as a `choose` leg
 (e.g. Skeleton Army's `choose g 4 t 1`). Outside Crimson Seas the tome leg is
@@ -346,6 +357,37 @@ Resolution differs by phase:
 `pending_required_choice.kind = "immediate_slay"` is the discriminator on
 both stages; `resume_kind` (`"domain_activation"` or `"harvest_pending_slay"`)
 tells the engine where to resume after the slay or pass.
+
+### 4c. `sail` — bare verb that opens an immediate may-Sail prompt (Crimson Seas)
+
+Used by Dampiar's Workshop (`g 3 + p 1 + sail`). The engine treats a bare
+`sail` token as: "the controlling player may immediately take one **free Sail**
+action." Like `slay`/`build_domain` it appears as the tail of a compound so the
+resource legs apply first (the `p 1` leg hands the player the Map the sail
+needs).
+
+```
+sail                # bare verb; tail of a compound, e.g. "g 3 + p 1 + sail"
+```
+
+Resolution (action phase only):
+
+- Opens `action_required.action = "may_sail"` with
+  `pending_required_choice.kind = "sail_opportunity"`, and flags
+  `pending_bonus_sail = <player_id>`.
+- While that flag is set, `consume_player_action` lets exactly one sail action
+  (`buy_goods` / `buy_tomes` / `rescue_noble` / `sail_exekratys`) run **without
+  spending a regular action** and without being blocked by the prompt. The sail
+  still pays its own gold/map cost.
+- On success the server calls `resolve_bonus_sail_if_consumed`, which clears the
+  flag + prompt and resumes the domain activation follow-up (restores
+  `standard_action` or ends the turn). A failed sail rolls back to the still-open
+  prompt so the player can retry.
+- Declining (`act_on_required_action` with `skip`) clears the bonus and resumes.
+
+The `may_sail` prompt is minimizable, so the player can also pick a specific
+target (e.g. a particular Amarynth Noble) directly on the Sail mat instead of
+using the prompt's destination buttons.
 
 ### 4a. `steal` — only exists in citizens
 

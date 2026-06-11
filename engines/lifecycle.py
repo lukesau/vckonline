@@ -148,6 +148,7 @@ class LifecycleEngine:
                     self.game.end_game_triggered = True
                     self.game._log_game_event(f"End-game condition met ({reason}); finishing this round.")
             self._reveal_hidden_domain_stack_tops()
+            self._refresh_finishing_player_tomes()
             self.game.turn_index = (self.game.turn_index + 1) % max(1, len(self.game.player_list))
             self.game.turn_number = int(self.game.turn_number) + 1
             if self.game.end_game_triggered and self.game.player_list[self.game.turn_index].is_first:
@@ -250,6 +251,7 @@ class LifecycleEngine:
                     self.game.end_game_triggered = True
                     self.game._log_game_event(f"End-game condition met ({reason}); finishing this round.")
             self._reveal_hidden_domain_stack_tops()
+            self._refresh_finishing_player_tomes()
             self.game.turn_index = (self.game.turn_index + 1) % max(1, len(self.game.player_list))
             self.game.turn_number = int(self.game.turn_number) + 1
             if self.game.end_game_triggered and self.game.player_list[self.game.turn_index].is_first:
@@ -317,6 +319,22 @@ class LifecycleEngine:
                 if self.game.phase == 'action':
                     break
 
+        # Crimson Seas "you may Sail" bonus (Dampiar's Workshop). While the
+        # may_sail prompt is open for this player, a single sail action runs for
+        # free: it does not spend a regular action and is not blocked by the
+        # may_sail prompt below. The bonus + prompt are cleared once the sail
+        # succeeds (resolve_bonus_sail_if_consumed); a failed sail rolls back to
+        # the still-open prompt so the player can retry.
+        if (
+            action_type in ("buy_goods", "buy_tomes", "rescue_noble", "sail_exekratys")
+            and getattr(self.game, "pending_bonus_sail", None) == player_id
+            and str((self.game.action_required or {}).get("action", "")) == "may_sail"
+            and player_id == self.current_player_id()
+        ):
+            self.game._last_consumed_action_marker = ("bonus_sail", None)
+            self.game.tick_id += 1
+            return True
+
         # Block while waiting on any active per-player prompt that isn't the
         # idle "standard_action" placeholder. This includes the new immediate
         # slay prompts (choose_monster_slay / slay_monster_payment), as well as
@@ -336,6 +354,7 @@ class LifecycleEngine:
                 "choose_monster_slay",
                 "slay_monster_payment",
                 "choose_domain_to_build",
+                "may_sail",
                 "event_gain_action",
                 "event_active_choose",
                 "event_sequence",
@@ -374,6 +393,26 @@ class LifecycleEngine:
         self.game.tick_id = int(getattr(self.game, "tick_id", 0)) - 1
         self.game._last_consumed_action_marker = None
         self._refresh_action_phase_required(self.current_player_id())
+
+    def resolve_bonus_sail_if_consumed(self):
+        """Finalize a Dampiar's Workshop free Sail after the sail action succeeded.
+
+        Returns True when the just-completed sail consumed the may_sail bonus
+        (so the caller skips the normal finish_turn handling): clears the bonus
+        flag + the may_sail prompt and resumes the domain activation follow-up,
+        which restores standard_action or ends the turn as appropriate.
+        """
+        if getattr(self.game, "_last_consumed_action_marker", None) != ("bonus_sail", None):
+            return False
+        self.game._last_consumed_action_marker = None
+        self.game.pending_bonus_sail = None
+        ar = self.game.action_required if isinstance(self.game.action_required, dict) else None
+        if ar and str(ar.get("action", "")) == "may_sail":
+            ar["action"] = ""
+            ar["id"] = self.game.game_id
+        self.game.pending_required_choice = None
+        self.game.domain_effects._resume_after_domain_activation_follow_up()
+        return True
 
     def finish_turn_if_no_actions_remaining(self):
         """After a successful standard action, advance roll/harvest if the turn was just spent."""
@@ -487,8 +526,18 @@ class LifecycleEngine:
         if self.game.crimson_seas_enabled():
             sixes = sum(1 for v in (fd1, fd2, fd1 + fd2) if v == 6)
             if sixes:
-                self.game.pending_exekratys_offerings = sixes
-                self.game.pending_exekratys_offering_player = player_id
+                roller = self.game._player_by_id(player_id)
+                # Avery Hollow (Domain #67): "During your Roll Phase, you don't
+                # lose Wild on a 6." The owner is exempt from the offering when
+                # they are the one who rolled the 6(s).
+                if roller and self.game._player_has_action_effect_flag(roller, "roll.exekratys_immune"):
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} rolled a 6 but is protected from the "
+                        f"Exekratys offering (Avery Hollow)."
+                    )
+                else:
+                    self.game.pending_exekratys_offerings = sixes
+                    self.game.pending_exekratys_offering_player = player_id
         self.game.tick_id += 1
         who = self.game._player_label(self.current_player_id())
         if fd1 == rd1 and fd2 == rd2:
@@ -594,6 +643,17 @@ class LifecycleEngine:
                 continue
             top.toggle_visibility(True)
             top.toggle_accessibility(True)
+
+    def _refresh_finishing_player_tomes(self):
+        """End-of-turn Tome refresh (Crimson Seas): flip all of the finishing
+        player's face-down (spent-this-turn) tomes back face-up. Called for the
+        player whose turn is ending, before the seat advances."""
+        player = self.game._player_by_id(self.current_player_id())
+        if not player:
+            return
+        for tome in getattr(player, "owned_tomes", None) or []:
+            if getattr(tome, "is_flipped", False):
+                tome.is_flipped = False
 
     def action_phase(self):
         return

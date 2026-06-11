@@ -36,6 +36,25 @@ def make_margrave(starter_id):
     )
 
 
+def make_coxswain(starter_id, gold_on=1, gold_off=1):
+    """A -1/-1 starter with the `doubles_or_no_payout_once` trigger.
+
+    Mirrors the real Coxswain: it has both a `doubles` leg and a `no_payout`
+    leg, but the rulebook says it activates AT MOST ONCE per harvest even when
+    both conditions are met. The `once` marker makes the in-band doubles
+    activation suppress the end-of-harvest no_payout leg. A flat gold payout
+    keeps the harvest non-interactive.
+    """
+    return Starter(
+        starter_id, "Coxswain", -1, -1,
+        gold_on, gold_off,
+        0, 0, 0, 0,
+        False, False, "", "",
+        "test",
+        "doubles_or_no_payout_once",
+    )
+
+
 def make_sum_match_citizen(citizen_id, roll_sum):
     """Citizen that fires when die_sum == roll_sum, paying 1 gold."""
     return Citizen(
@@ -64,6 +83,8 @@ def make_doubles_harvest_game(player_specs, die=3):
         p.victory_score = 0
         if spec.get("herald"):
             p.owned_starters.append(make_herald(10 + i))
+        if spec.get("coxswain"):
+            p.owned_starters.append(make_coxswain(20 + i))
         cs = spec.get("citizen_sum")
         if cs is not None:
             p.owned_citizens.append(make_sum_match_citizen(100 + i, cs))
@@ -153,6 +174,58 @@ class HeraldDoubleTriggerTests(unittest.TestCase):
         self.assertEqual(players[1].magic_score, 0)
         self.assertEqual(players[1].victory_score, 0)
         self.assertEqual(game.action_required.get("action"), "")
+
+
+class CoxswainOnceOnlyTests(unittest.TestCase):
+    """Coxswain (`doubles_or_no_payout_once`) fires at most once per harvest."""
+
+    def test_doubles_no_citizens_fires_once(self):
+        # Doubles roll, no dice-value citizens: the Coxswain's in-band doubles
+        # leg fires and MUST suppress its own no_payout leg, so it pays out
+        # exactly once (flat gold 1), unlike the Herald which pays twice.
+        game, players = make_doubles_harvest_game(
+            [{"coxswain": True}, {"coxswain": True}],
+            die=3,
+        )
+
+        game.advance_tick()
+
+        self.assertEqual(players[0].gold_score, 1, "Coxswain fires once on doubles+no_payout")
+        self.assertEqual(players[1].gold_score, 1, "Coxswain fires once on doubles+no_payout")
+        self.assertIsNone(game.concurrent_action)
+
+    def test_no_doubles_no_citizens_fires_once_via_no_payout(self):
+        # No doubles and no citizens fired: only the end-of-harvest no_payout
+        # leg fires, paying out once.
+        game, players = make_doubles_harvest_game(
+            [{"coxswain": True}, {"coxswain": True}],
+            die=2,
+        )
+        game.die_two = 5
+        game.die_sum = game.die_one + game.die_two
+
+        game.advance_tick()
+
+        self.assertEqual(players[0].gold_score, 1, "Coxswain no_payout leg fires once")
+        self.assertEqual(players[1].gold_score, 1, "Coxswain no_payout leg fires once")
+        self.assertIsNone(game.concurrent_action)
+
+    def test_doubles_with_citizen_activation_fires_once(self):
+        # Doubles roll where a citizen also fires: the citizen activation plus
+        # the Coxswain's own doubles leg both suppress its no_payout leg, so the
+        # Coxswain still contributes exactly one activation.
+        game, players = make_doubles_harvest_game(
+            [{"coxswain": True, "citizen_sum": 6}, {"coxswain": True}],
+            die=3,
+        )
+
+        game.advance_tick()
+
+        self.assertEqual(players[0].gold_score, 2,
+                         "Coxswain doubles leg (1) + citizen (1), no second no_payout fire")
+        self.assertEqual(players[1].gold_score, 1,
+                         "Coxswain-only player fires once on doubles")
+        self.assertIsNone(game.concurrent_action)
 
 
 if __name__ == "__main__":

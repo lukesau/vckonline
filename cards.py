@@ -71,7 +71,9 @@ class Starter(Card):
         self.special_payout_off_turn = special_payout_off_turn
         self.expansion = expansion
         # Non-dice activation gate. Empty string -> use roll_match. Substrings
-        # "doubles" and "no_payout" are recognized by the harvest engine.
+        # "doubles" and "no_payout" are recognized by the harvest engine. The
+        # extra "once" marker (Coxswain) means the doubles + no_payout legs fire
+        # at most once per harvest instead of stacking into two activations.
         self.activation_trigger = activation_trigger or ""
         # Starters are dealt directly to player tableaus and are always public.
         self.toggle_visibility(True)
@@ -526,6 +528,36 @@ class Noble(Card):
             special_duke_payout=data.get("special_duke_payout"),
             expansion=data.get("expansion"),
         )
+        return _apply_persisted_card_flags(card, data)
+
+
+class Tome(Card):
+    """Crimson Seas Tome token (Nae Aerie). A reusable resource: it sits face-up
+    in the owner's tableau and can be flipped face-down (`is_flipped`) to spend
+    it as 1 of the resource depicted on it (`tome_type` is "gold", "strength",
+    or "magic"). At the end of the owner's turn every face-down tome flips back
+    face-up. On the mat / in the supply tomes are still bare type strings; they
+    only become Tome objects once they enter a player's tableau.
+    """
+
+    def __init__(self, tome_type, is_flipped=False):
+        super().__init__()
+        self.tome_type = (tome_type or "").strip().lower()
+        self.name = f"{self.tome_type.capitalize()} Tome" if self.tome_type else "Tome"
+        self.is_flipped = bool(is_flipped)
+        self.toggle_visibility(True)
+
+    def to_dict(self):
+        return {
+            **super().to_dict(),
+            "tome_type": self.tome_type,
+            "name": self.name,
+            "is_flipped": self.is_flipped,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        card = cls(data.get("tome_type"), is_flipped=bool(data.get("is_flipped", False)))
         return _apply_persisted_card_flags(card, data)
 
 

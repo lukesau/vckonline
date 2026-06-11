@@ -106,6 +106,8 @@ class ChooseEngine:
                 norm_parts.append(f"<citizens {int(o.get('amount', 1) or 1)}>")
             elif o["token"] == "noble":
                 norm_parts.append("<noble>")
+            elif o["token"] == "goods":
+                norm_parts.append("<goods>")
             elif o["token"] == "citizens_where":
                 spec = o.get("spec", {})
                 extras = o.get("extras") or []
@@ -138,6 +140,10 @@ class ChooseEngine:
         # Expanded into one pick per face-up slot, like the tome reward.
         if s.lower() in ("noble", "nobles"):
             return {"token": "noble", "amount": 1}
+        # "<goods>": take any 1 of the face-up Araby goods (Crimson Seas).
+        # Expanded into one pick per face-up slot, like the noble/tome rewards.
+        if s.lower() in ("goods", "good"):
+            return {"token": "goods", "amount": 1}
         parts = self.game.payouts._tokenize_payout(s)
         if len(parts) >= 5 and parts[0].lower() == "count" and parts[1].lower() == "owned_monster_name":
             name = parts[2]
@@ -358,16 +364,25 @@ class ChooseEngine:
             return int(getattr(player, "magic_score", 0) or 0) >= pay_n
         if pay_k == "v":
             return int(getattr(player, "victory_score", 0) or 0) >= pay_n
+        if pay_k == "p":
+            return int(getattr(player, "map_score", 0) or 0) >= pay_n
         return False
 
     def _apply_self_convert_kv_to_player(self, player, kv):
         pay_k, pay_n = _parse_resource_kv(kv.get("pay", ""))
         gain_k, gain_n = _parse_resource_kv(kv.get("gain", ""))
         idx = {"g": 0, "s": 1, "m": 2, "v": 3}
-        pi, gi = idx[pay_k], idx[gain_k]
         payout = [0, 0, 0, 0]
-        payout[pi] -= pay_n
-        payout[gi] += gain_n
+        if pay_k == "p":
+            player.map_score = int(getattr(player, "map_score", 0)) - pay_n
+            self.game.harvest._bump_harvest_delta(player, 0, 0, 0, 0, -pay_n)
+        else:
+            payout[idx[pay_k]] -= pay_n
+        if gain_k == "p":
+            player.map_score = int(getattr(player, "map_score", 0)) + gain_n
+            self.game.harvest._bump_harvest_delta(player, 0, 0, 0, 0, gain_n)
+        else:
+            payout[idx[gain_k]] += gain_n
         player.gold_score = int(player.gold_score) + payout[0]
         player.strength_score = int(player.strength_score) + payout[1]
         player.magic_score = int(player.magic_score) + payout[2]
@@ -433,6 +448,13 @@ class ChooseEngine:
                     continue
                 if not any(getattr(self.game, "noble_slots", []) or []):
                     continue
+            # Goods are a Crimson Seas mechanic. Drop the leg outside the preset
+            # or when no goods are face-up in Araby to take.
+            if token == "goods":
+                if not crimson_seas:
+                    continue
+                if not any(getattr(self.game, "goods_slots", []) or []):
+                    continue
             out.append(opt)
         return out
 
@@ -472,6 +494,23 @@ class ChooseEngine:
                         "amount": 1,
                         "noble_id": getattr(noble, "noble_id", None),
                         "name": getattr(noble, "name", ""),
+                        "slot_index": i,
+                    })
+                continue
+            if token == "goods":
+                # "Take a Goods": expand into one pickable option per face-up
+                # Araby goods. The player takes the chosen one for free (no gold,
+                # no map); the row then refreshes (cascade + redraw).
+                if int(opt.get("amount", 1) or 1) != 1:
+                    continue
+                slots = getattr(self.game, "goods_slots", []) or []
+                for i, gtype in enumerate(slots):
+                    if not gtype:
+                        continue
+                    expanded.append({
+                        "token": "goods.choice",
+                        "amount": 1,
+                        "goods_type": gtype,
                         "slot_index": i,
                     })
                 continue
@@ -561,6 +600,9 @@ class ChooseEngine:
         if token == "noble.choice":
             # Take the chosen face-up noble for free; Amarynth refills from deck.
             return self.game.player_actions.take_noble_from_slot(player_id, opt.get("slot_index"))
+        if token == "goods.choice":
+            # Take the chosen face-up goods for free; Araby then refreshes.
+            return self.game.player_actions.take_goods_from_slot(player_id, opt.get("slot_index"))
         if token == "citizens_chain":
             # Defer to the payout-continuation machinery: queue N `<citizens>`
             # picks, each of which opens (and resolves) its own citizen prompt.
@@ -718,6 +760,9 @@ class ChooseEngine:
         if token == "noble.choice":
             name = (opt.get("name") or "Noble").strip()
             return f"gain Noble {name}"
+        if token == "goods.choice":
+            gtype = (opt.get("goods_type") or "").strip()
+            return f"gain {gtype} Goods" if gtype else "gain 1 Goods"
         if token == "citizens_chain":
             return f"gain {int(opt.get('amount', 0) or 0)} citizens"
         if token == "citizens.choice":

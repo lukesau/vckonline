@@ -110,9 +110,19 @@ class PayoutsEngine:
             return [-9999, 0, 0, 0]
         if isinstance(balance_hint, dict) and "g" in balance_hint:
             available_gold = int(balance_hint.get("g", 0) or 0)
+            available_magic = int(balance_hint.get("m", getattr(player, "magic_score", 0)) or 0)
         else:
             available_gold = int(getattr(player, "gold_score", 0) or 0)
-        have = self.game._player_citizen_role_totals(player)
+            available_magic = int(getattr(player, "magic_score", 0) or 0)
+        # Magic covers a Domain's Gold cost as a wild (build_domain rules), and
+        # face-up Gold/Magic tomes add to the respective pools.
+        if self.game.crimson_seas_enabled():
+            tome_counts = self.game.player_actions._face_up_tome_counts(player)
+        else:
+            tome_counts = {"gold": 0, "strength": 0, "magic": 0}
+        gold_pool = available_gold + int(tome_counts.get("gold", 0) or 0)
+        magic_pool = available_magic + int(tome_counts.get("magic", 0) or 0)
+        have = self.game._player_build_role_totals(player)
         has_pratchett = self.game._player_has_action_effect_flag(player, "action.pratchettsplateau")
         options = []
         for stack_idx, domain_stack in enumerate(self.game.domain_grid):
@@ -123,7 +133,7 @@ class PayoutsEngine:
                 continue
             if not getattr(top, "is_accessible", False) or not getattr(top, "is_visible", True):
                 continue
-            # Role requirement check (citizens only, matching build_domain logic).
+            # Role requirement check (Citizens and/or Nobles, matching build_domain logic).
             req_shadow = int(getattr(top, "shadow_count", 0) or 0)
             req_holy = int(getattr(top, "holy_count", 0) or 0)
             req_soldier = int(getattr(top, "soldier_count", 0) or 0)
@@ -136,7 +146,11 @@ class PayoutsEngine:
                 gold_cost = max(0, gold_cost - 1)
             if self.game._player_has_action_effect_flag(player, "action.blessedlands"):
                 gold_cost = max(0, gold_cost - self.game.events.blessed_lands_discount())
-            if available_gold < gold_cost:
+            # Affordable if the combined gold+magic pool covers the cost, with at
+            # least 1 gold-equivalent on hand when magic is needed as wild.
+            if (gold_pool + magic_pool) < gold_cost:
+                continue
+            if gold_cost > 0 and gold_pool < 1:
                 continue
             options.append({
                 "stack_idx": stack_idx,
@@ -159,6 +173,47 @@ class PayoutsEngine:
         self.game.action_required["action"] = "choose_domain_to_build"
         return [0, 0, 0, 0]
 
+    def _execute_refresh_tomes_payout(self, player_id):
+        """Flip all of the player's spent (face-down) Tomes back face-up
+        (Solo's Haven). Lets tomes used earlier this turn be reused immediately.
+        """
+        player = self.game._player_by_id(player_id)
+        if not player or not self.game.crimson_seas_enabled():
+            return [-9999, 0, 0, 0]
+        flipped = 0
+        for tome in getattr(player, "owned_tomes", None) or []:
+            if getattr(tome, "is_flipped", False):
+                tome.is_flipped = False
+                flipped += 1
+        if flipped:
+            self.game._log_game_event(
+                f"{self.game._player_label(player_id)} flipped {flipped} "
+                f"Tome{'s' if flipped != 1 else ''} face-up (Solo's Haven)."
+            )
+        return [0, 0, 0, 0]
+
+    def _execute_may_sail_payout(self, player_id):
+        """Offer the active player one optional free Sail (Dampiar's Workshop).
+
+        Opens the `may_sail` prompt and flags `pending_bonus_sail` so a single
+        sail action (buy goods / buy tomes / rescue noble / sail to Exekratys)
+        runs without spending a regular action. The sail still pays its own
+        gold/map cost; Dampiar's Workshop hands the player +1 Map (the `p 1` leg
+        of its compound) to fund it. Declining clears the flag and resumes the
+        domain activation follow-up.
+        """
+        player = self.game._player_by_id(player_id)
+        if not player or not self.game.crimson_seas_enabled():
+            return [-9999, 0, 0, 0]
+        self.game.pending_bonus_sail = player_id
+        self.game.pending_required_choice = {
+            "kind": "sail_opportunity",
+            "player_id": player_id,
+        }
+        self.game.action_required["id"] = player_id
+        self.game.action_required["action"] = "may_sail"
+        return [0, 0, 0, 0]
+
     def _execute_banish_center_payout(self, command, player_id):
         """Parse `banish_center <kind> [optional]` and prompt for a center-stack card.
 
@@ -173,7 +228,7 @@ class PayoutsEngine:
             return [-9999, 0, 0, 0]
         kind = parts[1].lower()
         optional = any(p.lower() == "optional" for p in parts[2:])
-        if kind not in ("citizen", "monster", "domain"):
+        if kind not in ("citizen", "monster", "domain", "noble"):
             return [-9999, 0, 0, 0]
         options = []
         if kind == "citizen":
@@ -207,6 +262,18 @@ class PayoutsEngine:
                     "name": getattr(top, "name", "?"),
                     "domain_id": int(getattr(top, "domain_id", -1)),
                     "gold_cost": int(getattr(top, "gold_cost", 0) or 0),
+                })
+        elif kind == "noble":
+            # Crimson Seas Amarynth: the 3 face-up nobles live in `noble_slots`
+            # (not a center grid). Each non-empty slot is a valid banish target.
+            for i, noble in enumerate(list(getattr(self.game, "noble_slots", []) or [])):
+                if not noble:
+                    continue
+                options.append({
+                    "token": "noble.center",
+                    "idx": i,
+                    "name": getattr(noble, "name", "?"),
+                    "noble_id": int(getattr(noble, "noble_id", -1) or -1),
                 })
         else:  # monster
             for i, stack in enumerate(list(getattr(self.game, "monster_grid", []) or [])):
@@ -312,6 +379,31 @@ class PayoutsEngine:
         elif self.game.exhausted_stack:
             self.game.events.reveal_exhausted_onto_stack(stack)
         return banished
+
+    def _banish_center_noble(self, slot_idx):
+        """Banish a face-up Noble from Amarynth, then draw the next noble in.
+
+        Crimson Seas nobles are not a center grid: the 3 face-up nobles sit in
+        `noble_slots`, backed by the `noble_supply` deck. Banishing removes the
+        chosen noble to the global banish pile and refills the emptied slot
+        directly from the deck (no cascading), matching the rescue refill.
+        """
+        slots = getattr(self.game, "noble_slots", None)
+        if not isinstance(slots, list) or slot_idx < 0 or slot_idx >= len(slots):
+            return None
+        noble = slots[slot_idx]
+        if not noble:
+            return None
+        self.game.banish_pile.append(noble)
+        new_noble = self.game.noble_supply.pop() if getattr(self.game, "noble_supply", None) else None
+        if new_noble is not None:
+            try:
+                new_noble.toggle_visibility(True)
+                new_noble.toggle_accessibility(True)
+            except AttributeError:
+                pass
+        self.game.noble_slots[slot_idx] = new_noble
+        return noble
 
     def _maybe_fire_northern_wall_banish(self, player_id):
         """If the active player owns The Northern Wall, open an optional Minion-banish prompt."""
@@ -869,6 +961,10 @@ class PayoutsEngine:
             return self.game.domain_effects._execute_manipulate_resources_payout(raw, player_id)
         if low == "slay":
             return self.game.slay._execute_slay_payout(player_id)
+        if low == "sail":
+            return self._execute_may_sail_payout(player_id)
+        if low == "refresh_tomes":
+            return self._execute_refresh_tomes_payout(player_id)
         if low.startswith("steal_citizen"):
             return self._execute_steal_citizen_payout(raw, player_id)
         if low.startswith("steal"):

@@ -331,6 +331,13 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
 .wiki-alt-option-thumb.is-noble {
   aspect-ratio: 280 / 438;
 }
+/* The narrower noble image no longer reaches the container's rounded top
+   corners, so the container can't clip them — round the image's own top
+   corners to match the bottom. */
+.wiki-card-image.is-noble {
+  border-top-left-radius: 10px;
+  border-top-right-radius: 10px;
+}
 
 .wiki-card-meta {
   padding: 8px 10px 10px;

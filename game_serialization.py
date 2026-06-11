@@ -1,8 +1,16 @@
 import json
 from json import JSONEncoder
 
-from cards import Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Starter
+from cards import Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Starter, Tome
 from game_models import GameMember, LobbyMember, Player
+
+
+def _tome_to_dict(t):
+    """Serialize an owned tome. Tomes in a tableau are Tome card objects, but
+    tolerate a legacy bare type string (face-up, not flipped) too."""
+    if isinstance(t, Tome):
+        return t.to_dict()
+    return Tome(t).to_dict()
 
 
 class SummaryEncoder(JSONEncoder):
@@ -52,9 +60,10 @@ class GameObjectEncoder(JSONEncoder):
                 "owned_domains": [domain.to_dict() for domain in obj.owned_domains],
                 "owned_dukes": [duke.to_dict() for duke in obj.owned_dukes],
                 "owned_monsters": [monster.to_dict() for monster in obj.owned_monsters],
-                # Crimson Seas tableau pieces (Goods/Tomes are type strings; Nobles are cards).
+                # Crimson Seas tableau pieces (Goods are type strings; Tomes and
+                # Nobles are cards).
                 "owned_goods": list(getattr(obj, "owned_goods", None) or []),
-                "owned_tomes": list(getattr(obj, "owned_tomes", None) or []),
+                "owned_tomes": [_tome_to_dict(t) for t in (getattr(obj, "owned_tomes", None) or [])],
                 "owned_nobles": [n.to_dict() for n in (getattr(obj, "owned_nobles", None) or [])],
                 "gold_score": obj.gold_score,
                 "strength_score": obj.strength_score,
@@ -236,6 +245,7 @@ def serialize_game_to_save_dict(game):
     base["monster_stack_areas"] = list(getattr(game, "monster_stack_areas", []) or [])
     base["exhausted_stack"] = [c.to_dict() for c in (getattr(game, "exhausted_stack", []) or [])]
     base["pending_payout_continuation"] = getattr(game, "pending_payout_continuation", None)
+    base["pending_bonus_sail"] = getattr(game, "pending_bonus_sail", None)
     base["pending_harvest_choices"] = list(getattr(game, "pending_harvest_choices", []) or [])
     base["harvest_processed"] = bool(getattr(game, "harvest_processed", False))
     base["_harvest_steal_phase_done"] = bool(getattr(game, "_harvest_steal_phase_done", False))

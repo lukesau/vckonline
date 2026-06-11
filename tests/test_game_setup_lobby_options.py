@@ -147,6 +147,79 @@ class LobbyOptionsIntegrationTests(unittest.TestCase):
             f"expected a non-base event across seeds, saw {seen}",
         )
 
+    def _load_with_players(self, preset, players, **kwargs):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return load_game_data(f"lobby-opt-{preset}", preset, players, **kwargs)
+
+    @staticmethod
+    def _crimson_domain_count(domains):
+        return sum(1 for d in domains if d.expansion == "crimsonseas")
+
+    def test_crimsonseas_all_deals_every_crimson_domain_plus_random_fill(self):
+        # "All" mode (expansion_only off): all 10 Crimson Seas domains, then
+        # 5 more (2-4 players) drawn from the full implemented pool.
+        state = self._load("crimsonseas")
+        domains = self._board_domains(state)
+        self.assertEqual(len(domains), 15)
+        self.assertEqual(self._crimson_domain_count(domains), 10)
+
+    def test_crimsonseas_all_fill_can_span_expansions(self):
+        # The 5 (or 10) fill slots come from the whole implemented pool, so a
+        # non-crimson, non-base domain should eventually appear across seeds.
+        import random as _random
+
+        fill_expansions = set()
+        for seed in range(40):
+            _random.seed(seed)
+            state = self._load("crimsonseas")
+            fill_expansions |= {
+                d.expansion for d in self._board_domains(state) if d.expansion != "crimsonseas"
+            }
+        if fill_expansions <= {"base"}:
+            self.skipTest(f"only base domains available to fill; saw {fill_expansions}")
+        self.assertTrue(
+            any(exp not in (None, "base", "crimsonseas") for exp in fill_expansions),
+            f"expected a non-base fill domain across seeds, saw {fill_expansions}",
+        )
+
+    def test_crimsonseas_expansion_fills_remaining_from_base_only(self):
+        # "Expansion" mode: all 10 Crimson Seas domains, remaining 5 from base.
+        state = self._load("crimsonseas", expansion_only=True)
+        domains = self._board_domains(state)
+        self.assertEqual(len(domains), 15)
+        self.assertEqual(self._crimson_domain_count(domains), 10)
+        for d in domains:
+            self.assertIn(d.expansion, ("crimsonseas", "base"))
+
+    def test_crimsonseas_five_players_deals_twenty_domains(self):
+        players = [LobbyMember(f"Player {i}", f"p{i}") for i in range(1, 6)]
+        for expansion_only in (False, True):
+            state = self._load_with_players(
+                "crimsonseas", players, expansion_only=expansion_only
+            )
+            domains = self._board_domains(state)
+            self.assertEqual(len(domains), 20)
+            self.assertEqual(self._crimson_domain_count(domains), 10)
+            if expansion_only:
+                for d in domains:
+                    self.assertIn(d.expansion, ("crimsonseas", "base"))
+
+    def test_crimsonseas_dukes_use_full_pool_both_modes(self):
+        # Crimson Seas ships no dukes, so both modes draw from the full pool.
+        import random as _random
+
+        for expansion_only in (False, True):
+            seen = set()
+            for seed in range(20):
+                _random.seed(seed)
+                state = self._load("crimsonseas", expansion_only=expansion_only)
+                for player in state["player_list"]:
+                    seen |= {duke.expansion for duke in player.owned_dukes}
+            self.assertTrue(
+                any(exp not in (None, "base") for exp in seen),
+                f"expected dukes beyond base (expansion_only={expansion_only}), saw {seen}",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

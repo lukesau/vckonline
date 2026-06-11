@@ -218,7 +218,9 @@ class SkeletonArmyTomeRewardTests(unittest.TestCase):
         # Option 2 is the first tome.choice (the Gold tome in slot 0).
         game.act_on_required_action(players[0].player_id, "choose 2")
 
-        self.assertEqual(players[0].owned_tomes, ["gold"])
+        self.assertEqual(len(players[0].owned_tomes), 1)
+        self.assertEqual(players[0].owned_tomes[0].tome_type, "gold")
+        self.assertFalse(players[0].owned_tomes[0].is_flipped)
         # Free: no gold spent and no map consumed.
         self.assertEqual(int(players[0].gold_score), gold_before)
         self.assertEqual(int(getattr(players[0], "map_score", 0)), map_before)
