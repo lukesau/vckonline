@@ -853,6 +853,33 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   padding: 32px 16px;
 }
 
+/* Rule-card art comes in slightly different dimensions per file. Normalize to a
+   single frame (~5:7, the cards' common ratio) and use object-fit: contain so
+   every tile is uniform and the whole image shows without distortion or
+   cropping. The frame background matches the card so any tiny letterbox blends
+   in rather than showing black bars. */
+.wiki-card-image.rule-card-img,
+.wiki-modal-image.rule-card-img {
+  aspect-ratio: 5 / 7;
+  object-fit: contain;
+  background: var(--bg-card);
+}
+
+.wiki-rule-card-name-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.wiki-rule-card-side {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+}
+
 /* Rule-card modal: image-only, so collapse the two-column body to a single
    centered image column. */
 .wiki-modal-body.rule-card {

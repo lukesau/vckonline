@@ -689,15 +689,18 @@
     else state.ruleCardSides.delete(slug);
   };
 
-  // Reuses the alt-toggle button as a front/back flip. Returns { wrap, altBtn }
-  // matching buildArtworkControls so the grid layers the button over the art
-  // and the modal places it below the image.
+  // Reuses the alt-toggle button as a front/back flip. The button reads "Flip";
+  // the current side is shown in `caption` (a span the caller places next to the
+  // card name). Returns { wrap, altBtn, caption } matching buildArtworkControls
+  // so the grid layers the button over the art and the modal places it below.
   function buildRuleCardArtwork(card, { modal }) {
     const hasBoth = !!card.front_url && !!card.back_url;
     let side = ruleCardSide(card.slug);
+    if (!hasBoth) side = card.front_url ? "front" : "back";
     const urlFor = (s) => (s === "back" ? (card.back_url || card.front_url) : (card.front_url || card.back_url));
+    const sideLabel = (s) => (s === "back" ? "Back" : "Front");
 
-    const imgClass = modal ? "wiki-modal-image" : "wiki-card-image";
+    const imgClass = (modal ? "wiki-modal-image" : "wiki-card-image") + " rule-card-img";
     const wrap = h("div", { class: "wiki-art-wrap" });
     const img = h("img", {
       class: imgClass,
@@ -710,40 +713,35 @@
     });
     wrap.appendChild(img);
 
+    const caption = h("span", { class: "wiki-rule-card-side" }, sideLabel(side));
+
     let altBtn = null;
     if (hasBoth) {
       altBtn = h("button", {
         type: "button",
         class: "wiki-alt-toggle" + (modal ? " modal" : ""),
-      });
-      const sync = () => {
-        const onBack = side === "back";
-        altBtn.classList.toggle("active", onBack);
-        altBtn.setAttribute("aria-pressed", onBack ? "true" : "false");
-        altBtn.textContent = modal
-          ? (onBack ? "Show front" : "Show back")
-          : (onBack ? "Front" : "Back");
-      };
+      }, "Flip");
       altBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         side = side === "back" ? "front" : "back";
         setRuleCardSide(card.slug, side);
         img.src = urlFor(side);
-        sync();
+        caption.textContent = sideLabel(side);
       });
-      sync();
       if (!modal) wrap.appendChild(altBtn);
     }
 
-    return { wrap, altBtn };
+    return { wrap, altBtn, caption };
   }
 
   function renderRuleCardGridCard(card) {
-    const { wrap } = buildRuleCardArtwork(card, { modal: false });
+    const { wrap, altBtn, caption } = buildRuleCardArtwork(card, { modal: false });
+    const nameRow = h("div", { class: "wiki-rule-card-name-row" },
+      h("span", { class: "wiki-card-name" }, card.name || "(unnamed)"));
+    if (altBtn) nameRow.appendChild(caption);
     const node = h("div", { class: "wiki-card" },
       wrap,
-      h("div", { class: "wiki-card-meta" },
-        h("div", { class: "wiki-card-name" }, card.name || "(unnamed)")),
+      h("div", { class: "wiki-card-meta" }, nameRow),
     );
     node.addEventListener("click", () => openRuleCardModal(card));
     return node;
