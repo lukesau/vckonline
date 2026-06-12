@@ -16,7 +16,7 @@ from typing import Dict, List, Optional
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 import shortuuid
 
@@ -2347,9 +2347,44 @@ async def counter_client():
     return FileResponse(_COUNTER_INDEX, media_type="text/html")
 
 
+# Tabs the wiki SPA knows how to render. Deep links to anything else are
+# bounced back to the wiki root rather than serving an empty page.
+_WIKI_TABS = frozenset({
+    "citizens", "monsters", "domains", "dukes", "starters",
+    "events", "nobles", "agents", "relics", "rulebooks",
+})
+
+
 @app.get("/wiki")
 async def wiki_client():
     return FileResponse(_WIKI_INDEX, media_type="text/html")
+
+
+@app.get("/wiki/{card_type}")
+async def wiki_client_type(card_type: str):
+    """Deep-link to a wiki tab (e.g. /wiki/agents). Serves the same SPA;
+    the client reads the path to select the tab. Unknown tabs redirect to
+    the wiki root."""
+    if card_type not in _WIKI_TABS:
+        return RedirectResponse("/wiki")
+    return FileResponse(_WIKI_INDEX, media_type="text/html")
+
+
+@app.get("/wiki/{card_type}/{card_id}")
+async def wiki_client_card(card_type: str, card_id: str):
+    """Deep-link to a single card's modal (e.g. /wiki/citizens/21). Serves the
+    same SPA; the client reads the path to open the matching card (and itself
+    redirects to the wiki root if the id resolves to no card). Unknown tabs
+    redirect here too."""
+    if card_type not in _WIKI_TABS:
+        return RedirectResponse("/wiki")
+    return FileResponse(_WIKI_INDEX, media_type="text/html")
+
+
+@app.get("/wiki/{full_path:path}")
+async def wiki_client_catch_all(full_path: str):
+    """Any other /wiki/* shape (too deep, malformed) redirects to the root."""
+    return RedirectResponse("/wiki")
 
 
 @app.get("/api/wiki/cards")

@@ -45,6 +45,44 @@
   // Special non-card tab: a flat list of rulebook PDFs (no DB, no card grid).
   const RULEBOOKS_TAB = "rulebooks";
 
+  // ── URL routing ────────────────────────────────────────────────────────
+  // The wiki is a single page but reflects its state in the path so links are
+  // shareable: `/wiki/<tab>` selects a tab and `/wiki/<tab>/<id>` opens a
+  // card's modal. The server serves the same SPA for all three shapes.
+  const isKnownTab = (t) => TYPE_ORDER.includes(t) || t === RULEBOOKS_TAB;
+  const wikiUrlForType = (type) => `/wiki/${type}`;
+  const wikiUrlForCard = (type, id) => `/wiki/${type}/${id}`;
+  const normalizePath = (p) => p.replace(/\/+$/, "");
+
+  // Parse `location.pathname` into { type, id }. Unknown tabs are dropped so a
+  // bad link falls back to the default tab instead of an empty grid.
+  function currentRoute() {
+    const parts = normalizePath(location.pathname).split("/").filter(Boolean);
+    let type = parts[1] ? decodeURIComponent(parts[1]) : null;
+    let id = parts[2] != null ? decodeURIComponent(parts[2]) : null;
+    if (type && !isKnownTab(type)) { type = null; id = null; }
+    return { type, id };
+  }
+
+  function findCard(type, id) {
+    if (!state.raw) return null;
+    const field = TYPE_TO_ID_FIELD[type];
+    if (!field) return null;
+    const target = String(id);
+    return (state.raw.cards[type] || []).find(c => String(c[field]) === target) || null;
+  }
+
+  function pushType(type) {
+    if (normalizePath(location.pathname) !== wikiUrlForType(type)) {
+      history.pushState({ type }, "", wikiUrlForType(type));
+    }
+  }
+  function pushCard(type, id) {
+    if (normalizePath(location.pathname) !== wikiUrlForCard(type, id)) {
+      history.pushState({ type, id, modal: true }, "", wikiUrlForCard(type, id));
+    }
+  }
+
   const state = {
     raw: null,                  // full payload from /api/wiki/cards
     rulebooks: null,            // cached PDF list from /api/wiki/rulebooks
@@ -241,7 +279,12 @@
   };
 
   // ── boot ──────────────────────────────────────────────────────────────
+  {
+    const route = currentRoute();
+    if (route.type) state.activeType = route.type;
+  }
   loadData();
+  window.addEventListener("popstate", applyRoute);
   el.search.addEventListener("input", (e) => {
     state.search = e.target.value.trim().toLowerCase();
     render();
@@ -267,6 +310,7 @@
       renderTabs();
       renderFilters();
       render();
+      applyInitialModalFromUrl();
       el.status.textContent = "";
       el.status.hidden = true;
     } catch (err) {
@@ -292,12 +336,7 @@
         TYPE_LABELS[type],
         h("span", { class: "wiki-tab-count" }, String(count))
       );
-      tab.addEventListener("click", () => {
-        state.activeType = type;
-        renderTabs();
-        renderFilters();
-        render();
-      });
+      tab.addEventListener("click", () => selectType(type));
       el.tabs.appendChild(tab);
     }
 
@@ -305,13 +344,17 @@
       class: "wiki-tab" + (state.activeType === RULEBOOKS_TAB ? " active" : ""),
       dataset: { type: RULEBOOKS_TAB },
     }, "Rulebooks");
-    rulebooksTab.addEventListener("click", () => {
-      state.activeType = RULEBOOKS_TAB;
-      renderTabs();
-      renderFilters();
-      render();
-    });
+    rulebooksTab.addEventListener("click", () => selectType(RULEBOOKS_TAB));
     el.tabs.appendChild(rulebooksTab);
+  }
+
+  // Switch tabs and reflect it in the URL (`/wiki/<type>`).
+  function selectType(type) {
+    state.activeType = type;
+    pushType(type);
+    renderTabs();
+    renderFilters();
+    render();
   }
 
   // ── per-type filter chips ─────────────────────────────────────────────
@@ -797,20 +840,77 @@
   }
 
   // ── detail modal ──────────────────────────────────────────────────────
+  // User-initiated open (grid click): push the card URL, then render the modal.
   function openModal(card) {
+    const type = state.activeType;
+    const id = card[TYPE_TO_ID_FIELD[type]];
+    pushCard(type, id);
+    showCardModal(card);
+  }
+
+  // DOM-only render of a card's modal (no history changes).
+  function showCardModal(card) {
     el.modalBody.innerHTML = "";
     el.modalBody.classList.remove("rule-card");
     el.modalBody.appendChild(renderDetail(card));
     el.modal.classList.add("open");
     el.modal.setAttribute("aria-hidden", "false");
   }
+
+  // User-initiated close (X / backdrop / Escape). If we pushed a card entry,
+  // step back so the URL returns to the tab; otherwise (deep-linked straight to
+  // the card) rewrite the URL to the tab in place.
   function closeModal() {
+    if (history.state && history.state.modal) {
+      history.back();
+      return;
+    }
+    history.replaceState({ type: state.activeType }, "", wikiUrlForType(state.activeType));
+    hideModal();
+  }
+
+  // DOM-only hide of the modal (no history changes).
+  function hideModal() {
     el.modal.classList.remove("open");
     el.modal.setAttribute("aria-hidden", "true");
     el.modalBody.classList.remove("rule-card");
     // The modal can flip a card to alt art; re-render so the grid card's
     // thumbnail picks up that selection.
     render();
+  }
+
+  // Send any unresolvable wiki URL back to the wiki root.
+  function redirectToWikiRoot() {
+    location.replace("/wiki");
+  }
+
+  // Open the deep-linked card after the initial data load. A missing card (bad
+  // id) is treated as a 404 and bounced to the wiki root.
+  function applyInitialModalFromUrl() {
+    const route = currentRoute();
+    if (route.id == null) return;
+    const card = findCard(route.type || state.activeType, route.id);
+    if (!card) { redirectToWikiRoot(); return; }
+    showCardModal(card);
+  }
+
+  // Sync the page to the current URL (browser back/forward).
+  function applyRoute() {
+    const route = currentRoute();
+    const type = route.type || "citizens";
+    if (type !== state.activeType) {
+      state.activeType = type;
+      renderTabs();
+      renderFilters();
+      render();
+    }
+    if (route.id != null) {
+      const card = findCard(type, route.id);
+      if (card) { showCardModal(card); return; }
+      redirectToWikiRoot();
+      return;
+    }
+    hideModal();
   }
 
   function renderDetail(card) {
