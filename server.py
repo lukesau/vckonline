@@ -2738,9 +2738,17 @@ def _render_wiki_page_response(
 
     try:
         if active_tab == RULEBOOKS_TAB:
+            # Counts power the tab-bar badges. Load them best-effort so the
+            # numbers match the other tabs, but never let a DB outage break the
+            # rulebooks tab (it is otherwise DB-independent).
+            try:
+                counts_data = _load_wiki_cards()
+            except Exception:
+                counts_data = None
             html_text = render_wiki_page(
                 _wiki_template(),
                 active_tab=active_tab,
+                cards_data=counts_data,
                 rulebooks_data=_scan_rulebooks(),
                 page_title=og_title,
             )

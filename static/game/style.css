@@ -2460,23 +2460,36 @@ html, body {
   display: flex;
 }
 
-.lobby-bg-canvas {
+.lobby-bg-layer {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  inset: 0;
   z-index: 0;
+  overflow: hidden;
+  background: #0a1610;
   pointer-events: none;
-  /* width/height set in JS to match bitmap; overlay overflow clips on resize */
 }
 
-/* Bouncing single-card lobby background: canvas matches overlay (see game.js). */
-.lobby-bg-canvas.lobby-bg-canvas--fill {
+.lobby-bg-layer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: rgba(4, 10, 7, 0.4);
+}
+
+.lobby-bg-card {
+  position: absolute;
   left: 0;
   top: 0;
-  width: 100%;
-  height: 100%;
-  transform: none;
+  z-index: 1;
+  display: block;
+  box-sizing: border-box;
+  border-style: solid;
+  object-fit: fill;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  contain: layout paint;
 }
 
 .lobby-sheet {

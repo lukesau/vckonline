@@ -297,6 +297,9 @@ a.wiki-tab { color: inherit; }
   color: inherit;
 }
 a.wiki-card:visited { color: inherit; }
+/* `.wiki-card` is `display: flex`, which beats the UA `[hidden]` rule, so the
+   filter code's `card.hidden = true` would otherwise leave cards visible. */
+.wiki-card[hidden] { display: none; }
 .wiki-card:hover {
   transform: translateY(-2px);
   border-color: var(--accent-soft);
@@ -803,8 +806,12 @@ a.wiki-card:visited { color: inherit; }
 }
 
 /* ── Rulebooks tab ───────────────────────────────────────────────────── */
-/* The shared grid container becomes a plain block on this tab so the PDF row
-   and the rule-card grid can each own their layout. */
+/* The shared `#wiki-grid` container is itself `display: grid`, so the rulebooks
+   markup (which is injected *inside* it) would otherwise be squeezed into a
+   single grid track — collapsing the PDF row to one-per-line and shrinking the
+   rule cards. Neutralise the outer grid on this tab so the PDF flex-row and the
+   rule-card grid can each own their layout at full width. */
+body[data-active-tab="rulebooks"] #wiki-grid,
 .wiki-grid.wiki-grid--plain {
   display: block;
 }

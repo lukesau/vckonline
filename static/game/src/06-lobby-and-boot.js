@@ -88,44 +88,41 @@ function lobbyBgBorderColor(url) {
   return LOBBY_BG_TYPE_BORDERS[lobbyBgTypeFromUrl(url)] || '#526263';
 }
 
-function lobbyBgRoundRectPath(ctx, left, top, w, h, r) {
-  const radius = Math.max(0, Math.min(r, w * 0.5, h * 0.5));
-  ctx.beginPath();
-  ctx.moveTo(left + radius, top);
-  ctx.arcTo(left + w, top, left + w, top + h, radius);
-  ctx.arcTo(left + w, top + h, left, top + h, radius);
-  ctx.arcTo(left, top + h, left, top, radius);
-  ctx.arcTo(left, top, left + w, top, radius);
-  ctx.closePath();
-}
-
-function startLobbyBackgroundBounce(canvas) {
-  const overlay = canvas.closest('.lobby-overlay');
+function startLobbyBackgroundBounce(layer) {
+  const overlay = layer.closest('.lobby-overlay');
   if (!overlay) return Promise.resolve();
 
-  const existingStop = canvas._lobbyBounceStop;
+  const existingStop = layer._lobbyBounceStop;
   if (typeof existingStop === 'function') existingStop();
 
-  const DARKEN = 'rgba(4, 10, 7, 0.4)';
   const SPEED_PX = 220;
   const CARD_MAX_H_FRAC = 0.28;
   // Bounces can land on an id with no art on disk; retry a few random picks
   // so a single 404 never stalls the rotation.
   const MAX_PICK_ATTEMPTS = 16;
 
+  let cardEl = layer.querySelector('.lobby-bg-card');
+  if (!cardEl) {
+    cardEl = document.createElement('img');
+    cardEl.className = 'lobby-bg-card';
+    cardEl.alt = '';
+    cardEl.decoding = 'async';
+    cardEl.draggable = false;
+    layer.appendChild(cardEl);
+  }
+
   let ranges = LOBBY_BG_FALLBACK_RANGES;
-  let ctx = null;
   let rafId = 0;
   let stopped = false;
   let lastTs = 0;
   let cssW = 1;
   let cssH = 1;
-  let dpr = 1;
   let x = 0;
   let y = 0;
   let vx = 0;
   let vy = 0;
   let currentImg = null;
+  let currentUrl = '';
   let currentBorderColor = '#526263';
   let currentSizeScale = 1;   // <1 shrinks smaller-format cards (e.g. Nobles)
   let nextCard = null;   // { url, img } — decoded and ready to show on the next bounce
@@ -137,13 +134,7 @@ function startLobbyBackgroundBounce(canvas) {
     const rect = overlay.getBoundingClientRect();
     cssW = Math.max(1, Math.floor(rect.width || window.innerWidth || 1));
     cssH = Math.max(1, Math.floor(rect.height || window.innerHeight || 1));
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.max(1, Math.floor(cssW * dpr));
-    canvas.height = Math.max(1, Math.floor(cssH * dpr));
-    canvas.style.width = `${cssW}px`;
-    canvas.style.height = `${cssH}px`;
-    ctx = canvas.getContext('2d');
-    return !!ctx;
+    return true;
   }
 
   function measureCard(img) {
@@ -200,6 +191,7 @@ function startLobbyBackgroundBounce(canvas) {
   }
 
   function applyCard(card) {
+    currentUrl = card.url;
     currentImg = card.img;
     currentBorderColor = lobbyBgBorderColor(card.url);
     currentSizeScale = lobbyBgTypeFromUrl(card.url) === 'noble' ? LOBBY_BG_NOBLE_HEIGHT_SCALE : 1;
@@ -207,6 +199,7 @@ function startLobbyBackgroundBounce(canvas) {
     halfW = m.dw * 0.5;
     halfH = m.dh * 0.5;
     clampPos();
+    renderCard();
   }
 
   // Preload exactly one card ahead so a bounce never reveals a half-loaded
@@ -244,7 +237,7 @@ function startLobbyBackgroundBounce(canvas) {
   }
 
   function step(dt) {
-    if (!ctx || !currentImg) return;
+    if (!currentImg) return;
     x += vx * dt;
     y += vy * dt;
 
@@ -277,38 +270,26 @@ function startLobbyBackgroundBounce(canvas) {
     }
   }
 
-  function drawFrame() {
-    if (!ctx || !currentImg) return;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#0a1610';
-    ctx.fillRect(0, 0, cssW, cssH);
-
+  function renderCard() {
+    if (!currentImg) return;
     const { dw, dh } = measureCard(currentImg);
-    const left = x - dw * 0.5;
-    const top = y - dh * 0.5;
     // Match the in-game card look (5px radius / 1px border on a ~158px card),
     // scaled to the larger background card.
     const radius = Math.max(4, Math.min(dw, dh) * 0.04);
     const border = Math.max(2, Math.min(dw, dh) * 0.016);
 
-    ctx.save();
-    lobbyBgRoundRectPath(ctx, left, top, dw, dh, radius);
-    ctx.clip();
-    ctx.drawImage(currentImg, left, top, dw, dh);
-    ctx.restore();
+    cardEl.src = currentUrl;
+    cardEl.style.width = `${dw}px`;
+    cardEl.style.height = `${dh}px`;
+    cardEl.style.borderColor = currentBorderColor;
+    cardEl.style.borderRadius = `${radius}px`;
+    cardEl.style.borderWidth = `${border}px`;
+    renderPosition();
+  }
 
-    // Colored outline drawn just inside the image edge so the rounded corners
-    // stay clean (stroke is centered on the path).
-    const inset = border * 0.5;
-    lobbyBgRoundRectPath(ctx, left + inset, top + inset, dw - border, dh - border, radius - inset);
-    ctx.lineWidth = border;
-    ctx.strokeStyle = currentBorderColor;
-    ctx.stroke();
-
-    ctx.fillStyle = DARKEN;
-    ctx.fillRect(0, 0, cssW, cssH);
+  function renderPosition() {
+    if (!currentImg) return;
+    cardEl.style.transform = `translate3d(${x - halfW}px, ${y - halfH}px, 0)`;
   }
 
   function frame(ts) {
@@ -316,7 +297,7 @@ function startLobbyBackgroundBounce(canvas) {
     const dt = Math.min(0.05, Math.max(0, (ts - lastTs) / 1000));
     lastTs = ts;
     step(dt);
-    drawFrame();
+    renderPosition();
     rafId = window.requestAnimationFrame(frame);
   }
 
@@ -326,7 +307,7 @@ function startLobbyBackgroundBounce(canvas) {
     halfW = m.dw * 0.5;
     halfH = m.dh * 0.5;
     clampPos();
-    drawFrame();
+    renderCard();
   }
 
   function stop() {
@@ -335,12 +316,12 @@ function startLobbyBackgroundBounce(canvas) {
     rafId = 0;
     window.removeEventListener('resize', onResize);
     nextCard = null;
-    canvas.classList.remove('lobby-bg-canvas--fill');
-    if (canvas._lobbyBounceStop === stop) delete canvas._lobbyBounceStop;
+    cardEl.removeAttribute('src');
+    cardEl.style.transform = '';
+    if (layer._lobbyBounceStop === stop) delete layer._lobbyBounceStop;
   }
 
-  canvas.classList.add('lobby-bg-canvas--fill');
-  canvas._lobbyBounceStop = stop;
+  layer._lobbyBounceStop = stop;
 
   return lobbyBgFetchRanges()
     .then(async r => {
@@ -364,13 +345,13 @@ function startLobbyBackgroundBounce(canvas) {
       lastTs = 0;
       prepareNext();
       window.addEventListener('resize', onResize);
-      drawFrame();
+      renderCard();
       rafId = window.requestAnimationFrame(frame);
     });
 }
 
-async function initLobbyBackgroundCanvas(canvas) {
-  await startLobbyBackgroundBounce(canvas);
+async function initLobbyBackgroundBounce(layer) {
+  await startLobbyBackgroundBounce(layer);
 }
 
 // ── Lobby modal when visiting without game_id / player_id ────────────────
@@ -2270,8 +2251,8 @@ function initLobbyModal() {
 
   openOverlay();
   showStep('name');
-  const bgCanvas = document.getElementById('lobby-bg-canvas');
-  if (bgCanvas) initLobbyBackgroundCanvas(bgCanvas).catch(() => {});
+  const bgLayer = document.getElementById('lobby-bg-layer');
+  if (bgLayer) initLobbyBackgroundBounce(bgLayer).catch(() => {});
   connectLobbyWs();
   tryResumeStoredPlayer();
 
