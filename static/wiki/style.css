@@ -744,6 +744,36 @@ a.wiki-card:visited { color: inherit; }
 .wiki-payout-list .v-g { color: var(--gold); font-weight: 600; }
 .wiki-payout-list .v-s { color: var(--str); font-weight: 600; }
 .wiki-payout-list .v-m { color: var(--mag); font-weight: 600; }
+.wiki-payout-special {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wiki-payout-list + .wiki-payout-special {
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.wiki-payout-special-code {
+  margin-top: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wiki-payout-list + .wiki-payout-special-code {
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.wiki-payout-special-code.sub {
+  margin-top: 4px;
+  color: var(--muted);
+  border-top: none;
+  padding-top: 0;
+}
+.wiki-payout-empty { color: var(--muted); font-size: 13px; }
 
 .wiki-multipliers {
   display: grid;

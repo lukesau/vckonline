@@ -53,6 +53,7 @@ If the DB is unreachable, `/api/wiki/cards` returns `503` with a `detail` descri
 - Per-type filter chips: expansion, citizen role, citizen roll-match signature, monster area/type, domain effect kind, banned-only, implementation status (Implemented / Unimplemented). The citizen roll-match chips are derived from the data: any unique combination of positive `roll_match1`/`roll_match2` values becomes a chip (e.g. `3`, `9/10`, `7/8`); negative/zero sentinels are ignored.
 - Responsive card grid using `400×570` art from `images/{kind}s/`.
 - Click any card → modal with full art, stats, role badges, raw effect strings, payouts, and (for dukes and nobles) the full multiplier matrix.
+  - Citizen/starter payout boxes (On turn / Off turn) only render non-zero Gold/Strength/Magic rows, and fold each turn's special payout into the same box. When a citizen has authored human text (`special_payout_on_turn_text` / `special_payout_off_turn_text`) it shows as the headline, with the raw effect string (`special_payout_on_turn` / `special_payout_off_turn`) underneath in muted monospace. Cards without authored text just show the raw effect string.
 - Banned entries render a red `Banned` badge but are still listed.
 - Unimplemented entries (see below) render a yellow `Unimplemented` badge but are still listed.
 

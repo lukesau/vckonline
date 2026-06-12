@@ -402,57 +402,60 @@ def _render_roles(card):
 
 
 def _payout_row(label, value, code_cls):
-    is_zero = not value or value == 0
-    zero_cls = " zero" if is_zero else ""
+    if not value or value == 0:
+        return ""
     return (
-        f'<li class="{zero_cls.lstrip()}">'
+        f'<li>'
         f'<span>{esc(label)}</span>'
-        f'<span class="{esc(code_cls)}">{esc(value or 0)}</span>'
+        f'<span class="{esc(code_cls)}">{esc(value)}</span>'
         f'</li>'
     )
 
 
+def _payout_block(title, gold, strength, magic, special, special_text=None):
+    rows = (
+        _payout_row("Gold", gold, "v-g")
+        + _payout_row("Strength", strength, "v-s")
+        + _payout_row("Magic", magic, "v-m")
+    )
+    body = ""
+    if rows:
+        body += f'<ul class="wiki-payout-list">{rows}</ul>'
+    sp = str(special or "").strip()
+    sp_text = str(special_text or "").strip()
+    if sp_text:
+        body += f'<div class="wiki-payout-special">{esc(sp_text)}</div>'
+    if sp:
+        # Always surface the raw effect string; muted when human text exists.
+        code_cls = "wiki-payout-special-code" + (" sub" if sp_text else "")
+        body += f'<div class="{code_cls}">{esc(sp)}</div>'
+    if not body:
+        body = '<div class="wiki-payout-empty">—</div>'
+    return f'<div class="wiki-payout-block"><h4>{esc(title)}</h4>{body}</div>'
+
+
 def _render_payout_card(card):
     sections = []
-    on_turn = (
-        '<div class="wiki-payout-block"><h4>On turn</h4>'
-        '<ul class="wiki-payout-list">'
-        f'{_payout_row("Gold", card.get("gold_payout_on_turn"), "v-g")}'
-        f'{_payout_row("Strength", card.get("strength_payout_on_turn"), "v-s")}'
-        f'{_payout_row("Magic", card.get("magic_payout_on_turn"), "v-m")}'
-        '</ul></div>'
+    on_turn = _payout_block(
+        "On turn",
+        card.get("gold_payout_on_turn"),
+        card.get("strength_payout_on_turn"),
+        card.get("magic_payout_on_turn"),
+        card.get("special_payout_on_turn"),
+        card.get("special_payout_on_turn_text"),
     )
-    off_turn = (
-        '<div class="wiki-payout-block"><h4>Off turn</h4>'
-        '<ul class="wiki-payout-list">'
-        f'{_payout_row("Gold", card.get("gold_payout_off_turn"), "v-g")}'
-        f'{_payout_row("Strength", card.get("strength_payout_off_turn"), "v-s")}'
-        f'{_payout_row("Magic", card.get("magic_payout_off_turn"), "v-m")}'
-        '</ul></div>'
+    off_turn = _payout_block(
+        "Off turn",
+        card.get("gold_payout_off_turn"),
+        card.get("strength_payout_off_turn"),
+        card.get("magic_payout_off_turn"),
+        card.get("special_payout_off_turn"),
+        card.get("special_payout_off_turn_text"),
     )
     sections.append(
         f'<section class="wiki-section"><h3>Payouts</h3>'
         f'<div class="wiki-payouts">{on_turn}{off_turn}</div></section>'
     )
-    sp_on = str(card.get("special_payout_on_turn") or "").strip()
-    sp_off = str(card.get("special_payout_off_turn") or "").strip()
-    if sp_on or sp_off:
-        body = ""
-        if sp_on:
-            body += (
-                f'<div class="wiki-effect">'
-                f'<span class="wiki-effect-label">ON TURN</span> {esc(sp_on)}'
-                f'</div>'
-            )
-        if sp_off:
-            body += (
-                f'<div class="wiki-effect">'
-                f'<span class="wiki-effect-label">OFF TURN</span> {esc(sp_off)}'
-                f'</div>'
-            )
-        sections.append(
-            f'<section class="wiki-section"><h3>Special effects</h3>{body}</section>'
-        )
     sc = card.get("special_citizen")
     if sc is not None and sc != 0 and sc is not False:
         sections.append(

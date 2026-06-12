@@ -19,6 +19,8 @@ INSERT INTO `vckonline`.`citizens`
 `has_special_payout_off_turn`,
 `special_payout_on_turn`,
 `special_payout_off_turn`,
+`special_payout_on_turn_text`,
+`special_payout_off_turn_text`,
 `special_citizen`)
 VALUES
 ('',/*name*/
@@ -41,4 +43,6 @@ VALUES
 ,/*has_special_payout_off_turn*/
 ,/*special_payout_on_turn*/
 ,/*special_payout_off_turn*/
+,/*special_payout_on_turn_text*/
+,/*special_payout_off_turn_text*/
 /*special_citizen*/);

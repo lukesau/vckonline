@@ -73,6 +73,8 @@ def _load_citizens(cur):
             row["expansion"],
         )
         entry = c.to_dict()
+        entry["special_payout_on_turn_text"] = row.get("special_payout_on_turn_text")
+        entry["special_payout_off_turn_text"] = row.get("special_payout_off_turn_text")
         entry["is_unimplemented"] = _is_unimplemented_citizen(row)
         entry["alt_variants"] = list_card_image_variants("citizen", row["id_citizens"])
         entry["has_alt_image"] = bool(entry["alt_variants"])
