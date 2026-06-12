@@ -1309,12 +1309,12 @@ function makeAgentsSection(state) {
     const agent = slots[i] || null;
     if (agent) {
       const card = mk('agent-card');
-      const nameEl = mk('agent-name');
-      nameEl.textContent = agent.name || 'Agent';
-      const textEl = mk('agent-text');
-      textEl.textContent = agent.activation_effect_text || '';
-      card.appendChild(nameEl);
-      card.appendChild(textEl);
+      const img = document.createElement('img');
+      img.className = 'agent-card-img';
+      img.src = `/card-image/agent/${agent.agent_id}`;
+      img.alt = agent.name || 'Agent';
+      img.loading = 'lazy';
+      card.appendChild(img);
 
       const engageable = agent.engageable !== false;
       const affordable = _playerCanAffordAgent(state, agent);
@@ -1334,17 +1334,6 @@ function makeAgentsSection(state) {
     row.appendChild(slot);
   }
 
-  const deckWrap = mk('agents-deck');
-  const deckBack = mk('agents-deck-back');
-  deckWrap.appendChild(deckBack);
-  const deckCount = mk('agents-deck-count');
-  deckCount.textContent = String(state.agents_deck_size || 0);
-  deckWrap.appendChild(deckCount);
-  const deckLabel = mk('agents-deck-label');
-  deckLabel.textContent = 'Deck';
-  deckWrap.appendChild(deckLabel);
-  row.appendChild(deckWrap);
-
   sec.appendChild(row);
   return sec;
 }
@@ -1352,6 +1341,12 @@ function makeAgentsSection(state) {
 function openEngageAgentModal(slotIndex, agent) {
   const overlay = mk('agent-engage-overlay');
   const panel = mk('agent-engage-panel');
+
+  const img = document.createElement('img');
+  img.className = 'agent-engage-img';
+  img.src = `/card-image/agent/${agent.agent_id}`;
+  img.alt = agent.name || 'Agent';
+  panel.appendChild(img);
 
   const title = document.createElement('h3');
   title.textContent = `Engage ${agent.name || 'Agent'}?`;

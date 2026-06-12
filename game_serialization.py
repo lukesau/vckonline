@@ -187,7 +187,6 @@ class GameObjectEncoder(JSONEncoder):
                 "agents_slots": [
                     _agent_slot_to_wire(a) for a in (getattr(obj, "agents_slots", None) or [])
                 ],
-                "agents_deck_size": len(getattr(obj, "agents_deck", None) or []),
                 "agents_enabled": bool(getattr(obj, "agents_enabled", lambda: False)()),
                 "pending_reroll_twilight_used": bool(getattr(obj, "_pending_reroll_twilight_used", False)),
                 "pending_reroll_blood_moon_used": bool(getattr(obj, "_pending_reroll_blood_moon_used", False)),
