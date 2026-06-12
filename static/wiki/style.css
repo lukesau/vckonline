@@ -775,6 +775,30 @@ a.wiki-card:visited { color: inherit; }
 }
 .wiki-payout-empty { color: var(--muted); font-size: 13px; }
 
+.wiki-effect-text {
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wiki-effect-code {
+  margin-top: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wiki-effect-code.sub { color: var(--muted); }
+.wiki-effect-text + .wiki-effect-code { margin-top: 6px; }
+.wiki-effect-code-label {
+  text-transform: uppercase;
+  font-size: 10px;
+  color: var(--accent-soft);
+  margin-right: 4px;
+}
+
 .wiki-multipliers {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));

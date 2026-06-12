@@ -339,24 +339,42 @@ def _stat(cls, label, value):
     )
 
 
+def _signed(value, positive):
+    """Format a stat with a leading +/- so costs and rewards read clearly.
+
+    Zero is rendered bare (no sign); non-numeric values pass through unchanged.
+    """
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if n == 0:
+        return str(n)
+    return f"{'+' if positive else '-'}{abs(n)}"
+
+
 def _render_stats_row(tab, card):
     stats = []
+    is_monster = tab == "monsters"
     if card.get("gold_cost") is not None:
         stats.append(_stat("gold", "Cost", f"{card['gold_cost']}g"))
     if card.get("strength_cost") is not None:
-        stats.append(_stat("str", "Strength", str(card["strength_cost"])))
+        value = _signed(card["strength_cost"], False) if is_monster else str(card["strength_cost"])
+        stats.append(_stat("str", "Strength", value))
     magic_cost = card.get("magic_cost")
     if magic_cost is not None and magic_cost > 0:
-        stats.append(_stat("mag", "Magic", str(magic_cost)))
+        value = _signed(magic_cost, False) if is_monster else str(magic_cost)
+        stats.append(_stat("mag", "Magic", value))
     if card.get("vp_reward") is not None:
-        stats.append(_stat("vp", "VP", str(card["vp_reward"])))
+        value = _signed(card["vp_reward"], True) if is_monster else str(card["vp_reward"])
+        stats.append(_stat("vp", "VP", value))
     if tab == "monsters":
-        if card.get("gold_reward") is not None:
-            stats.append(_stat("gold", "Gold reward", str(card["gold_reward"])))
+        if card.get("gold_reward"):
+            stats.append(_stat("gold", "Gold reward", _signed(card["gold_reward"], True)))
         if card.get("strength_reward"):
-            stats.append(_stat("str", "Strength reward", str(card["strength_reward"])))
+            stats.append(_stat("str", "Strength reward", _signed(card["strength_reward"], True)))
         if card.get("magic_reward"):
-            stats.append(_stat("mag", "Magic reward", str(card["magic_reward"])))
+            stats.append(_stat("mag", "Magic reward", _signed(card["magic_reward"], True)))
     if tab in ("citizens", "starters", "events") and card.get("roll_match1") is not None:
         rolls = [r for r in (card.get("roll_match1"), card.get("roll_match2")) if r and r > 0]
         if rolls:
@@ -468,17 +486,22 @@ def _render_payout_card(card):
 
 def _render_monster_rewards(card):
     sections = []
+    sr = str(card.get("special_reward") or "").strip()
+    sr_text = str(card.get("special_reward_text") or "").strip()
+    if card.get("has_special_reward") and sr:
+        body = ""
+        if sr_text:
+            body += f'<div class="wiki-effect-text">{esc(sr_text)}</div>'
+        code_cls = "wiki-effect-code" + (" sub" if sr_text else "")
+        body += f'<div class="{code_cls}">{esc(sr)}</div>'
+        sections.append(
+            f'<section class="wiki-section"><h3>Special reward</h3>{body}</section>'
+        )
     sc = str(card.get("special_cost") or "").strip()
     if card.get("has_special_cost") and sc:
         sections.append(
             f'<section class="wiki-section"><h3>Special cost</h3>'
-            f'<div class="wiki-effect">{esc(sc)}</div></section>'
-        )
-    sr = str(card.get("special_reward") or "").strip()
-    if card.get("has_special_reward") and sr:
-        sections.append(
-            f'<section class="wiki-section"><h3>Special reward</h3>'
-            f'<div class="wiki-effect">{esc(sr)}</div></section>'
+            f'<div class="wiki-effect-code">{esc(sc)}</div></section>'
         )
     if not sections:
         return ""
@@ -486,28 +509,25 @@ def _render_monster_rewards(card):
 
 
 def _render_domain(card):
-    sections = []
     passive = str(card.get("passive_effect") or "").strip()
     activation = str(card.get("activation_effect") or "").strip()
     text = str(card.get("effect_text") or card.get("text") or "").strip()
-    if passive:
-        sections.append(
-            f'<section class="wiki-section"><h3>Passive effect</h3>'
-            f'<div class="wiki-effect">{esc(passive)}</div></section>'
-        )
-    if activation:
-        sections.append(
-            f'<section class="wiki-section"><h3>Activation effect</h3>'
-            f'<div class="wiki-effect">{esc(activation)}</div></section>'
-        )
+    body = ""
     if text:
-        sections.append(
-            f'<section class="wiki-section"><h3>Rules text</h3>'
-            f'<div class="wiki-rules-text">{esc(text)}</div></section>'
-        )
-    if not sections:
+        body += f'<div class="wiki-effect-text">{esc(text)}</div>'
+    codes = []
+    if activation:
+        codes.append(("Activation", activation))
+    if passive:
+        codes.append(("Passive", passive))
+    show_labels = len(codes) > 1
+    for label, raw in codes:
+        sub = " sub" if text else ""
+        prefix = f'<span class="wiki-effect-code-label">{label}</span> ' if show_labels else ""
+        body += f'<div class="wiki-effect-code{sub}">{prefix}{esc(raw)}</div>'
+    if not body:
         return ""
-    return f'<div>{"".join(sections)}</div>'
+    return f'<div><section class="wiki-section"><h3>Effect</h3>{body}</section></div>'
 
 
 def _render_event(card):
@@ -518,12 +538,18 @@ def _render_event(card):
         ("passive_effect", "Passive effect"),
         ("special_reward", "Special reward"),
     ):
-        val = str(card.get(key) or "").strip()
-        if val:
-            sections.append(
-                f'<section class="wiki-section"><h3>{esc(title)}</h3>'
-                f'<div class="wiki-effect">{esc(val)}</div></section>'
-            )
+        raw = str(card.get(key) or "").strip()
+        if not raw:
+            continue
+        text = str(card.get(f"{key}_text") or "").strip()
+        body = ""
+        if text:
+            body += f'<div class="wiki-effect-text">{esc(text)}</div>'
+        code_cls = "wiki-effect-code" + (" sub" if text else "")
+        body += f'<div class="{code_cls}">{esc(raw)}</div>'
+        sections.append(
+            f'<section class="wiki-section"><h3>{esc(title)}</h3>{body}</section>'
+        )
     if not sections:
         return ""
     return f'<div>{"".join(sections)}</div>'

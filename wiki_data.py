@@ -106,6 +106,7 @@ def _load_monsters(cur):
             row["expansion"],
         )
         entry = m.to_dict()
+        entry["special_reward_text"] = row.get("special_reward_text")
         entry["is_unimplemented"] = _is_unimplemented_monster(row)
         entry["alt_variants"] = list_card_image_variants("monster", row["id_monsters"])
         entry["has_alt_image"] = bool(entry["alt_variants"])
@@ -231,6 +232,8 @@ def _load_starters(cur):
             row.get("activation_trigger", "") or "",
         )
         entry = s.to_dict()
+        entry["special_payout_on_turn_text"] = row.get("special_payout_on_turn_text")
+        entry["special_payout_off_turn_text"] = row.get("special_payout_off_turn_text")
         entry["is_unimplemented"] = _is_unimplemented_starter(row)
         entry["alt_variants"] = list_card_image_variants("starter", row["id_starters"])
         entry["has_alt_image"] = bool(entry["alt_variants"])
