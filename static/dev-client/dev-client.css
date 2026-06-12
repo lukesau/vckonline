@@ -165,7 +165,8 @@ body { font-family: Arial, sans-serif; max-width: 1200px; margin: 0 auto; paddin
                 padding: 4px 0;
             }
             .rejoin-name { min-width: 160px; font-weight: bold; }
-            .rejoin-copy-btn { margin: 0; }
+            .rejoin-copy-btn,
+            .rejoin-qr-btn { margin: 0; }
             .tableau-seat-layout {
                 position: relative;
                 width: 100%;

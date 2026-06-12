@@ -23,7 +23,91 @@ function showSpectatorBanner() {
   leave.className = 'spectator-banner-leave';
   leave.textContent = 'Leave';
   bar.appendChild(leave);
+  if (GAME_ID && typeof VCK_REJOIN !== 'undefined' && VCK_REJOIN.openRejoinPrompt) {
+    const rejoin = document.createElement('button');
+    rejoin.type = 'button';
+    rejoin.className = 'spectator-banner-rejoin';
+    rejoin.textContent = 'Rejoin';
+    rejoin.addEventListener('click', () => VCK_REJOIN.openRejoinPrompt(GAME_ID));
+    bar.appendChild(rejoin);
+  }
   document.body.appendChild(bar);
+}
+
+function diceInfoRejoinUrl() {
+  if (typeof VCK_REJOIN !== 'undefined' && VCK_REJOIN.rejoinUrl) {
+    return VCK_REJOIN.rejoinUrl(GAME_ID, PLAYER_ID);
+  }
+  const q = new URLSearchParams({ game_id: GAME_ID, player_id: PLAYER_ID });
+  return `${location.origin}/?${q}`;
+}
+
+function refreshDiceInfoRejoinHost(host, state) {
+  if (!host || SPECTATOR || !GAME_ID || !PLAYER_ID) return;
+  const code = ((state && state.my_rejoin_code) || '').toString().trim();
+  const fp = `${code}|${GAME_ID}|${PLAYER_ID}`;
+  if (host.dataset.fp === fp) return;
+  host.dataset.fp = fp;
+  host.innerHTML = '';
+
+  const title = document.createElement('div');
+  title.className = 'dice-info-rejoin-title';
+  title.textContent = 'Rejoin on another device';
+  host.appendChild(title);
+
+  if (code) {
+    const codeEl = document.createElement('div');
+    codeEl.className = 'dice-info-rejoin-code';
+    codeEl.textContent = code;
+    codeEl.title = 'Your rejoin code — enter this if you lost your session';
+    host.appendChild(codeEl);
+  } else {
+    const wait = document.createElement('div');
+    wait.className = 'dice-info-rejoin-wait';
+    wait.textContent = 'Loading rejoin code…';
+    host.appendChild(wait);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'dice-info-rejoin-actions';
+
+  const copyLink = document.createElement('button');
+  copyLink.type = 'button';
+  copyLink.className = 'dice-info-rejoin-btn';
+  copyLink.textContent = 'Copy link';
+  copyLink.addEventListener('click', async () => {
+    const url = diceInfoRejoinUrl();
+    const copyFn = (typeof VCK_REJOIN !== 'undefined' && VCK_REJOIN.copyText)
+      ? VCK_REJOIN.copyText
+      : null;
+    const ok = copyFn ? await copyFn(url) : false;
+    const prev = copyLink.textContent;
+    copyLink.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(() => { copyLink.textContent = prev; }, 1500);
+  });
+  actions.appendChild(copyLink);
+
+  const showQr = document.createElement('button');
+  showQr.type = 'button';
+  showQr.className = 'dice-info-rejoin-btn';
+  showQr.textContent = 'Show QR';
+  showQr.addEventListener('click', () => {
+    if (typeof VCK_REJOIN === 'undefined' || !VCK_REJOIN.openQrModal) return;
+    VCK_REJOIN.openQrModal(diceInfoRejoinUrl(), {
+      title: 'Scan to rejoin',
+      subtitle: code || undefined,
+    });
+  });
+  actions.appendChild(showQr);
+
+  host.appendChild(actions);
+
+  const hint = document.createElement('div');
+  hint.className = 'dice-info-rejoin-hint';
+  hint.textContent = code
+    ? 'Scan the QR on your phone, or enter the code from the lobby’s Active games list.'
+    : 'Use the link or QR to open this seat on another device.';
+  host.appendChild(hint);
 }
 
 // Crimson Seas adds a whole bundle of mechanics (the Sail/island board, maps,
@@ -996,6 +1080,13 @@ function openDiceInfoModal(state) {
   rulebook.rel = 'noopener noreferrer';
   panel.appendChild(rulebook);
 
+  let rejoinHost = null;
+  if (!SPECTATOR && GAME_ID && PLAYER_ID) {
+    rejoinHost = document.createElement('div');
+    rejoinHost.className = 'dice-info-rejoin';
+    panel.appendChild(rejoinHost);
+  }
+
   const logHost = document.createElement('div');
   panel.appendChild(logHost);
 
@@ -1042,6 +1133,8 @@ function openDiceInfoModal(state) {
       rebuilt.scrollTop = prevScrollTop;
       lastLogFingerprint = fp;
     }
+
+    refreshDiceInfoRejoinHost(rejoinHost, s);
   }
 
   renderFromState();

@@ -730,30 +730,18 @@
             }
 
             function rejoinUrlFor(gameId, pid) {
+                if (typeof VCK_REJOIN !== 'undefined' && VCK_REJOIN.rejoinUrl) {
+                    return VCK_REJOIN.rejoinUrl(gameId, pid);
+                }
                 const q = new URLSearchParams({ game_id: gameId, player_id: pid });
                 return `${location.origin}/?${q}`;
             }
 
             async function copyTextToClipboard(text) {
-                try {
-                    if (navigator.clipboard && navigator.clipboard.writeText) {
-                        await navigator.clipboard.writeText(text);
-                        return true;
-                    }
-                } catch (_) { /* fall through to legacy path */ }
-                try {
-                    const ta = document.createElement('textarea');
-                    ta.value = text;
-                    ta.style.position = 'fixed';
-                    ta.style.opacity = '0';
-                    document.body.appendChild(ta);
-                    ta.select();
-                    const ok = document.execCommand('copy');
-                    document.body.removeChild(ta);
-                    return ok;
-                } catch (_) {
-                    return false;
+                if (typeof VCK_REJOIN !== 'undefined' && VCK_REJOIN.copyText) {
+                    return VCK_REJOIN.copyText(text);
                 }
+                return false;
             }
 
             function refreshRejoinLinks(gameState) {
@@ -791,8 +779,20 @@
                         setTimeout(() => { btn.textContent = prev; }, 1500);
                     };
 
+                    const qrBtn = document.createElement('button');
+                    qrBtn.type = 'button';
+                    qrBtn.className = 'rejoin-qr-btn';
+                    qrBtn.textContent = 'Show QR';
+                    qrBtn.title = url;
+                    qrBtn.onclick = () => {
+                        if (typeof VCK_REJOIN !== 'undefined' && VCK_REJOIN.openQrModal) {
+                            VCK_REJOIN.openQrModal(url, { title: `Rejoin as ${nm}`, subtitle: pid });
+                        }
+                    };
+
                     row.appendChild(label);
                     row.appendChild(btn);
+                    row.appendChild(qrBtn);
                     list.appendChild(row);
                 });
             }

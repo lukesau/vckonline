@@ -717,6 +717,18 @@ function _renderActiveGameRow(game) {
   });
   row.appendChild(btn);
 
+  if (typeof VCK_REJOIN !== 'undefined' && VCK_REJOIN.openRejoinPrompt) {
+    const rejoinBtn = document.createElement('button');
+    rejoinBtn.type = 'button';
+    rejoinBtn.className = 'lobby-btn lobby-btn-ghost active-games-rejoin-btn';
+    rejoinBtn.textContent = 'Rejoin';
+    rejoinBtn.addEventListener('click', () => {
+      _closeActiveGamesDialog();
+      VCK_REJOIN.openRejoinPrompt(game.game_id);
+    });
+    row.appendChild(rejoinBtn);
+  }
+
   return row;
 }
 

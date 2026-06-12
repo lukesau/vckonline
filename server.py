@@ -393,6 +393,7 @@ def _maybe_start_lobby_game(lb: Lobby):
         if getattr(new_game, "phase", None) == "action":
             break
     games[new_game_id] = new_game
+    _init_game_rejoin_codes(new_game_id, new_game)
     _record_snapshot(new_game_id, new_game)
 
     lobbies.pop(lb.lobby_id, None)
@@ -460,6 +461,68 @@ gamers: List[GameMember] = []
 # natural undo boundaries.
 _GAME_HISTORY_MAX_LEN = 200
 game_histories: Dict[str, deque] = {}
+
+# Per-game human-readable rejoin codes (game-scoped, not global player ids).
+# game_id -> {"by_code": {NORMALIZED: player_id}, "by_player": {player_id: DISPLAY}}
+game_rejoin_registry: Dict[str, dict] = {}
+_rejoin_attempt_times: Dict[str, deque] = {}
+_REJOIN_WORDS_A = (
+    "BLUE", "RED", "GOLD", "JADE", "ROSE", "MIST", "SNOW", "FIRE", "IRON", "MOSS",
+    "DARK", "PALE", "WILD", "BOLD", "CALM", "DEEP", "FAST", "HIGH", "KIND", "LUCK",
+)
+_REJOIN_WORDS_B = (
+    "FOX", "WOLF", "HAWK", "BEAR", "LYNX", "DEER", "FROG", "OWL", "LION", "SEAL",
+    "FISH", "CROW", "DOVE", "MOTH", "NEST", "PINE", "REED", "STAR", "TIDE", "WAVE",
+)
+_REJOIN_RATE_MAX = 12
+_REJOIN_RATE_WINDOW_S = 60.0
+
+
+def _normalize_rejoin_code(code: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (code or "").upper())
+
+
+def _mint_rejoin_code(taken: set) -> tuple:
+    """Return (display_code, normalized_key) unique within `taken`."""
+    for _ in range(200):
+        display = f"{random.choice(_REJOIN_WORDS_A)}-{random.choice(_REJOIN_WORDS_B)}-{random.randint(10, 99)}"
+        key = _normalize_rejoin_code(display)
+        if key and key not in taken:
+            return display, key
+    fallback = str(shortuuid.uuid())[:8].upper()
+    return fallback, _normalize_rejoin_code(fallback)
+
+
+def _init_game_rejoin_codes(game_id: str, game: Game) -> None:
+    taken = set()
+    by_code = {}
+    by_player = {}
+    for p in getattr(game, "player_list", []) or []:
+        pid = str(getattr(p, "player_id", "") or "").strip()
+        if not pid:
+            continue
+        display, key = _mint_rejoin_code(taken)
+        taken.add(key)
+        by_code[key] = pid
+        by_player[pid] = display
+    if by_code:
+        game_rejoin_registry[game_id] = {"by_code": by_code, "by_player": by_player}
+
+
+def _clear_game_rejoin_codes(game_id: str) -> None:
+    game_rejoin_registry.pop(game_id, None)
+    _rejoin_attempt_times.pop(game_id, None)
+
+
+def _rejoin_rate_ok(game_id: str) -> bool:
+    now = time.time()
+    dq = _rejoin_attempt_times.setdefault(game_id, deque())
+    while dq and dq[0] < now - _REJOIN_RATE_WINDOW_S:
+        dq.popleft()
+    if len(dq) >= _REJOIN_RATE_MAX:
+        return False
+    dq.append(now)
+    return True
 
 
 def _record_snapshot(game_id: str, game: Game) -> None:
@@ -1025,6 +1088,7 @@ async def _finish_draft(lobby_id: str):
             if getattr(new_game, "phase", None) == "action":
                 break
         games[new_game_id] = new_game
+        _init_game_rejoin_codes(new_game_id, new_game)
         _record_snapshot(new_game_id, new_game)
         _hurry_up_reset(new_game_id)
         lobbies.pop(lobby_id, None)
@@ -1102,6 +1166,10 @@ class SetDukeSelectCountRequest(BaseModel):
 
 class AbandonGameRequest(BaseModel):
     player_id: str
+
+
+class RejoinRequest(BaseModel):
+    rejoin_code: str
 
 
 class ResourcePayment(BaseModel):
@@ -1751,6 +1819,13 @@ def _serialize_game_for_player(game, viewer_player_id: Optional[str]):
             if projection is not None:
                 p["duke_vp_projection"] = projection
 
+    if viewer_player_id:
+        reg = game_rejoin_registry.get(getattr(game, "game_id", None) or state.get("game_id") or "")
+        if reg:
+            code = (reg.get("by_player") or {}).get(str(viewer_player_id))
+            if code:
+                state["my_rejoin_code"] = code
+
     return state
 
 
@@ -1816,6 +1891,7 @@ async def _initiate_game_shutdown(game_id: str, reason: str, initiated_by_player
             return
         games.pop(game_id, None)
         game_histories.pop(game_id, None)
+        _clear_game_rejoin_codes(game_id)
         _hurry_up_cancel(game_id)
         # Just in case anything re-added entries.
         global gamers
@@ -2244,6 +2320,43 @@ async def step_game_back(game_id: str):
     }
 
 
+@app.post("/api/game/{game_id}/rejoin")
+async def rejoin_game(game_id: str, request: RejoinRequest):
+    """Claim a seat in an active game using a human-readable rejoin code.
+
+    Returns the opaque player_id for the matched seat so the client can
+    resume play (cookie + URL). Codes are minted at game start and scoped to
+    this game only.
+    """
+    game = games.get(game_id)
+    if not game:
+        return game_not_found_json()
+    if getattr(game, "shutdown", None):
+        raise HTTPException(status_code=400, detail="This game is ending")
+    if getattr(game, "phase", None) == "game_over":
+        raise HTTPException(status_code=400, detail="This game has ended")
+    if not _rejoin_rate_ok(game_id):
+        raise HTTPException(status_code=429, detail="Too many attempts; try again in a minute")
+
+    reg = game_rejoin_registry.get(game_id)
+    if not reg:
+        raise HTTPException(status_code=400, detail="Rejoin is not available for this game")
+
+    key = _normalize_rejoin_code(request.rejoin_code)
+    if not key:
+        raise HTTPException(status_code=400, detail="Enter your rejoin code")
+
+    player_id = (reg.get("by_code") or {}).get(key)
+    if not player_id:
+        raise HTTPException(status_code=404, detail="Invalid rejoin code")
+
+    in_game = any(str(getattr(p, "player_id", "")) == str(player_id) for p in getattr(game, "player_list", []) or [])
+    if not in_game:
+        raise HTTPException(status_code=404, detail="That seat is no longer in this game")
+
+    return {"game_id": game_id, "player_id": player_id, "message": "Rejoined"}
+
+
 @app.post("/api/game/{game_id}/abandon")
 async def abandon_game(game_id: str, request: AbandonGameRequest):
     """Abandon a game. Ends the game for everyone, then destroys it after 30s."""
@@ -2277,6 +2390,7 @@ async def startup_event():
             for game_id in inactive_games:
                 del games[game_id]
                 game_histories.pop(game_id, None)
+                _clear_game_rejoin_codes(game_id)
                 _hurry_up_cancel(game_id)
                 # Remove gamers from this game
                 global gamers
