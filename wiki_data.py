@@ -269,6 +269,32 @@ def _load_nobles(cur):
     return out
 
 
+def _load_agents(cur):
+    rows = _fetch_all(cur, "SELECT * FROM agents ORDER BY id_agents")
+    out = []
+    for row in rows:
+        out.append({
+            "id_agents":              row["id_agents"],
+            "name":                   row["name"],
+            "activation_effect":      row["activation_effect"],
+            "activation_effect_text": row["activation_effect_text"],
+        })
+    return out
+
+
+def _load_relics(cur):
+    rows = _fetch_all(cur, "SELECT * FROM relics ORDER BY id_relics")
+    out = []
+    for row in rows:
+        out.append({
+            "id_relics":           row["id_relics"],
+            "name":                row["name"],
+            "passive_effect":      row["passive_effect"],
+            "passive_effect_text": row["passive_effect_text"],
+        })
+    return out
+
+
 def load_all_cards_for_wiki():
     """Return a dict of `{citizens, monsters, domains, dukes, starters}` lists.
 
@@ -297,6 +323,8 @@ def load_all_cards_for_wiki():
                 "starters": _load_starters(cur),
                 "events": _load_events(cur),
                 "nobles": _load_nobles(cur),
+                "agents": _load_agents(cur),
+                "relics": _load_relics(cur),
             }
         finally:
             cur.close()

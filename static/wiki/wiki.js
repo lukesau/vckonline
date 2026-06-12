@@ -6,7 +6,7 @@
 (() => {
   "use strict";
 
-  const TYPE_ORDER = ["citizens", "monsters", "domains", "dukes", "starters", "events", "nobles"];
+  const TYPE_ORDER = ["citizens", "monsters", "domains", "dukes", "starters", "events", "nobles", "agents", "relics"];
   const TYPE_LABELS = {
     citizens: "Citizens",
     monsters: "Monsters",
@@ -15,6 +15,8 @@
     starters: "Starters",
     events:   "Events",
     nobles:   "Nobles",
+    agents:   "Agents",
+    relics:   "Relics",
   };
   // The card-image endpoint expects the *singular* type name.
   const TYPE_TO_IMAGE_KIND = {
@@ -25,6 +27,8 @@
     starters: "starter",
     events:   "event",
     nobles:   "noble",
+    agents:   "agent",
+    relics:   "relic",
   };
   const TYPE_TO_ID_FIELD = {
     citizens: "citizen_id",
@@ -34,6 +38,8 @@
     starters: "starter_id",
     events:   "id_events",
     nobles:   "noble_id",
+    agents:   "id_agents",
+    relics:   "id_relics",
   };
 
   // Special non-card tab: a flat list of rulebook PDFs (no DB, no card grid).
@@ -546,6 +552,8 @@
           c.special_cost,
           c.passive_effect,
           c.activation_effect,
+          c.passive_effect_text,
+          c.activation_effect_text,
           c.roll_effect,
           c.effect_text,
           c.special_duke_payout,
@@ -884,7 +892,27 @@
     if (type === "dukes") return renderDuke(card);
     if (type === "events") return renderEvent(card);
     if (type === "nobles") return renderNoble(card);
+    if (type === "agents") return renderAgent(card);
+    if (type === "relics") return renderRelic(card);
     return null;
+  }
+
+  function renderAgent(card) {
+    const text = (card.activation_effect_text || "").toString().trim();
+    if (!text) return null;
+    return h("section", { class: "wiki-section" },
+      h("h3", {}, "Activation effect"),
+      h("div", { class: "wiki-effect" }, text),
+    );
+  }
+
+  function renderRelic(card) {
+    const text = (card.passive_effect_text || "").toString().trim();
+    if (!text) return null;
+    return h("section", { class: "wiki-section" },
+      h("h3", {}, "Passive effect"),
+      h("div", { class: "wiki-effect" }, text),
+    );
   }
 
   function payoutRow(label, value, codeCls) {

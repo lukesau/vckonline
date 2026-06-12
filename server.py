@@ -63,6 +63,8 @@ _CARD_IMAGE_DIRS: Dict[str, Path] = {
     "starter": _REPO_ROOT / "images" / "starters",
     "event":   _REPO_ROOT / "images" / "exhausted",
     "noble":   _REPO_ROOT / "images" / "nobles",
+    "agent":   _REPO_ROOT / "images" / "agents",
+    "relic":   _REPO_ROOT / "images" / "relics",
 }
 # Single 400x570 back for all Exhausted tokens; generate with scripts/card_image_utils.py from images/exhausted_back.jpg
 _EXHAUSTED_CARD_JPEG = _REPO_ROOT / "images" / "exhausted" / "exhausted_card.jpg"
@@ -82,6 +84,8 @@ _LOBBY_BG_CARD_RANGES = {
     "duke": [[1, 21], [99, 102]],
     "event": [[1, 36]],
     "noble": [[1, 16]],
+    "agent": [[1, 15]],
+    "relic": [[1, 13]],
 }
 
 

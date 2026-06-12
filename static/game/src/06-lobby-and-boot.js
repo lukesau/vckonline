@@ -15,6 +15,8 @@ const LOBBY_BG_FALLBACK_RANGES = {
   duke: [[1, 21], [99, 102]],
   event: [[1, 36]],
   noble: [[1, 16]],
+  agent: [[1, 15]],
+  relic: [[1, 13]],
 };
 
 // Crimson Seas Nobles are smaller cards with a taller/narrower proportion than
@@ -73,6 +75,8 @@ const LOBBY_BG_TYPE_BORDERS = {
   starter: '#526263',
   event: '#A83524',
   noble: '#423632',
+  agent: '#A0782C',
+  relic: '#AB5A21',
 };
 
 function lobbyBgTypeFromUrl(url) {
