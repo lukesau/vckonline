@@ -7,12 +7,12 @@
 // adding art only means widening a range (server is the source of truth via
 // `/api/lobby/background-cards`; this is the fallback if that fetch fails).
 // Each type maps to a list of inclusive `[lo, hi]` sub-ranges so disjoint id
-// blocks (e.g. dukes 1-21 and 99-102) skip the empty ids between them.
+// blocks can skip empty ids between them.
 const LOBBY_BG_FALLBACK_RANGES = {
   citizen: [[1, 49]],
   domain: [[1, 80]],
   monster: [[1, 189]],
-  duke: [[1, 21], [99, 102]],
+  duke: [[1, 25]],
   event: [[1, 36]],
   noble: [[1, 16]],
   agent: [[1, 15]],
