@@ -210,6 +210,26 @@ def is_unimplemented_starter(row):
     return False
 
 
+def is_unimplemented_noble(row):
+    if row.get("has_special_duke_payout") and _is_empty_special(row.get("special_duke_payout")):
+        return True
+    return False
+
+
+def is_unimplemented_agent(row):
+    # Agents carry no `has_*` gate: every agent always has an activation
+    # effect, so the engine-resolvable `activation_effect` string being empty
+    # is what marks the row an unfilled stub (the human `activation_effect_text`
+    # may still be authored).
+    return _is_empty_special(row.get("activation_effect"))
+
+
+def is_unimplemented_relic(row):
+    # Relics mirror agents: every relic always has a passive effect, so an
+    # empty engine-resolvable `passive_effect` string is the stub signal.
+    return _is_empty_special(row.get("passive_effect"))
+
+
 def is_unimplemented_event(row):
     if row.get("has_roll_effect") and _is_empty_special(row.get("roll_effect")):
         return True

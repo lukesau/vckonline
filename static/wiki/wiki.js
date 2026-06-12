@@ -343,9 +343,14 @@
       });
       groups.push({ key: "is_monster", label: "Monster", options: [{ value: "yes", label: "Is monster" }] });
       groups.push(implementationGroup);
+    } else if (type === "starters") {
+      groups.push(implementationGroup);
     } else if (type === "nobles") {
       groups.push(roleGroup);
       groups.push({ key: "special", label: "Payout", options: [{ value: "yes", label: "Has special payout" }] });
+      groups.push(implementationGroup);
+    } else if (type === "agents" || type === "relics") {
+      groups.push(implementationGroup);
     }
     return groups;
   }

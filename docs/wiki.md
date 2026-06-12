@@ -58,15 +58,20 @@ If the DB is unreachable, `/api/wiki/cards` returns `503` with a `detail` descri
 
 ## Unimplemented detection
 
-A row is flagged as `is_unimplemented` when one of its `has_*` flags is truthy but the matching text column is `NULL` or whitespace-only. The convention across the codebase is that the `has_*` boolean gates whether the engine will try to resolve an effect string, so a flagged row with no text is an authored stub that has not been filled in yet. The predicates live in `card_filters.py` and are imported by both `wiki_data.py` (to render the badge) and `game_setup.py` (to filter the `random` preset's card pool — see `docs/database.md`), so a card the wiki shows as Unimplemented is the same card the random preset refuses to deal.
+A row is flagged as `is_unimplemented` when the engine-resolvable effect string the engine would run is `NULL` or whitespace-only. For most card types a `has_*` boolean gates whether the engine will try to resolve that string, so a flagged row with no string is an authored stub that has not been filled in yet. Agents and relics have **no** `has_*` gate — every agent always has an activation effect and every relic always has a passive effect — so for those types the machine column being empty is itself the stub signal (the human-facing `*_effect_text` may still be authored). The predicates live in `card_filters.py` and are imported by both `wiki_data.py` (to render the badge) and `game_setup.py` (to filter the `random` preset's card pool — see `docs/database.md`), so a card the wiki shows as Unimplemented is the same card the random preset refuses to deal.
 
 | Card type | Trigger columns |
 |-----------|-----------------|
 | Citizens  | `has_special_payout_on_turn` + `special_payout_on_turn`, `has_special_payout_off_turn` + `special_payout_off_turn` |
 | Monsters  | `has_special_reward` + `special_reward`, `has_special_cost` + `special_cost` |
 | Domains   | `has_passive_effect` + `passive_effect`, `has_activation_effect` + `activation_effect` |
+| Starters  | `has_special_payout_on_turn` + `special_payout_on_turn`, `has_special_payout_off_turn` + `special_payout_off_turn` |
+| Events    | `has_roll_effect` + `roll_effect`, `has_activation_effect` + `activation_effect`, `has_passive_effect` + `passive_effect`, `has_special_reward` + `special_reward` |
+| Nobles    | `has_special_duke_payout` + `special_duke_payout` |
+| Agents    | `activation_effect` (no `has_*` flag — always required) |
+| Relics    | `passive_effect` (no `has_*` flag — always required) |
 
-Dukes and starters are not flagged today — dukes are pure stat multipliers, and starters use the same payout columns as citizens but no production starter ships with an unfilled special.
+Dukes are never flagged — they are pure stat multipliers with no effect string, so there is nothing to leave unfilled. Every other type is covered. Note that today most starters and nobles ship fully implemented (no unfilled special), so those badges only appear if a future stub is added, whereas every agent and relic currently has a `NULL` machine effect and so shows as Unimplemented.
 
 ## Alternate artwork
 

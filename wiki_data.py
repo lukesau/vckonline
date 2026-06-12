@@ -19,6 +19,10 @@ from card_filters import (
     is_unimplemented_monster as _is_unimplemented_monster,
     is_unimplemented_domain as _is_unimplemented_domain,
     is_unimplemented_event as _is_unimplemented_event,
+    is_unimplemented_starter as _is_unimplemented_starter,
+    is_unimplemented_noble as _is_unimplemented_noble,
+    is_unimplemented_agent as _is_unimplemented_agent,
+    is_unimplemented_relic as _is_unimplemented_relic,
     list_card_image_variants,
 )
 
@@ -225,6 +229,7 @@ def _load_starters(cur):
             row.get("activation_trigger", "") or "",
         )
         entry = s.to_dict()
+        entry["is_unimplemented"] = _is_unimplemented_starter(row)
         entry["alt_variants"] = list_card_image_variants("starter", row["id_starters"])
         entry["has_alt_image"] = bool(entry["alt_variants"])
         out.append(entry)
@@ -263,6 +268,7 @@ def _load_nobles(cur):
         # because it was never set. Report the real expansion so the wiki badge
         # is consistent with other crimsonseas cards.
         entry["expansion"] = "crimsonseas"
+        entry["is_unimplemented"] = _is_unimplemented_noble(row)
         entry["alt_variants"] = list_card_image_variants("noble", row["id_nobles"])
         entry["has_alt_image"] = bool(entry["alt_variants"])
         out.append(entry)
@@ -278,6 +284,7 @@ def _load_agents(cur):
             "name":                   row["name"],
             "activation_effect":      row["activation_effect"],
             "activation_effect_text": row["activation_effect_text"],
+            "is_unimplemented":       _is_unimplemented_agent(row),
         })
     return out
 
@@ -291,6 +298,7 @@ def _load_relics(cur):
             "name":                row["name"],
             "passive_effect":      row["passive_effect"],
             "passive_effect_text": row["passive_effect_text"],
+            "is_unimplemented":    _is_unimplemented_relic(row),
         })
     return out
 
@@ -300,10 +308,11 @@ def load_all_cards_for_wiki():
 
     Each list contains plain dicts (via `cards.*.to_dict()`). Domain and
     duke entries additionally include an `is_banned` boolean so the
-    client can flag entries listed in `banned_cards.json`. Citizen,
-    monster, and domain entries also include an `is_unimplemented`
-    boolean — true when a row has a special/effect flag set but the
-    corresponding text column is null or empty.
+    client can flag entries listed in `banned_cards.json`. Every type
+    except dukes also includes an `is_unimplemented` boolean — true when
+    the engine-resolvable effect string is null or empty (see
+    `card_filters.py` for the per-type rule). Dukes are pure stat
+    multipliers with no effect string, so they are never flagged.
 
     Raises whatever `mariadb` raises if the DB is unreachable. The
     server wraps the call so the wiki endpoint returns a clear error
