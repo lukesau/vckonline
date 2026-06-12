@@ -291,7 +291,9 @@
 
     if (type === "citizens") {
       groups.push(roleGroup);
-      const rolls = unique(cards.map((c) => c.dataset.rolls)).sort();
+      const rolls = unique(cards.map((c) => c.dataset.rolls)).sort(
+        (a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0)
+      );
       if (rolls.length) {
         groups.push({ key: "roll_match", label: "Rolls", options: rolls.map((v) => ({ value: v, label: v })) });
       }
