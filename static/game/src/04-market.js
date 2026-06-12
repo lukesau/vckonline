@@ -969,6 +969,9 @@ function appendTomePaymentUI(panel, card, ctx) {
 }
 
 function appendMarketActionUI(infoEl, card, ctx) {
+  // Spectators are read-only: they can open any card to read it, but never get
+  // hire/build/slay payment fields or buttons.
+  if (SPECTATOR) return;
   // Suppress the entire pay-fields/action panel while the player has a
   // prompt pending (visible or minimized via "Peek board"). Without this,
   // a minimized may-slay/finalize-roll/etc. prompt would let the player

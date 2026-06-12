@@ -124,7 +124,9 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   display: inline-flex;
   align-items: baseline;
   gap: 8px;
+  text-decoration: none;
 }
+a.wiki-tab { color: inherit; }
 .wiki-tab:hover { background: var(--bg-card); }
 .wiki-tab.active {
   background: var(--bg);
@@ -291,7 +293,10 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em;
   position: relative;
   display: flex;
   flex-direction: column;
+  text-decoration: none;
+  color: inherit;
 }
+a.wiki-card:visited { color: inherit; }
 .wiki-card:hover {
   transform: translateY(-2px);
   border-color: var(--accent-soft);

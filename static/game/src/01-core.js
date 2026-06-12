@@ -6,9 +6,22 @@ const _vckStored =
   typeof VCK_CLIENT_META !== 'undefined' && VCK_CLIENT_META.read ? VCK_CLIENT_META.read() : {};
 const _qGid = (params.get('game_id') || '').trim();
 const _qPid = (params.get('player_id') || '').trim();
-const GAME_ID = _qGid || String(_vckStored.game_id || '').trim();
-const PLAYER_ID = _qPid || String(_vckStored.player_id || '').trim();
-if (typeof VCK_CLIENT_META !== 'undefined' && VCK_CLIENT_META.patch) {
+const _storedGid = String(_vckStored.game_id || '').trim();
+const _storedPid = String(_vckStored.player_id || '').trim();
+
+// ── Spectator mode ─────────────────────────────────────────────────────────
+// A spectate link is the game URL WITHOUT a player_id ("?game_id=…"). When a
+// game_id is present in the URL but no player_id is, the page is read-only
+// spectator: it observes board state + prompts and can "Peek board" but cannot
+// take any action. We still honor a returning real player who follows a bare
+// game link — if their stored creds match THIS game we resume them as a player
+// rather than dropping them into spectator mode.
+const SPECTATOR = !!(_qGid && !_qPid && !(_storedPid && _storedGid === _qGid));
+const GAME_ID = _qGid || _storedGid;
+const PLAYER_ID = SPECTATOR ? '' : (_qPid || _storedPid);
+// True when this page can observe a game at all (player or spectator).
+const CAN_VIEW_GAME = !!(GAME_ID && (PLAYER_ID || SPECTATOR));
+if (typeof VCK_CLIENT_META !== 'undefined' && VCK_CLIENT_META.patch && !SPECTATOR) {
   if (_qGid || _qPid) {
     const pu = {};
     if (_qGid) pu.game_id = _qGid;

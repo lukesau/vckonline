@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="/images/valeria_logo.png" type="image/png">
   <title>Valeria Card Kingdoms Wiki</title>
-  <meta name="description" content="Browse every card in the Valeria Card Kingdoms Online database. Citizens, monsters, domains, dukes, and starters with full stats and effects.">
+  <meta name="description" content="Browse every card in the Valeria Card Kingdoms Online database. Citizens, monsters, domains, dukes, starters, events, nobles, agents, and relics with full stats and effects.">
   <link rel="stylesheet" href="/static/wiki/style.css">
 </head>
-<body>
+<body<!--WIKI_BODY_ATTRS-->>
   <header class="wiki-header">
     <div class="wiki-header-inner">
       <a class="wiki-brand" href="/wiki">
@@ -22,7 +22,7 @@
         <a class="wiki-headlink" href="/counter">Counter</a>
       </div>
     </div>
-    <nav class="wiki-tabs" id="wiki-tabs"></nav>
+    <nav class="wiki-tabs" id="wiki-tabs"><!--WIKI_TABS--></nav>
     <details class="wiki-filters-wrap" id="wiki-filters-wrap">
       <summary class="wiki-filters-summary">
         <span class="wiki-filters-summary-label">Search &amp; filters</span>
@@ -41,18 +41,18 @@
         <div class="wiki-filters" id="wiki-filters"></div>
       </div>
     </details>
-    <div class="wiki-status" id="wiki-status">Loading card data...</div>
+    <!--WIKI_STATUS-->
   </header>
 
   <main class="wiki-main">
-    <div id="wiki-grid" class="wiki-grid" aria-live="polite"></div>
+    <div id="wiki-grid" class="wiki-grid" aria-live="polite"><!--WIKI_GRID--></div>
     <p id="wiki-empty" class="wiki-empty" hidden>No cards match your filters.</p>
   </main>
 
-  <div id="wiki-modal" class="wiki-modal-backdrop" aria-hidden="true">
+  <div id="wiki-modal" <!--WIKI_MODAL_ATTRS-->>
     <div class="wiki-modal" role="dialog" aria-modal="true" aria-labelledby="wiki-modal-title">
       <button type="button" class="wiki-modal-close" id="wiki-modal-close" aria-label="Close">&times;</button>
-      <div class="wiki-modal-body" id="wiki-modal-body"></div>
+      <div class="wiki-modal-body" id="wiki-modal-body"><!--WIKI_MODAL_BODY--></div>
     </div>
   </div>
 

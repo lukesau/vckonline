@@ -38,7 +38,7 @@ function passivePollWouldDisruptUi() {
 function startPassiveStatePolling() {
   if (passiveStatePollTimer) return;
   passiveStatePollTimer = setInterval(() => {
-    if (!GAME_ID || !PLAYER_ID) return;
+    if (!CAN_VIEW_GAME) return;
     if (document.hidden) return;
     if (concurrentPollTimer) return;
     if (passivePollWouldDisruptUi()) return;
@@ -53,9 +53,12 @@ function stopPassiveStatePolling() {
 }
 
 async function fetchGameStateFromApi() {
-  if (!GAME_ID || !PLAYER_ID) return;
+  if (!CAN_VIEW_GAME) return;
   try {
-    const res = await fetch(`/api/game/${encodeURIComponent(GAME_ID)}/state?player_id=${encodeURIComponent(PLAYER_ID)}`);
+    const stateUrl = PLAYER_ID
+      ? `/api/game/${encodeURIComponent(GAME_ID)}/state?player_id=${encodeURIComponent(PLAYER_ID)}`
+      : `/api/game/${encodeURIComponent(GAME_ID)}/state`;
+    const res = await fetch(stateUrl);
     if (!res.ok) {
       if (res.status === 404) {
         const payload = await res.json().catch(() => ({}));
@@ -3405,7 +3408,7 @@ function computePromptFingerprint(state) {
 let lastPromptFingerprint = '';
 
 function renderPromptModal(state) {
-  if (!GAME_ID || !PLAYER_ID) return;
+  if (!CAN_VIEW_GAME) return;
 
   // If the prompt has materially changed since the last render and the user
   // had it minimized, surface the new state so they don't miss it.

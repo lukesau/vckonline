@@ -330,6 +330,7 @@
                 updateConcurrentPolling(data);
                 updatePassiveGamePolling(data);
                 refreshTableauActionButtons(data);
+                refreshRejoinLinks(data);
                 maybeAutoHarvest(data);
                 refreshHistoryStatus();
             }
@@ -725,6 +726,74 @@
                     btn.style.top = `${y}px`;
                     btn.onclick = () => { openSeatTableau(pid); };
                     wrap.appendChild(btn);
+                });
+            }
+
+            function rejoinUrlFor(gameId, pid) {
+                const q = new URLSearchParams({ game_id: gameId, player_id: pid });
+                return `${location.origin}/?${q}`;
+            }
+
+            async function copyTextToClipboard(text) {
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(text);
+                        return true;
+                    }
+                } catch (_) { /* fall through to legacy path */ }
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    const ok = document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    return ok;
+                } catch (_) {
+                    return false;
+                }
+            }
+
+            function refreshRejoinLinks(gameState) {
+                const list = document.getElementById('rejoinLinksList');
+                if (!list) return;
+                list.innerHTML = '';
+                const gameId = (gameState && gameState.game_id) || currentGameId;
+                const players = gameState && Array.isArray(gameState.player_list) ? gameState.player_list : [];
+                const cleanPlayers = players.filter(p => p && p.player_id);
+                if (!gameId || !cleanPlayers.length) {
+                    list.textContent = 'No active game.';
+                    return;
+                }
+                cleanPlayers.forEach((p) => {
+                    const pid = p.player_id;
+                    const nm = ((p.name ?? '').toString().trim() || pid);
+                    const url = rejoinUrlFor(gameId, pid);
+
+                    const row = document.createElement('div');
+                    row.className = 'rejoin-row';
+
+                    const label = document.createElement('span');
+                    label.className = 'rejoin-name';
+                    label.textContent = nm + (pid === playerId ? ' (you)' : '');
+
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'rejoin-copy-btn';
+                    btn.textContent = 'Copy game URL';
+                    btn.title = url;
+                    btn.onclick = async () => {
+                        const ok = await copyTextToClipboard(url);
+                        const prev = btn.textContent;
+                        btn.textContent = ok ? 'Copied!' : 'Copy failed';
+                        setTimeout(() => { btn.textContent = prev; }, 1500);
+                    };
+
+                    row.appendChild(label);
+                    row.appendChild(btn);
+                    list.appendChild(row);
                 });
             }
 

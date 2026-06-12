@@ -646,6 +646,149 @@ async function openPresetPreview(preset, opts = {}) {
   }
 }
 
+// ── Active games / spectate dialog ───────────────────────────────────────────
+// Clicking the "N active games" text in the lobby footer opens this overlay,
+// which lists every live game with light metadata (players, turn/phase, whose
+// turn it is) and a Spectate button. Spectating is just the game URL with no
+// player_id, so the button navigates to `/?game_id=<id>`.
+const ACTIVE_GAME_PHASE_LABELS = {
+  roll: 'Roll phase',
+  harvest: 'Harvest phase',
+  action: 'Action phase',
+  cleanup: 'Cleanup',
+  setup: 'Setup',
+  game_over: 'Game over',
+};
+
+function _closeActiveGamesDialog() {
+  const existing = document.getElementById('active-games-overlay');
+  if (existing) existing.remove();
+  document.removeEventListener('keydown', _activeGamesKeydown);
+}
+
+function _activeGamesKeydown(e) {
+  if (e.key === 'Escape') _closeActiveGamesDialog();
+}
+
+function _activeGamePhaseLabel(phase) {
+  return ACTIVE_GAME_PHASE_LABELS[phase] || (phase ? String(phase) : '');
+}
+
+function _renderActiveGameRow(game) {
+  const row = document.createElement('li');
+  row.className = 'active-games-row';
+
+  const info = document.createElement('div');
+  info.className = 'active-games-info';
+
+  const title = document.createElement('div');
+  title.className = 'active-games-title';
+  const preset = lobbyPresetShortLabel(game.preset);
+  const pc = Number(game.player_count) || (game.players || []).length;
+  title.textContent = `${preset} • ${pc} player${pc === 1 ? '' : 's'}`;
+  info.appendChild(title);
+
+  const meta = document.createElement('div');
+  meta.className = 'active-games-meta';
+  const bits = [];
+  if (game.turn_number) bits.push(`Turn ${game.turn_number}`);
+  const phaseLabel = _activeGamePhaseLabel(game.phase);
+  if (phaseLabel) bits.push(phaseLabel);
+  if (game.active_player_name) bits.push(`${truncateLobbyName(game.active_player_name, 12)}'s turn`);
+  meta.textContent = bits.join(' • ');
+  info.appendChild(meta);
+
+  const roster = (game.players || []).map(n => truncateLobbyName(n, 10)).join(', ');
+  if (roster) {
+    const rosterEl = document.createElement('div');
+    rosterEl.className = 'active-games-roster';
+    rosterEl.textContent = roster;
+    info.appendChild(rosterEl);
+  }
+
+  row.appendChild(info);
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'lobby-btn lobby-btn-primary active-games-spectate-btn';
+  btn.textContent = 'Spectate';
+  btn.addEventListener('click', () => {
+    window.location.href = `/?game_id=${encodeURIComponent(game.game_id)}`;
+  });
+  row.appendChild(btn);
+
+  return row;
+}
+
+async function openActiveGamesDialog() {
+  _closeActiveGamesDialog();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'active-games-overlay';
+  overlay.className = 'active-games-overlay';
+  overlay.addEventListener('click', e => { if (e.target === overlay) _closeActiveGamesDialog(); });
+
+  const panel = document.createElement('div');
+  panel.className = 'active-games-panel';
+
+  const header = document.createElement('div');
+  header.className = 'active-games-header';
+  const heading = document.createElement('h2');
+  heading.className = 'active-games-heading';
+  heading.textContent = 'Active games';
+  header.appendChild(heading);
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'active-games-close';
+  closeBtn.setAttribute('aria-label', 'Close');
+  closeBtn.textContent = '×';
+  closeBtn.addEventListener('click', _closeActiveGamesDialog);
+  header.appendChild(closeBtn);
+  panel.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'active-games-body';
+  const loading = document.createElement('p');
+  loading.className = 'active-games-status';
+  loading.textContent = 'Loading games…';
+  body.appendChild(loading);
+  panel.appendChild(body);
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  document.addEventListener('keydown', _activeGamesKeydown);
+
+  try {
+    const res = await fetch('/api/lobby/active-games');
+    const data = await res.json().catch(() => ({}));
+    if (!document.getElementById('active-games-overlay')) return;
+    if (!res.ok) {
+      const detail = data.detail != null ? String(data.detail) : res.statusText;
+      throw new Error(detail || 'Request failed');
+    }
+    body.innerHTML = '';
+    const list = Array.isArray(data.games) ? data.games : [];
+    if (!list.length) {
+      const empty = document.createElement('p');
+      empty.className = 'active-games-status';
+      empty.textContent = 'No active games right now.';
+      body.appendChild(empty);
+      return;
+    }
+    const ul = document.createElement('ul');
+    ul.className = 'active-games-list';
+    list.forEach(g => ul.appendChild(_renderActiveGameRow(g)));
+    body.appendChild(ul);
+  } catch (err) {
+    if (!document.getElementById('active-games-overlay')) return;
+    body.innerHTML = '';
+    const errEl = document.createElement('p');
+    errEl.className = 'active-games-status active-games-status--error';
+    errEl.textContent = `Could not load games: ${err.message || err}`;
+    body.appendChild(errEl);
+  }
+}
+
 // Some players pick very long display names. In compact "meta" surfaces
 // inside the lobby modal (the comma-separated roster on each lobby
 // card, the owner name embedded in the in-lobby meta line, etc.) those
@@ -1338,7 +1481,22 @@ function initLobbyModal() {
     if (metaEl) {
       const lc = (data.lobbies || []).length;
       const gc = typeof data.game_count === 'number' ? data.game_count : 0;
-      metaEl.textContent = `${lc} open lobb${lc === 1 ? 'y' : 'ies'} • ${gc} active game${gc === 1 ? '' : 's'}`;
+      metaEl.innerHTML = '';
+      metaEl.appendChild(
+        document.createTextNode(`${lc} open lobb${lc === 1 ? 'y' : 'ies'} • `),
+      );
+      const gamesLabel = `${gc} active game${gc === 1 ? '' : 's'}`;
+      if (gc > 0) {
+        const gamesLink = document.createElement('button');
+        gamesLink.type = 'button';
+        gamesLink.className = 'lobby-active-games-link';
+        gamesLink.textContent = gamesLabel;
+        gamesLink.title = 'View active games and spectate';
+        gamesLink.addEventListener('click', () => openActiveGamesDialog());
+        metaEl.appendChild(gamesLink);
+      } else {
+        metaEl.appendChild(document.createTextNode(gamesLabel));
+      }
     }
 
     if (!stepBrowse.classList.contains('lobby-hidden')) {
@@ -2125,9 +2283,10 @@ function initLobbyModal() {
 // ── Boot ──────────────────────────────────────────────────────────────────
 initVirtualKeyboardWatcher();
 
-if (!GAME_ID || !PLAYER_ID) {
+if (!CAN_VIEW_GAME) {
   initLobbyModal();
 } else {
+  if (SPECTATOR) showSpectatorBanner();
   connect();
   initOpponentTableauWheelScroll();
   initPlayerDetailModal();
@@ -2141,7 +2300,7 @@ if (!GAME_ID || !PLAYER_ID) {
   // we don't sit on a stale board waiting for the next event.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
-    if (!GAME_ID || !PLAYER_ID) return;
+    if (!CAN_VIEW_GAME) return;
     fetchGameStateFromApi();
   });
   window.addEventListener('resize', () => {

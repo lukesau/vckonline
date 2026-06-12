@@ -1,500 +1,320 @@
 /*
- * Read-only browser for the vckonline card database.
- * Lives behind /wiki — talks to /api/wiki/cards on the FastAPI server.
+ * Progressive enhancement for the server-rendered card wiki.
+ * Card grids and detail HTML come from the server; this script adds
+ * search, filters, modal navigation, and alt-artwork controls.
  */
 
 (() => {
   "use strict";
 
-  const TYPE_ORDER = ["citizens", "monsters", "domains", "dukes", "starters", "events", "nobles", "agents", "relics"];
-  const TYPE_LABELS = {
-    citizens: "Citizens",
-    monsters: "Monsters",
-    domains:  "Domains",
-    dukes:    "Dukes",
-    starters: "Starters",
-    events:   "Events",
-    nobles:   "Nobles",
-    agents:   "Agents",
-    relics:   "Relics",
-  };
-  // The card-image endpoint expects the *singular* type name.
+  const TYPE_ORDER = [
+    "citizens", "monsters", "domains", "dukes", "starters",
+    "events", "nobles", "agents", "relics",
+  ];
   const TYPE_TO_IMAGE_KIND = {
     citizens: "citizen",
     monsters: "monster",
-    domains:  "domain",
-    dukes:    "duke",
+    domains: "domain",
+    dukes: "duke",
     starters: "starter",
-    events:   "event",
-    nobles:   "noble",
-    agents:   "agent",
-    relics:   "relic",
+    events: "event",
+    nobles: "noble",
+    agents: "agent",
+    relics: "relic",
   };
-  const TYPE_TO_ID_FIELD = {
-    citizens: "citizen_id",
-    monsters: "monster_id",
-    domains:  "domain_id",
-    dukes:    "duke_id",
-    starters: "starter_id",
-    events:   "id_events",
-    nobles:   "noble_id",
-    agents:   "id_agents",
-    relics:   "id_relics",
-  };
-
-  // Special non-card tab: a flat list of rulebook PDFs (no DB, no card grid).
   const RULEBOOKS_TAB = "rulebooks";
 
-  // ── URL routing ────────────────────────────────────────────────────────
-  // The wiki is a single page but reflects its state in the path so links are
-  // shareable: `/wiki/<tab>` selects a tab and `/wiki/<tab>/<id>` opens a
-  // card's modal. The server serves the same SPA for all three shapes.
-  const isKnownTab = (t) => TYPE_ORDER.includes(t) || t === RULEBOOKS_TAB;
-  const wikiUrlForType = (type) => `/wiki/${type}`;
-  const wikiUrlForCard = (type, id) => `/wiki/${type}/${id}`;
-  const normalizePath = (p) => p.replace(/\/+$/, "");
-
-  // Parse `location.pathname` into { type, id }. Unknown tabs are dropped so a
-  // bad link falls back to the default tab instead of an empty grid.
-  function currentRoute() {
-    const parts = normalizePath(location.pathname).split("/").filter(Boolean);
-    let type = parts[1] ? decodeURIComponent(parts[1]) : null;
-    let id = parts[2] != null ? decodeURIComponent(parts[2]) : null;
-    if (type && !isKnownTab(type)) { type = null; id = null; }
-    return { type, id };
-  }
-
-  function findCard(type, id) {
-    if (!state.raw) return null;
-    const field = TYPE_TO_ID_FIELD[type];
-    if (!field) return null;
-    const target = String(id);
-    return (state.raw.cards[type] || []).find(c => String(c[field]) === target) || null;
-  }
-
-  function pushType(type) {
-    if (normalizePath(location.pathname) !== wikiUrlForType(type)) {
-      history.pushState({ type }, "", wikiUrlForType(type));
-    }
-  }
-  function pushCard(type, id) {
-    if (normalizePath(location.pathname) !== wikiUrlForCard(type, id)) {
-      history.pushState({ type, id, modal: true }, "", wikiUrlForCard(type, id));
-    }
-  }
-
   const state = {
-    raw: null,                  // full payload from /api/wiki/cards
-    rulebooks: null,            // cached PDF list from /api/wiki/rulebooks
-    ruleCards: null,            // cached rule-card list from /api/wiki/rulebooks
-    // Per rule-card front/back selection: slug -> "front" | "back" (absent = front).
-    ruleCardSides: new Map(),
-    activeType: "citizens",
+    activeType: document.body.dataset.activeTab || "citizens",
     search: "",
-    filters: {},                // { citizens: { role: 'shadow' }, monsters: { area: 'Forest' }, ... }
-    // Per-card alternate-artwork selection: `${type}_${id}` -> variant token
-    // (e.g. "alt_01"). Absent means the canonical art. Persists between the
-    // grid and the detail modal for one page session (no localStorage —
-    // refresh resets to canonical art).
+    filters: {},
     altSelections: new Map(),
+    ruleCardSides: new Map(),
   };
 
   const el = {
-    tabs:    document.getElementById("wiki-tabs"),
-    grid:    document.getElementById("wiki-grid"),
-    empty:   document.getElementById("wiki-empty"),
-    search:  document.getElementById("wiki-search"),
+    grid: document.getElementById("wiki-grid"),
+    empty: document.getElementById("wiki-empty"),
+    search: document.getElementById("wiki-search"),
     filters: document.getElementById("wiki-filters"),
     filtersWrap: document.getElementById("wiki-filters-wrap"),
     filtersCount: document.getElementById("wiki-filters-count"),
-    status:  document.getElementById("wiki-status"),
-    modal:   document.getElementById("wiki-modal"),
+    modal: document.getElementById("wiki-modal"),
     modalBody: document.getElementById("wiki-modal-body"),
     modalClose: document.getElementById("wiki-modal-close"),
   };
 
-  // Default the filter panel open on wide viewports and closed on narrow ones.
-  // The user can still toggle freely; we only set the initial state.
   const FILTER_BREAKPOINT_PX = 720;
-  el.filtersWrap.open = window.innerWidth > FILTER_BREAKPOINT_PX;
+  if (el.filtersWrap) {
+    el.filtersWrap.open = window.innerWidth > FILTER_BREAKPOINT_PX;
+  }
 
-  // ── tiny dom helpers ──────────────────────────────────────────────────
-  const h = (tag, attrs = {}, ...children) => {
-    const node = document.createElement(tag);
-    for (const [k, v] of Object.entries(attrs)) {
-      if (v == null || v === false) continue;
-      if (k === "class") node.className = v;
-      else if (k === "html") node.innerHTML = v;
-      else if (k === "onclick") node.addEventListener("click", v);
-      else if (k === "dataset") Object.assign(node.dataset, v);
-      else node.setAttribute(k, v);
+  const wikiUrlForType = (type) => `/wiki/${type}`;
+  const wikiUrlForCard = (type, id) => `/wiki/${type}/${id}`;
+  const normalizePath = (p) => p.replace(/\/+$/, "");
+
+  function currentRoute() {
+    const parts = normalizePath(location.pathname).split("/").filter(Boolean);
+    let type = parts[1] ? decodeURIComponent(parts[1]) : null;
+    let id = parts[2] != null ? decodeURIComponent(parts[2]) : null;
+    if (type && type !== RULEBOOKS_TAB && !TYPE_ORDER.includes(type)) {
+      type = null;
+      id = null;
     }
-    for (const c of children) {
-      if (c == null || c === false) continue;
-      node.append(c.nodeType ? c : document.createTextNode(c));
-    }
-    return node;
-  };
+    return { type, id };
+  }
 
-  const titleCase = (s) => (s || "").toString().replace(/\b\w/g, c => c.toUpperCase());
-
-  // Citizen-role icon art (lives at /images/<role>.png). Rendered alongside
-  // the text label so the wiki stays readable at a glance.
-  const ROLE_ICONS = {
-    shadow:  "/images/shadow.png",
-    holy:    "/images/holy.png",
-    soldier: "/images/soldier.png",
-    worker:  "/images/worker.png",
-  };
-  const roleIcon = (role) =>
-    ROLE_ICONS[role]
-      ? h("img", { class: "wiki-role-icon", src: ROLE_ICONS[role], alt: "", "aria-hidden": "true" })
-      : null;
-
-  // ── alt artwork helpers ───────────────────────────────────────────────
-  const altKey = (type, id) => `${type}_${id}`;
-  const getAltVariant = (type, id) => state.altSelections.get(altKey(type, id)) || "";
-  const setAltVariant = (type, id, token) => {
-    const k = altKey(type, id);
-    if (token) state.altSelections.set(k, token);
-    else       state.altSelections.delete(k);
-  };
-  // `variant` is a token string ("" / null = canonical art).
-  const cardImageUrl = (type, id, variant) => {
-    const kind = TYPE_TO_IMAGE_KIND[type];
+  function cardImageUrl(kind, id, variant, canonicalSrc) {
+    if (!variant && canonicalSrc) return canonicalSrc;
     const base = `/card-image/${kind}/${id}`;
     return variant ? `${base}?variant=${encodeURIComponent(variant)}` : base;
-  };
+  }
 
-  // "alt_01" -> "Alt 1", "alt" -> "Alt", anything else -> the raw token.
-  const altLabel = (token) => {
+  function altKey(type, id) {
+    return `${type}_${id}`;
+  }
+
+  function getAltVariant(type, id) {
+    return state.altSelections.get(altKey(type, id)) || "";
+  }
+
+  function setAltVariant(type, id, token) {
+    const k = altKey(type, id);
+    if (token) state.altSelections.set(k, token);
+    else state.altSelections.delete(k);
+  }
+
+  function altLabel(token) {
     const m = /^alt_0*(\d+)$/.exec(token);
     if (m) return `Alt ${parseInt(m[1], 10)}`;
     if (token === "alt") return "Alt";
     return token;
-  };
+  }
 
-  // Build the artwork image, its variant fallback, the Alt button, and (for
-  // multi-variant cards) a chooser overlay rendered over the art. Shared by
-  // the grid thumbnail and the detail modal. Returns { wrap, altBtn } where
-  // `wrap` is a positioned container holding the <img>; for the grid the Alt
-  // button is layered over the art inside `wrap`, for the modal it is returned
-  // separately so the caller can place it below the image.
-  const buildArtworkControls = (type, id, variants, { modal }) => {
-    variants = Array.isArray(variants) ? variants : [];
-    let current = getAltVariant(type, id);
-    if (current && !variants.includes(current)) current = "";
+  function parseVariants(raw) {
+    if (!raw) return [];
+    return raw.split(",").map((s) => s.trim()).filter(Boolean);
+  }
 
-    // Nobles are physically smaller cards (narrower, taller proportion than a
-    // standard card). Tag their art so the CSS can use the true aspect ratio
-    // and shrink the frame instead of cropping the taller image.
-    const isNoble = type === "nobles";
-    const imgClass = (modal ? "wiki-modal-image" : "wiki-card-image") + (isNoble ? " is-noble" : "");
-    const wrap = h("div", { class: "wiki-art-wrap" + (isNoble ? " is-noble" : "") });
-    const img = h("img", {
-      class: imgClass,
-      src: cardImageUrl(type, id, current),
-      alt: "",
-      loading: modal ? null : "lazy",
-    });
-    // A broken alternate degrades to the canonical art before "no image".
-    img.addEventListener("error", () => {
-      const src = img.getAttribute("src") || "";
-      const q = src.indexOf("?variant=");
-      if (q !== -1) { img.src = src.slice(0, q); return; }
-      img.replaceWith(h("div", { class: imgClass + " missing" }, "no image"));
-    });
-    wrap.appendChild(img);
+  function wireArtworkControls(root) {
+    const wraps = root.querySelectorAll(".wiki-art-wrap[data-card-type]");
+    wraps.forEach((wrap) => {
+      const tab = wrap.dataset.cardType;
+      const id = wrap.dataset.cardId;
+      const kind = wrap.dataset.imageKind;
+      const canonicalSrc = wrap.dataset.canonicalSrc || "";
+      const variants = parseVariants(wrap.dataset.variants);
+      const img = wrap.querySelector("img");
+      const btn = wrap.querySelector(".wiki-alt-toggle:not(.modal)")
+        || root.querySelector(`.wiki-alt-toggle.modal[data-card-type="${tab}"][data-card-id="${id}"]`);
+      if (!img || !variants.length) return;
 
-    let altBtn = null;
-    let chooser = null;
+      let current = getAltVariant(tab, id);
+      if (current && !variants.includes(current)) current = "";
 
-    const closeChooser = () => { if (chooser) { chooser.remove(); chooser = null; } };
-    const syncBtn = () => {
-      if (!altBtn) return;
-      const on = !!current;
-      altBtn.classList.toggle("active", on);
-      altBtn.setAttribute("aria-pressed", on ? "true" : "false");
-      altBtn.title = on ? "Change or clear alternate artwork" : "Show alternate artwork";
-      if (modal) altBtn.textContent = on ? `Showing ${altLabel(current)}` : "Show alternate artwork";
-    };
-    const setVariant = (token) => {
-      current = token;
-      setAltVariant(type, id, token);
-      img.src = cardImageUrl(type, id, current);
-      syncBtn();
-    };
-
-    const openChooser = () => {
-      closeChooser();
-      chooser = h("div", { class: "wiki-alt-chooser" });
-      chooser.addEventListener("click", (e) => e.stopPropagation());
-      const closeBtn = h("button", {
-        type: "button", class: "wiki-alt-chooser-close", "aria-label": "Close chooser",
-      }, "\u00d7");
-      closeBtn.addEventListener("click", (e) => { e.stopPropagation(); closeChooser(); });
-      const grid = h("div", { class: "wiki-alt-chooser-grid" });
-      const makeOpt = (token, label) => {
-        const opt = h("button", {
-          type: "button",
-          class: "wiki-alt-option" + (current === token ? " active" : ""),
-        });
-        const thumb = h("img", {
-          class: "wiki-alt-option-thumb" + (isNoble ? " is-noble" : ""), src: cardImageUrl(type, id, token), alt: "", loading: "lazy",
-        });
-        thumb.addEventListener("error", () => {
-          const s = thumb.getAttribute("src") || "";
-          const q = s.indexOf("?variant=");
-          if (q !== -1) thumb.src = s.slice(0, q);
-        });
-        opt.append(thumb, h("span", { class: "wiki-alt-option-label" }, label));
-        opt.addEventListener("click", (e) => { e.stopPropagation(); setVariant(token); closeChooser(); });
-        return opt;
+      const syncBtn = () => {
+        if (!btn) return;
+        const on = !!current;
+        btn.classList.toggle("active", on);
+        btn.setAttribute("aria-pressed", on ? "true" : "false");
+        if (btn.classList.contains("modal")) {
+          btn.textContent = on ? `Showing ${altLabel(current)}` : "Show alternate artwork";
+        }
       };
-      grid.appendChild(makeOpt("", "Original"));
-      variants.forEach((v) => grid.appendChild(makeOpt(v, altLabel(v))));
-      chooser.append(closeBtn, grid);
-      wrap.appendChild(chooser);
-    };
 
-    if (variants.length) {
-      altBtn = h("button", {
-        type: "button",
-        class: "wiki-alt-toggle" + (modal ? " modal" : ""),
-      }, modal ? "Show alternate artwork" : "Alt");
-      altBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (variants.length === 1) {
-          setVariant(current ? "" : variants[0]);
+      const setVariant = (token) => {
+        current = token;
+        setAltVariant(tab, id, token);
+        img.src = cardImageUrl(kind, id, current, canonicalSrc);
+        syncBtn();
+        // Keep grid thumbnail in sync when modal alt changes.
+        document.querySelectorAll(
+          `.wiki-art-wrap[data-card-type="${tab}"][data-card-id="${id}"] img`
+        ).forEach((other) => {
+          const otherWrap = other.closest(".wiki-art-wrap");
+          const otherCanonical = otherWrap ? (otherWrap.dataset.canonicalSrc || "") : canonicalSrc;
+          if (other !== img) other.src = cardImageUrl(kind, id, current, otherCanonical);
+        });
+      };
+
+      img.addEventListener("error", () => {
+        const src = img.getAttribute("src") || "";
+        const q = src.indexOf("?variant=");
+        if (q !== -1) {
+          img.src = src.slice(0, q);
           return;
         }
-        if (chooser) closeChooser();
-        else openChooser();
+        const cls = img.className;
+        const missing = document.createElement("div");
+        missing.className = cls + " missing";
+        missing.textContent = "no image";
+        img.replaceWith(missing);
       });
-      syncBtn();
-      if (!modal) wrap.appendChild(altBtn);  // layer over the thumbnail art
-    }
 
-    return { wrap, altBtn };
-  };
-
-  // ── boot ──────────────────────────────────────────────────────────────
-  {
-    const route = currentRoute();
-    if (route.type) state.activeType = route.type;
-  }
-  loadData();
-  window.addEventListener("popstate", applyRoute);
-  el.search.addEventListener("input", (e) => {
-    state.search = e.target.value.trim().toLowerCase();
-    render();
-  });
-  el.modalClose.addEventListener("click", closeModal);
-  el.modal.addEventListener("click", (e) => {
-    if (e.target === el.modal) closeModal();
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeModal();
-  });
-
-  async function loadData({ refresh = false } = {}) {
-    el.status.classList.remove("error");
-    el.status.textContent = "Loading card data...";
-    try {
-      const res = await fetch(`/api/wiki/cards${refresh ? "?refresh=1" : ""}`);
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail || `HTTP ${res.status}`);
-      }
-      state.raw = await res.json();
-      renderTabs();
-      renderFilters();
-      render();
-      applyInitialModalFromUrl();
-      el.status.textContent = "";
-      el.status.hidden = true;
-    } catch (err) {
-      el.status.hidden = false;
-      el.status.classList.add("error");
-      el.status.textContent = `Failed to load card data: ${err.message}. Is the DB tunnel up?`;
-      el.grid.innerHTML = "";
-      // Card data failed, but rulebooks are static files served independently —
-      // keep that tab reachable so the rules are still browsable.
-      renderTabs();
-    }
-  }
-
-  // ── tab bar ───────────────────────────────────────────────────────────
-  function renderTabs() {
-    el.tabs.innerHTML = "";
-    for (const type of (state.raw ? TYPE_ORDER : [])) {
-      const count = (state.raw.cards[type] || []).length;
-      const tab = h("button", {
-        class: "wiki-tab" + (type === state.activeType ? " active" : ""),
-        dataset: { type },
-      },
-        TYPE_LABELS[type],
-        h("span", { class: "wiki-tab-count" }, String(count))
-      );
-      tab.addEventListener("click", () => selectType(type));
-      el.tabs.appendChild(tab);
-    }
-
-    const rulebooksTab = h("button", {
-      class: "wiki-tab" + (state.activeType === RULEBOOKS_TAB ? " active" : ""),
-      dataset: { type: RULEBOOKS_TAB },
-    }, "Rulebooks");
-    rulebooksTab.addEventListener("click", () => selectType(RULEBOOKS_TAB));
-    el.tabs.appendChild(rulebooksTab);
-  }
-
-  // Switch tabs and reflect it in the URL (`/wiki/<type>`).
-  function selectType(type) {
-    state.activeType = type;
-    pushType(type);
-    renderTabs();
-    renderFilters();
-    render();
-  }
-
-  // ── per-type filter chips ─────────────────────────────────────────────
-  function renderFilters() {
-    el.filters.innerHTML = "";
-    const type = state.activeType;
-    // The rulebooks tab is a plain link list — no search or filter chips.
-    if (type === RULEBOOKS_TAB) {
-      el.filtersWrap.hidden = true;
-      return;
-    }
-    el.filtersWrap.hidden = false;
-    const cards = state.raw.cards[type] || [];
-    const groups = buildFilterGroupsFor(type, cards);
-    el.filters.hidden = groups.length === 0;
-    for (const group of groups) {
-      const groupEl = h("div", { class: "wiki-filter-group" },
-        h("span", { class: "wiki-filter-label" }, group.label));
-      const multiSelect = group.key === "role";
-      for (const opt of group.options) {
-        const selected = state.filters[type]?.[group.key];
-        const active = multiSelect
-          ? Array.isArray(selected) && selected.includes(opt.value)
-          : selected === opt.value;
-        const chipIcon = group.key === "role" ? roleIcon(opt.value) : null;
-        const chip = h("button", {
-          class: "wiki-chip" + (chipIcon ? " wiki-chip--icon" : "") + (active ? " active" : ""),
-        }, chipIcon, opt.label);
-        chip.addEventListener("click", () => {
-          state.filters[type] = state.filters[type] || {};
-          if (multiSelect) {
-            const current = Array.isArray(state.filters[type][group.key])
-              ? state.filters[type][group.key]
-              : [];
-            if (current.includes(opt.value)) {
-              const next = current.filter(v => v !== opt.value);
-              if (next.length) state.filters[type][group.key] = next;
-              else delete state.filters[type][group.key];
-            } else {
-              state.filters[type][group.key] = [...current, opt.value];
-            }
-          } else if (state.filters[type][group.key] === opt.value) {
-            delete state.filters[type][group.key];
-          } else {
-            state.filters[type][group.key] = opt.value;
+      if (btn) {
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (variants.length === 1) {
+            setVariant(current ? "" : variants[0]);
+            return;
           }
-          renderFilters();
-          render();
+          openAltChooser(wrap, tab, id, kind, variants, current, setVariant);
         });
-        groupEl.appendChild(chip);
+        syncBtn();
       }
-      el.filters.appendChild(groupEl);
-    }
-    updateActiveFilterCount();
+    });
   }
 
-  function updateActiveFilterCount() {
+  function openAltChooser(wrap, tab, id, kind, variants, current, setVariant) {
+    const existing = wrap.querySelector(".wiki-alt-chooser");
+    if (existing) { existing.remove(); return; }
+
+    const chooser = document.createElement("div");
+    chooser.className = "wiki-alt-chooser";
+    chooser.addEventListener("click", (e) => e.stopPropagation());
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "wiki-alt-chooser-close";
+    closeBtn.setAttribute("aria-label", "Close chooser");
+    closeBtn.textContent = "\u00d7";
+    closeBtn.addEventListener("click", (e) => { e.stopPropagation(); chooser.remove(); });
+
+    const grid = document.createElement("div");
+    grid.className = "wiki-alt-chooser-grid";
+
+    const makeOpt = (token, label) => {
+      const opt = document.createElement("button");
+      opt.type = "button";
+      opt.className = "wiki-alt-option" + (current === token ? " active" : "");
+      const thumb = document.createElement("img");
+      thumb.className = "wiki-alt-option-thumb";
+      thumb.src = cardImageUrl(kind, id, token, token ? "" : (wrap.dataset.canonicalSrc || ""));
+      thumb.alt = "";
+      thumb.loading = "lazy";
+      const lbl = document.createElement("span");
+      lbl.className = "wiki-alt-option-label";
+      lbl.textContent = label;
+      opt.append(thumb, lbl);
+      opt.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setVariant(token);
+        chooser.remove();
+      });
+      return opt;
+    };
+
+    grid.appendChild(makeOpt("", "Original"));
+    variants.forEach((v) => grid.appendChild(makeOpt(v, altLabel(v))));
+    chooser.append(closeBtn, grid);
+    wrap.appendChild(chooser);
+  }
+
+  function wireRuleCardControls(root) {
+    root.querySelectorAll(".wiki-alt-toggle[data-rule-card-slug]").forEach((btn) => {
+      if (btn.dataset.wiredRuleFlip) return;
+      btn.dataset.wiredRuleFlip = "1";
+      const slug = btn.dataset.ruleCardSlug;
+      const front = btn.dataset.frontUrl || "";
+      const back = btn.dataset.backUrl || "";
+      if (!slug || !front || !back) return;
+
+      const container = btn.closest(".wiki-modal-image-col") || btn.closest(".wiki-rule-card");
+      const img = container ? container.querySelector("img") : null;
+      const caption = container ? container.querySelector(".wiki-rule-card-side") : null;
+      if (!img) return;
+
+      let side = state.ruleCardSides.get(slug) || "front";
+      const urlFor = (s) => (s === "back" ? (back || front) : (front || back));
+      const sideLabel = (s) => (s === "back" ? "Back" : "Front");
+
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        side = side === "back" ? "front" : "back";
+        state.ruleCardSides.set(slug, side);
+        img.src = urlFor(side);
+        if (caption) caption.textContent = sideLabel(side);
+      });
+    });
+  }
+
+  // ── filters (derived from SSR data-* on cards) ───────────────────────
+  function gridCards() {
+    if (!el.grid) return [];
+    return Array.from(el.grid.querySelectorAll("a.wiki-card"));
+  }
+
+  function unique(arr) {
+    return Array.from(new Set(arr.filter(Boolean)));
+  }
+
+  function titleCase(s) {
+    return (s || "").toString().replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  function buildFilterGroups() {
     const type = state.activeType;
-    const active = Object.keys(state.filters[type] || {}).length;
-    if (active > 0) {
-      el.filtersCount.textContent = String(active);
-      el.filtersCount.classList.add("has-active");
-    } else {
-      el.filtersCount.textContent = "";
-      el.filtersCount.classList.remove("has-active");
-    }
-  }
-
-  function buildFilterGroupsFor(type, cards) {
+    const cards = gridCards();
     const groups = [];
-    const expansions = unique(cards.map(c => c.expansion).filter(Boolean));
+
+    const expansions = unique(cards.map((c) => c.dataset.expansion));
     if (expansions.length > 1) {
       groups.push({
         key: "expansion",
         label: "Expansion",
-        options: expansions.sort().map(v => ({ value: v, label: titleCase(v) })),
+        options: expansions.sort().map((v) => ({ value: v, label: titleCase(v) })),
       });
     }
+
     const implementationGroup = {
       key: "implementation",
       label: "Status",
       options: [
-        { value: "implemented",   label: "Implemented" },
+        { value: "implemented", label: "Implemented" },
         { value: "unimplemented", label: "Unimplemented" },
       ],
     };
-    // Multi-select group: selecting several roles matches cards that have ALL of them.
+
     const roleGroup = {
       key: "role",
       label: "Role",
+      multi: true,
       options: [
-        { value: "shadow",  label: "Shadow" },
-        { value: "holy",    label: "Holy" },
+        { value: "shadow", label: "Shadow" },
+        { value: "holy", label: "Holy" },
         { value: "soldier", label: "Soldier" },
-        { value: "worker",  label: "Worker" },
+        { value: "worker", label: "Worker" },
       ],
     };
+
     if (type === "citizens") {
       groups.push(roleGroup);
-      const rollSignatures = unique(cards.map(rollSignatureFor).filter(Boolean))
-        .sort(compareRollSignatures);
-      if (rollSignatures.length) {
-        groups.push({
-          key: "roll_match",
-          label: "Rolls",
-          options: rollSignatures.map(sig => ({ value: sig, label: sig })),
-        });
+      const rolls = unique(cards.map((c) => c.dataset.rolls)).sort();
+      if (rolls.length) {
+        groups.push({ key: "roll_match", label: "Rolls", options: rolls.map((v) => ({ value: v, label: v })) });
       }
       groups.push({
         key: "has_special",
         label: "Has effect",
         options: [
           { value: "any", label: "Any" },
-          { value: "on",  label: "On-turn" },
+          { value: "on", label: "On-turn" },
           { value: "off", label: "Off-turn" },
         ],
       });
       groups.push(implementationGroup);
     } else if (type === "monsters") {
-      const areas = unique(cards.map(c => c.area).filter(Boolean)).sort();
+      const areas = unique(cards.map((c) => c.dataset.area)).sort();
       if (areas.length) {
-        groups.push({
-          key: "area",
-          label: "Area",
-          options: areas.map(a => ({ value: a, label: a })),
-        });
+        groups.push({ key: "area", label: "Area", options: areas.map((a) => ({ value: a, label: a })) });
       }
-      const types = unique(cards.map(c => c.monster_type).filter(Boolean)).sort();
-      if (types.length > 1) {
-        groups.push({
-          key: "monster_type",
-          label: "Type",
-          options: types.map(a => ({ value: a, label: titleCase(a) })),
-        });
+      const mtypes = unique(cards.map((c) => c.dataset.monsterType)).sort();
+      if (mtypes.length > 1) {
+        groups.push({ key: "monster_type", label: "Type", options: mtypes.map((a) => ({ value: a, label: titleCase(a) })) });
       }
-      groups.push({
-        key: "has_special_reward",
-        label: "Reward",
-        options: [{ value: "yes", label: "Has special" }],
-      });
+      groups.push({ key: "has_special_reward", label: "Reward", options: [{ value: "yes", label: "Has special" }] });
       groups.push(implementationGroup);
     } else if (type === "domains") {
       groups.push(roleGroup);
@@ -502,364 +322,168 @@
         key: "effect",
         label: "Has effect",
         options: [
-          { value: "passive",    label: "Passive" },
+          { value: "passive", label: "Passive" },
           { value: "activation", label: "Activation" },
         ],
       });
       groups.push(implementationGroup);
-      groups.push({
-        key: "banned",
-        label: "Banned",
-        options: [{ value: "yes", label: "Banned only" }],
-      });
+      groups.push({ key: "banned", label: "Banned", options: [{ value: "yes", label: "Banned only" }] });
     } else if (type === "dukes") {
-      groups.push({
-        key: "banned",
-        label: "Banned",
-        options: [{ value: "yes", label: "Banned only" }],
-      });
+      groups.push({ key: "banned", label: "Banned", options: [{ value: "yes", label: "Banned only" }] });
     } else if (type === "events") {
       groups.push({
         key: "effect",
         label: "Has effect",
         options: [
-          { value: "roll",       label: "Roll" },
+          { value: "roll", label: "Roll" },
           { value: "activation", label: "Activation" },
-          { value: "passive",    label: "Passive" },
-          { value: "reward",     label: "Special reward" },
+          { value: "passive", label: "Passive" },
+          { value: "reward", label: "Special reward" },
         ],
       });
-      groups.push({
-        key: "is_monster",
-        label: "Monster",
-        options: [{ value: "yes", label: "Is monster" }],
-      });
+      groups.push({ key: "is_monster", label: "Monster", options: [{ value: "yes", label: "Is monster" }] });
       groups.push(implementationGroup);
     } else if (type === "nobles") {
       groups.push(roleGroup);
-      groups.push({
-        key: "special",
-        label: "Payout",
-        options: [{ value: "yes", label: "Has special payout" }],
-      });
+      groups.push({ key: "special", label: "Payout", options: [{ value: "yes", label: "Has special payout" }] });
     }
     return groups;
   }
 
-  function unique(arr) {
-    return Array.from(new Set(arr));
-  }
-
-  // Returns a canonical "A" or "A/B" string of a card's positive roll matches,
-  // or null if the card has no positive matches. Negative/zero sentinels (e.g.
-  // the -1 used in roll_match2 for single-match citizens) are dropped so a card
-  // like Dragoon (rolls 9, 10) groups under "9/10" and Kings Guard (7, 8) under
-  // "7/8", while a single-match citizen with rolls (3, -1) groups under "3".
-  function rollSignatureFor(card) {
-    const rolls = [card.roll_match1, card.roll_match2]
-      .map(r => Number(r))
-      .filter(r => Number.isFinite(r) && r > 0);
-    if (!rolls.length) return null;
-    rolls.sort((a, b) => a - b);
-    return rolls.join("/");
-  }
-
-  function compareRollSignatures(a, b) {
-    const [a1, a2 = 0] = a.split("/").map(Number);
-    const [b1, b2 = 0] = b.split("/").map(Number);
-    return a1 - b1 || a2 - b2;
-  }
-
-  // ── filtering pipeline ────────────────────────────────────────────────
-  // Role filters are multi-select: a card must carry EVERY selected role.
   function passesRoleFilter(card, roles) {
     if (!Array.isArray(roles) || !roles.length) return true;
-    return roles.every(role => (card[`${role}_count`] || 0) > 0);
+    return roles.every((role) => Number(card.dataset[role] || 0) > 0);
   }
 
-  function filteredCards() {
+  function cardPassesFilters(card) {
     const type = state.activeType;
-    const cards = state.raw.cards[type] || [];
     const f = state.filters[type] || {};
-    return cards.filter(c => {
-      if (state.search) {
-        const q = state.search;
-        const hay = [
-          c.name,
-          c.expansion,
-          c.area,
-          c.monster_type,
-          c.special_payout_on_turn,
-          c.special_payout_off_turn,
-          c.special_reward,
-          c.special_cost,
-          c.passive_effect,
-          c.activation_effect,
-          c.passive_effect_text,
-          c.activation_effect_text,
-          c.roll_effect,
-          c.effect_text,
-          c.special_duke_payout,
-        ].filter(Boolean).join(" ").toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      if (f.expansion && c.expansion !== f.expansion) return false;
-      if (f.implementation === "implemented" && c.is_unimplemented) return false;
-      if (f.implementation === "unimplemented" && !c.is_unimplemented) return false;
-      if (type === "citizens") {
-        if (!passesRoleFilter(c, f.role)) return false;
-        if (f.roll_match) {
-          const sig = rollSignatureFor(c);
-          if (sig !== f.roll_match) return false;
-        }
-        if (f.has_special) {
-          const on = !!c.has_special_payout_on_turn && !!String(c.special_payout_on_turn || "").trim();
-          const off = !!c.has_special_payout_off_turn && !!String(c.special_payout_off_turn || "").trim();
-          if (f.has_special === "any" && !(on || off)) return false;
-          if (f.has_special === "on" && !on) return false;
-          if (f.has_special === "off" && !off) return false;
-        }
-      }
-      if (type === "monsters") {
-        if (f.area && c.area !== f.area) return false;
-        if (f.monster_type && c.monster_type !== f.monster_type) return false;
-        if (f.has_special_reward === "yes" && !c.has_special_reward) return false;
-      }
-      if (type === "domains") {
-        if (!passesRoleFilter(c, f.role)) return false;
-        if (f.effect === "passive" && !c.has_passive_effect) return false;
-        if (f.effect === "activation" && !c.has_activation_effect) return false;
-        if (f.banned === "yes" && !c.is_banned) return false;
-      }
-      if (type === "dukes") {
-        if (f.banned === "yes" && !c.is_banned) return false;
-      }
-      if (type === "events") {
-        if (f.effect === "roll"       && !c.has_roll_effect)        return false;
-        if (f.effect === "activation" && !c.has_activation_effect)  return false;
-        if (f.effect === "passive"    && !c.has_passive_effect)     return false;
-        if (f.effect === "reward"     && !c.has_special_reward)     return false;
-        if (f.is_monster === "yes"    && !c.is_monster)             return false;
-      }
-      if (type === "nobles") {
-        if (!passesRoleFilter(c, f.role)) return false;
-        if (f.special === "yes" && !c.has_special_duke_payout) return false;
-      }
-      return true;
-    });
-  }
 
-  // ── grid rendering ────────────────────────────────────────────────────
-  function render() {
-    if (state.activeType === RULEBOOKS_TAB) {
-      renderRulebooks();
-      return;
+    if (state.search) {
+      const hay = (card.dataset.search || "").toLowerCase();
+      if (!hay.includes(state.search)) return false;
     }
-    el.grid.classList.remove("wiki-grid--plain");
-    if (!state.raw) return;
-    const cards = filteredCards();
-    el.grid.innerHTML = "";
-    if (!cards.length) {
-      el.empty.hidden = false;
-      return;
-    }
-    el.empty.hidden = true;
-    const frag = document.createDocumentFragment();
-    for (const card of cards) {
-      frag.appendChild(renderGridCard(card));
-    }
-    el.grid.appendChild(frag);
-  }
+    if (f.expansion && card.dataset.expansion !== f.expansion) return false;
+    if (f.implementation === "implemented" && card.dataset.implementation === "unimplemented") return false;
+    if (f.implementation === "unimplemented" && card.dataset.implementation !== "unimplemented") return false;
 
-  // ── rulebooks tab ─────────────────────────────────────────────────────
-  async function loadRulebooks() {
-    try {
-      const res = await fetch("/api/wiki/rulebooks");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = await res.json();
-      state.rulebooks = Array.isArray(body.rulebooks) ? body.rulebooks : [];
-      state.ruleCards = Array.isArray(body.rule_cards) ? body.rule_cards : [];
-    } catch (err) {
-      state.rulebooks = [];
-      state.ruleCards = [];
-    }
-    if (state.activeType === RULEBOOKS_TAB) render();
-  }
-
-  function renderRulebooks() {
-    el.empty.hidden = true;
-    // The container is normally a CSS grid; switch it to a plain block so the
-    // sections below can use their own layouts (a wrapping PDF row + a card grid).
-    el.grid.classList.add("wiki-grid--plain");
-    if (state.rulebooks === null) {
-      el.grid.innerHTML = "";
-      el.grid.appendChild(h("p", { class: "wiki-rulebooks-status" }, "Loading rulebooks..."));
-      loadRulebooks();
-      return;
-    }
-    el.grid.innerHTML = "";
-
-    const books = state.rulebooks || [];
-    const cards = state.ruleCards || [];
-    if (!books.length && !cards.length) {
-      el.grid.appendChild(h("p", { class: "wiki-rulebooks-status" }, "No rulebooks available."));
-      return;
-    }
-
-    if (books.length) {
-      const list = h("ul", { class: "wiki-rulebooks" });
-      for (const book of books) {
-        list.appendChild(h("li", { class: "wiki-rulebook-item" },
-          h("a", {
-            class: "wiki-rulebook-link",
-            href: book.url,
-            target: "_blank",
-            rel: "noopener noreferrer",
-          }, book.name)));
+    if (type === "citizens") {
+      if (!passesRoleFilter(card, f.role)) return false;
+      if (f.roll_match && card.dataset.rolls !== f.roll_match) return false;
+      if (f.has_special) {
+        const sp = card.dataset.special || "";
+        if (f.has_special === "any" && !sp) return false;
+        if (f.has_special === "on" && sp !== "on" && sp !== "any") return false;
+        if (f.has_special === "off" && sp !== "off" && sp !== "any") return false;
       }
-      el.grid.appendChild(h("section", { class: "wiki-rb-section" },
-        h("h2", { class: "wiki-rb-heading" }, "Rulebooks"),
-        list));
     }
-
-    if (cards.length) {
-      const cardGrid = h("div", { class: "wiki-grid" });
-      for (const card of cards) {
-        cardGrid.appendChild(renderRuleCardGridCard(card));
-      }
-      el.grid.appendChild(h("section", { class: "wiki-rb-section" },
-        h("h2", { class: "wiki-rb-heading" }, "Rule Cards"),
-        cardGrid));
-    }
-  }
-
-  // ── rule cards (front/back image-only cards, no DB) ────────────────────
-  const ruleCardSide = (slug) => state.ruleCardSides.get(slug) || "front";
-  const setRuleCardSide = (slug, side) => {
-    if (side === "back") state.ruleCardSides.set(slug, "back");
-    else state.ruleCardSides.delete(slug);
-  };
-
-  // Reuses the alt-toggle button as a front/back flip. The button reads "Flip";
-  // the current side is shown in `caption` (a span the caller places next to the
-  // card name). Returns { wrap, altBtn, caption } matching buildArtworkControls
-  // so the grid layers the button over the art and the modal places it below.
-  function buildRuleCardArtwork(card, { modal }) {
-    const hasBoth = !!card.front_url && !!card.back_url;
-    let side = ruleCardSide(card.slug);
-    if (!hasBoth) side = card.front_url ? "front" : "back";
-    const urlFor = (s) => (s === "back" ? (card.back_url || card.front_url) : (card.front_url || card.back_url));
-    const sideLabel = (s) => (s === "back" ? "Back" : "Front");
-
-    const imgClass = (modal ? "wiki-modal-image" : "wiki-card-image") + " rule-card-img";
-    const wrap = h("div", { class: "wiki-art-wrap" });
-    const img = h("img", {
-      class: imgClass,
-      src: urlFor(side),
-      alt: "",
-      loading: modal ? null : "lazy",
-    });
-    img.addEventListener("error", () => {
-      img.replaceWith(h("div", { class: imgClass + " missing" }, "no image"));
-    });
-    wrap.appendChild(img);
-
-    const caption = h("span", { class: "wiki-rule-card-side" }, sideLabel(side));
-
-    let altBtn = null;
-    if (hasBoth) {
-      altBtn = h("button", {
-        type: "button",
-        class: "wiki-alt-toggle" + (modal ? " modal" : ""),
-      }, "Flip");
-      altBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        side = side === "back" ? "front" : "back";
-        setRuleCardSide(card.slug, side);
-        img.src = urlFor(side);
-        caption.textContent = sideLabel(side);
-      });
-      if (!modal) wrap.appendChild(altBtn);
-    }
-
-    return { wrap, altBtn, caption };
-  }
-
-  function renderRuleCardGridCard(card) {
-    const { wrap, altBtn, caption } = buildRuleCardArtwork(card, { modal: false });
-    const nameRow = h("div", { class: "wiki-rule-card-name-row" },
-      h("span", { class: "wiki-card-name" }, card.name || "(unnamed)"));
-    if (altBtn) nameRow.appendChild(caption);
-    const node = h("div", { class: "wiki-card" },
-      wrap,
-      h("div", { class: "wiki-card-meta" }, nameRow),
-    );
-    node.addEventListener("click", () => openRuleCardModal(card));
-    return node;
-  }
-
-  function openRuleCardModal(card) {
-    el.modalBody.innerHTML = "";
-    el.modalBody.classList.add("rule-card");
-    const { wrap, altBtn } = buildRuleCardArtwork(card, { modal: true });
-    el.modalBody.appendChild(h("div", { class: "wiki-modal-image-col" }, wrap, altBtn));
-    el.modal.classList.add("open");
-    el.modal.setAttribute("aria-hidden", "false");
-  }
-
-  function renderGridCard(card) {
-    const type = state.activeType;
-    const kind = TYPE_TO_IMAGE_KIND[type];
-    const id = card[TYPE_TO_ID_FIELD[type]];
-    const badges = [];
-    if (card.expansion) badges.push(h("span", { class: "wiki-badge expansion" }, card.expansion));
-    if (card.is_banned) badges.push(h("span", { class: "wiki-badge banned" }, "Banned"));
-    if (card.is_unimplemented) badges.push(h("span", {
-      class: "wiki-badge unimplemented",
-      title: "Has a flagged special effect with no text — not yet implemented",
-    }, "Unimplemented"));
-    if (card.is_extra) badges.push(h("span", { class: "wiki-badge extra", title: "Only dealt in 5-player games" }, "5P"));
-
-    const { wrap } = buildArtworkControls(type, id, card.alt_variants, { modal: false });
-
-    let idLine = `${kind} #${id}`;
     if (type === "monsters") {
-      if (card.area) idLine += ` · ${card.area}`;
-      if (card.order != null) idLine += ` · order ${card.order}`;
+      if (f.area && card.dataset.area !== f.area) return false;
+      if (f.monster_type && card.dataset.monsterType !== f.monster_type) return false;
+      if (f.has_special_reward === "yes" && card.dataset.hasSpecialReward !== "yes") return false;
     }
-    const node = h("div", { class: "wiki-card", "data-id": String(id), "data-type": type },
-      wrap,
-      h("div", { class: "wiki-card-meta" },
-        h("div", { class: "wiki-card-name" }, card.name || "(unnamed)"),
-        h("div", { class: "wiki-card-id" }, idLine),
-      ),
-      badges.length ? h("div", { class: "wiki-card-badges" }, ...badges) : null,
-    );
-    node.addEventListener("click", () => openModal(card));
-    return node;
+    if (type === "domains") {
+      if (!passesRoleFilter(card, f.role)) return false;
+      if (f.effect === "passive" && card.dataset.passive !== "yes") return false;
+      if (f.effect === "activation" && card.dataset.activation !== "yes") return false;
+      if (f.banned === "yes" && card.dataset.banned !== "yes") return false;
+    }
+    if (type === "dukes") {
+      if (f.banned === "yes" && card.dataset.banned !== "yes") return false;
+    }
+    if (type === "events") {
+      if (f.effect === "roll" && card.dataset.roll !== "yes") return false;
+      if (f.effect === "activation" && card.dataset.activation !== "yes") return false;
+      if (f.effect === "passive" && card.dataset.passive !== "yes") return false;
+      if (f.effect === "reward" && card.dataset.reward !== "yes") return false;
+      if (f.is_monster === "yes" && card.dataset.isMonster !== "yes") return false;
+    }
+    if (type === "nobles") {
+      if (!passesRoleFilter(card, f.role)) return false;
+      if (f.special === "yes" && card.dataset.special !== "yes") return false;
+    }
+    return true;
   }
 
-  // ── detail modal ──────────────────────────────────────────────────────
-  // User-initiated open (grid click): push the card URL, then render the modal.
-  function openModal(card) {
-    const type = state.activeType;
-    const id = card[TYPE_TO_ID_FIELD[type]];
-    pushCard(type, id);
-    showCardModal(card);
+  function applyFilters() {
+    const cards = gridCards();
+    let visible = 0;
+    cards.forEach((card) => {
+      const show = cardPassesFilters(card);
+      card.hidden = !show;
+      if (show) visible += 1;
+    });
+    if (el.empty) el.empty.hidden = visible > 0 || cards.length === 0;
   }
 
-  // DOM-only render of a card's modal (no history changes).
-  function showCardModal(card) {
-    el.modalBody.innerHTML = "";
-    el.modalBody.classList.remove("rule-card");
-    el.modalBody.appendChild(renderDetail(card));
+  function renderFilters() {
+    if (!el.filters || state.activeType === RULEBOOKS_TAB) return;
+    el.filters.innerHTML = "";
+    const groups = buildFilterGroups();
+    el.filters.hidden = groups.length === 0;
+
+    for (const group of groups) {
+      const groupEl = document.createElement("div");
+      groupEl.className = "wiki-filter-group";
+      const label = document.createElement("span");
+      label.className = "wiki-filter-label";
+      label.textContent = group.label;
+      groupEl.appendChild(label);
+
+      for (const opt of group.options) {
+        const selected = state.filters[state.activeType]?.[group.key];
+        const active = group.multi
+          ? Array.isArray(selected) && selected.includes(opt.value)
+          : selected === opt.value;
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "wiki-chip" + (active ? " active" : "");
+        chip.textContent = opt.label;
+        chip.addEventListener("click", () => {
+          state.filters[state.activeType] = state.filters[state.activeType] || {};
+          if (group.multi) {
+            const current = Array.isArray(state.filters[state.activeType][group.key])
+              ? state.filters[state.activeType][group.key]
+              : [];
+            if (current.includes(opt.value)) {
+              const next = current.filter((v) => v !== opt.value);
+              if (next.length) state.filters[state.activeType][group.key] = next;
+              else delete state.filters[state.activeType][group.key];
+            } else {
+              state.filters[state.activeType][group.key] = [...current, opt.value];
+            }
+          } else if (state.filters[state.activeType][group.key] === opt.value) {
+            delete state.filters[state.activeType][group.key];
+          } else {
+            state.filters[state.activeType][group.key] = opt.value;
+          }
+          renderFilters();
+          applyFilters();
+        });
+        groupEl.appendChild(chip);
+      }
+      el.filters.appendChild(groupEl);
+    }
+
+    const active = Object.keys(state.filters[state.activeType] || {}).length;
+    if (el.filtersCount) {
+      el.filtersCount.textContent = active > 0 ? String(active) : "";
+      el.filtersCount.classList.toggle("has-active", active > 0);
+    }
+  }
+
+  // ── modal ─────────────────────────────────────────────────────────────
+  function showModal() {
     el.modal.classList.add("open");
     el.modal.setAttribute("aria-hidden", "false");
   }
 
-  // User-initiated close (X / backdrop / Escape). If we pushed a card entry,
-  // step back so the URL returns to the tab; otherwise (deep-linked straight to
-  // the card) rewrite the URL to the tab in place.
+  function hideModal() {
+    el.modal.classList.remove("open");
+    el.modal.setAttribute("aria-hidden", "true");
+    el.modalBody.classList.remove("rule-card");
+  }
+
   function closeModal() {
     if (history.state && history.state.modal) {
       history.back();
@@ -869,346 +493,117 @@
     hideModal();
   }
 
-  // DOM-only hide of the modal (no history changes).
-  function hideModal() {
-    el.modal.classList.remove("open");
-    el.modal.setAttribute("aria-hidden", "true");
-    el.modalBody.classList.remove("rule-card");
-    // The modal can flip a card to alt art; re-render so the grid card's
-    // thumbnail picks up that selection.
-    render();
+  async function openCardModal(type, id, push = true) {
+    if (push) {
+      history.pushState({ type, id, modal: true }, "", wikiUrlForCard(type, id));
+    }
+    try {
+      const res = await fetch(`/api/wiki/card-detail/${type}/${id}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      el.modalBody.innerHTML = await res.text();
+      el.modalBody.classList.remove("rule-card");
+      wireArtworkControls(el.modalBody);
+      showModal();
+    } catch (_) {
+      location.href = wikiUrlForCard(type, id);
+    }
   }
 
-  // Send any unresolvable wiki URL back to the wiki root.
-  function redirectToWikiRoot() {
-    location.replace("/wiki");
+  function wireGridClicks() {
+    if (!el.grid) return;
+    el.grid.addEventListener("click", (e) => {
+      const link = e.target.closest("a.wiki-card");
+      if (!link) return;
+      e.preventDefault();
+      const type = link.dataset.type || state.activeType;
+      const id = link.dataset.id;
+      if (type && id) openCardModal(type, id);
+    });
   }
 
-  // Open the deep-linked card after the initial data load. A missing card (bad
-  // id) is treated as a 404 and bounced to the wiki root.
-  function applyInitialModalFromUrl() {
-    const route = currentRoute();
-    if (route.id == null) return;
-    const card = findCard(route.type || state.activeType, route.id);
-    if (!card) { redirectToWikiRoot(); return; }
-    showCardModal(card);
-  }
-
-  // Sync the page to the current URL (browser back/forward).
   function applyRoute() {
     const route = currentRoute();
-    const type = route.type || "citizens";
-    if (type !== state.activeType) {
-      state.activeType = type;
-      renderTabs();
-      renderFilters();
-      render();
-    }
-    if (route.id != null) {
-      const card = findCard(type, route.id);
-      if (card) { showCardModal(card); return; }
-      redirectToWikiRoot();
+    if (route.id != null && route.type && route.type !== RULEBOOKS_TAB) {
+      openCardModal(route.type, route.id, false);
       return;
     }
     hideModal();
   }
 
-  function renderDetail(card) {
-    const type = state.activeType;
-    const kind = TYPE_TO_IMAGE_KIND[type];
-    const id = card[TYPE_TO_ID_FIELD[type]];
-
-    const { wrap, altBtn } = buildArtworkControls(type, id, card.alt_variants, { modal: true });
-
-    const left = h("div", { class: "wiki-modal-image-col" },
-      wrap,
-      altBtn,
-      card.is_banned ? h("span", { class: "wiki-badge banned" }, "Banned in game setup") : null,
-      card.is_unimplemented ? h("span", {
-        class: "wiki-badge unimplemented",
-        title: "Has a flagged special effect with no text — not yet implemented",
-      }, "Unimplemented") : null,
-    );
-
-    const right = h("div", { class: "wiki-modal-detail" },
-      h("div", { class: "wiki-modal-header-row" },
-        h("h2", { id: "wiki-modal-title" }, card.name || "(unnamed)"),
-        h("span", { class: "wiki-modal-type" }, kind),
-        h("span", { class: "wiki-modal-dbid" }, `id ${id}`),
-      ),
-      renderStatsRow(type, card),
-      renderRoles(card),
-      renderTypeSpecific(type, card),
-    );
-
-    return h("div", { class: "wiki-modal-body-inner", style: "display: contents;" }, left, right);
+  // ── boot ──────────────────────────────────────────────────────────────
+  function openRuleCardModal(cardEl) {
+    const slug = cardEl.dataset.ruleCardSlug;
+    const front = cardEl.dataset.frontUrl || "";
+    const back = cardEl.dataset.backUrl || "";
+    const side = state.ruleCardSides.get(slug) || "front";
+    const url = side === "back" ? (back || front) : (front || back);
+    el.modalBody.innerHTML = "";
+    el.modalBody.classList.add("rule-card");
+    const wrap = document.createElement("div");
+    wrap.className = "wiki-modal-image-col";
+    const art = document.createElement("div");
+    art.className = "wiki-art-wrap";
+    art.dataset.ruleCardSlug = slug;
+    art.dataset.frontUrl = front;
+    art.dataset.backUrl = back;
+    const img = document.createElement("img");
+    img.className = "wiki-modal-image rule-card-img";
+    img.src = url;
+    img.alt = cardEl.querySelector(".wiki-card-name")?.textContent || "";
+    art.appendChild(img);
+    if (front && back) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "wiki-alt-toggle modal";
+      btn.textContent = "Flip";
+      btn.dataset.ruleCardSlug = slug;
+      btn.dataset.frontUrl = front;
+      btn.dataset.backUrl = back;
+      wrap.append(art, btn);
+    } else {
+      wrap.appendChild(art);
+    }
+    el.modalBody.appendChild(wrap);
+    wireRuleCardControls(el.modalBody);
+    showModal();
   }
 
-  function renderStatsRow(type, card) {
-    const stats = [];
-    if (card.gold_cost != null) stats.push(stat("gold", "Cost", `${card.gold_cost}g`));
-    if (card.strength_cost != null) stats.push(stat("str", "Strength", `${card.strength_cost}`));
-    if (card.magic_cost != null && card.magic_cost > 0) stats.push(stat("mag", "Magic", `${card.magic_cost}`));
-    if (card.vp_reward != null) stats.push(stat("vp", "VP", `${card.vp_reward}`));
-    if (card.gold_reward != null && type === "monsters") stats.push(stat("gold", "Gold reward", `${card.gold_reward}`));
-    if (card.strength_reward != null && type === "monsters" && card.strength_reward) stats.push(stat("str", "Strength reward", `${card.strength_reward}`));
-    if (card.magic_reward != null && type === "monsters" && card.magic_reward) stats.push(stat("mag", "Magic reward", `${card.magic_reward}`));
-    if (card.roll_match1 != null && (type === "citizens" || type === "starters" || type === "events")) {
-      const rolls = [card.roll_match1, card.roll_match2].filter(r => r && r > 0);
-      if (rolls.length) stats.push(stat("", "Rolls", rolls.join(" / ")));
-    }
-    if (type === "events" && card.gold_reward)     stats.push(stat("gold", "Gold reward",     `${card.gold_reward}`));
-    if (type === "events" && card.strength_reward) stats.push(stat("str",  "Strength reward", `${card.strength_reward}`));
-    if (type === "events" && card.magic_reward)    stats.push(stat("mag",  "Magic reward",    `${card.magic_reward}`));
-    if (type === "events" && card.monster_type)    stats.push(stat("",     "Monster type",    titleCase(card.monster_type)));
-    if (type === "monsters" && card.area) stats.push(stat("", "Area", card.area));
-    if (type === "monsters" && card.monster_type) stats.push(stat("", "Type", titleCase(card.monster_type)));
-    if (type === "monsters" && card.order != null) stats.push(stat("", "Order", String(card.order)));
-    if (type === "monsters" && card.is_extra) stats.push(stat("", "Tier", "5p extra"));
-    if (card.expansion) stats.push(stat("", "Expansion", card.expansion));
-    return h("div", { class: "wiki-stats" }, ...stats);
-  }
-
-  function stat(cls, label, value) {
-    return h("div", { class: "wiki-stat" + (cls ? " " + cls : "") },
-      h("span", { class: "label" }, label),
-      h("strong", {}, value));
-  }
-
-  function renderRoles(card) {
-    const roles = [];
-    if (card.shadow_count > 0)  roles.push(h("span", { class: "wiki-role shadow"  }, roleIcon("shadow"),  `Shadow × ${card.shadow_count}`));
-    if (card.holy_count > 0)    roles.push(h("span", { class: "wiki-role holy"    }, roleIcon("holy"),    `Holy × ${card.holy_count}`));
-    if (card.soldier_count > 0) roles.push(h("span", { class: "wiki-role soldier" }, roleIcon("soldier"), `Soldier × ${card.soldier_count}`));
-    if (card.worker_count > 0)  roles.push(h("span", { class: "wiki-role worker"  }, roleIcon("worker"),  `Worker × ${card.worker_count}`));
-    if (!roles.length) return null;
-    return h("div", { class: "wiki-roles" }, ...roles);
-  }
-
-  function renderTypeSpecific(type, card) {
-    if (type === "citizens" || type === "starters") return renderPayoutCard(card);
-    if (type === "monsters") return renderMonsterRewards(card);
-    if (type === "domains") return renderDomain(card);
-    if (type === "dukes") return renderDuke(card);
-    if (type === "events") return renderEvent(card);
-    if (type === "nobles") return renderNoble(card);
-    if (type === "agents") return renderAgent(card);
-    if (type === "relics") return renderRelic(card);
-    return null;
-  }
-
-  function renderAgent(card) {
-    const text = (card.activation_effect_text || "").toString().trim();
-    if (!text) return null;
-    return h("section", { class: "wiki-section" },
-      h("h3", {}, "Activation effect"),
-      h("div", { class: "wiki-effect" }, text),
-    );
-  }
-
-  function renderRelic(card) {
-    const text = (card.passive_effect_text || "").toString().trim();
-    if (!text) return null;
-    return h("section", { class: "wiki-section" },
-      h("h3", {}, "Passive effect"),
-      h("div", { class: "wiki-effect" }, text),
-    );
-  }
-
-  function payoutRow(label, value, codeCls) {
-    const isZero = !value || value === 0;
-    return h("li", { class: isZero ? "zero" : "" },
-      h("span", {}, label),
-      h("span", { class: codeCls }, String(value || 0)));
-  }
-
-  function renderPayoutCard(card) {
-    const sections = [];
-    const onTurn = h("div", { class: "wiki-payout-block" },
-      h("h4", {}, "On turn"),
-      h("ul", { class: "wiki-payout-list" },
-        payoutRow("Gold", card.gold_payout_on_turn, "v-g"),
-        payoutRow("Strength", card.strength_payout_on_turn, "v-s"),
-        payoutRow("Magic", card.magic_payout_on_turn, "v-m"),
-      ),
-    );
-    const offTurn = h("div", { class: "wiki-payout-block" },
-      h("h4", {}, "Off turn"),
-      h("ul", { class: "wiki-payout-list" },
-        payoutRow("Gold", card.gold_payout_off_turn, "v-g"),
-        payoutRow("Strength", card.strength_payout_off_turn, "v-s"),
-        payoutRow("Magic", card.magic_payout_off_turn, "v-m"),
-      ),
-    );
-    sections.push(h("section", { class: "wiki-section" },
-      h("h3", {}, "Payouts"),
-      h("div", { class: "wiki-payouts" }, onTurn, offTurn)));
-
-    const spOn = (card.special_payout_on_turn || "").toString().trim();
-    const spOff = (card.special_payout_off_turn || "").toString().trim();
-    if (spOn || spOff) {
-      sections.push(h("section", { class: "wiki-section" },
-        h("h3", {}, "Special effects"),
-        spOn ? h("div", { class: "wiki-effect" },
-          h("span", { class: "wiki-effect-label" }, "ON TURN"), spOn) : null,
-        spOff ? h("div", { class: "wiki-effect" },
-          h("span", { class: "wiki-effect-label" }, "OFF TURN"), spOff) : null,
-      ));
-    }
-
-    if (card.special_citizen != null && card.special_citizen !== 0 && card.special_citizen !== false) {
-      sections.push(h("section", { class: "wiki-section" },
-        h("h3", {}, "Flags"),
-        h("div", { class: "wiki-rules-text" }, `special_citizen = ${card.special_citizen}`),
-      ));
-    }
-
-    return h("div", {}, ...sections);
-  }
-
-  function renderMonsterRewards(card) {
-    const sections = [];
-    if (card.has_special_cost && (card.special_cost || "").toString().trim()) {
-      sections.push(h("section", { class: "wiki-section" },
-        h("h3", {}, "Special cost"),
-        h("div", { class: "wiki-effect" }, String(card.special_cost).trim()),
-      ));
-    }
-    if (card.has_special_reward && (card.special_reward || "").toString().trim()) {
-      sections.push(h("section", { class: "wiki-section" },
-        h("h3", {}, "Special reward"),
-        h("div", { class: "wiki-effect" }, String(card.special_reward).trim()),
-      ));
-    }
-    return sections.length ? h("div", {}, ...sections) : null;
-  }
-
-  function renderDomain(card) {
-    const sections = [];
-    const passive = (card.passive_effect || "").toString().trim();
-    const activation = (card.activation_effect || "").toString().trim();
-    const text = (card.effect_text || "").toString().trim();
-    if (passive) {
-      sections.push(h("section", { class: "wiki-section" },
-        h("h3", {}, "Passive effect"),
-        h("div", { class: "wiki-effect" }, passive),
-      ));
-    }
-    if (activation) {
-      sections.push(h("section", { class: "wiki-section" },
-        h("h3", {}, "Activation effect"),
-        h("div", { class: "wiki-effect" }, activation),
-      ));
-    }
-    if (text) {
-      sections.push(h("section", { class: "wiki-section" },
-        h("h3", {}, "Rules text"),
-        h("div", { class: "wiki-rules-text" }, text),
-      ));
-    }
-    return sections.length ? h("div", {}, ...sections) : null;
-  }
-
-  function renderEvent(card) {
-    const sections = [];
-    const roll = (card.roll_effect || "").toString().trim();
-    const activation = (card.activation_effect || "").toString().trim();
-    const passive = (card.passive_effect || "").toString().trim();
-    const reward = (card.special_reward || "").toString().trim();
-    if (roll) {
-      sections.push(h("section", { class: "wiki-section" },
-        h("h3", {}, "Roll effect"),
-        h("div", { class: "wiki-effect" }, roll),
-      ));
-    }
-    if (activation) {
-      sections.push(h("section", { class: "wiki-section" },
-        h("h3", {}, "Activation effect"),
-        h("div", { class: "wiki-effect" }, activation),
-      ));
-    }
-    if (passive) {
-      sections.push(h("section", { class: "wiki-section" },
-        h("h3", {}, "Passive effect"),
-        h("div", { class: "wiki-effect" }, passive),
-      ));
-    }
-    if (reward) {
-      sections.push(h("section", { class: "wiki-section" },
-        h("h3", {}, "Special reward"),
-        h("div", { class: "wiki-effect" }, reward),
-      ));
-    }
-    return sections.length ? h("div", {}, ...sections) : null;
-  }
-
-  function renderDuke(card) {
-    const multFields = [
-      ["gold_multiplier", "Gold"],
-      ["strength_multiplier", "Strength"],
-      ["magic_multiplier", "Magic"],
-      ["shadow_multiplier", "Shadow"],
-      ["holy_multiplier", "Holy"],
-      ["soldier_multiplier", "Soldier"],
-      ["worker_multiplier", "Worker"],
-      ["monster_multiplier", "Monsters slain"],
-      ["citizen_multiplier", "Citizens owned"],
-      ["domain_multiplier", "Domains owned"],
-      ["boss_multiplier", "Bosses slain"],
-      ["minion_multiplier", "Minions slain"],
-      ["beast_multiplier", "Beasts slain"],
-      ["titan_multiplier", "Titans slain"],
-    ];
-    const mults = multFields.map(([key, label]) => {
-      const v = Number(card[key] || 0);
-      const role = key.replace("_multiplier", "");
-      return h("div", { class: "wiki-mult" + (v === 0 ? " zero" : "") },
-        h("span", { class: "wiki-mult-label" }, roleIcon(role), label),
-        h("span", { class: "wiki-mult-value" }, v.toString()),
-      );
+  function wireRuleCardGridClicks() {
+    document.querySelectorAll(".wiki-rule-card").forEach((cardEl) => {
+      cardEl.addEventListener("click", (e) => {
+        if (e.target.closest(".wiki-alt-toggle")) return;
+        openRuleCardModal(cardEl);
+      });
     });
-    return h("section", { class: "wiki-section" },
-      h("h3", {}, "VP multipliers"),
-      h("div", { class: "wiki-multipliers" }, ...mults),
-    );
   }
 
-  function renderNoble(card) {
-    const multFields = [
-      ["shadow_multiplier", "Shadow"],
-      ["holy_multiplier", "Holy"],
-      ["soldier_multiplier", "Soldier"],
-      ["worker_multiplier", "Worker"],
-      ["monster_multiplier", "Monsters slain"],
-      ["citizen_multiplier", "Citizens owned"],
-      ["domain_multiplier", "Domains owned"],
-      ["boss_multiplier", "Bosses slain"],
-      ["minion_multiplier", "Minions slain"],
-      ["beast_multiplier", "Beasts slain"],
-      ["titan_multiplier", "Titans slain"],
-      ["goods_multiplier", "Goods"],
-    ];
-    const mults = multFields.map(([key, label]) => {
-      const v = Number(card[key] || 0);
-      const role = key.replace("_multiplier", "");
-      return h("div", { class: "wiki-mult" + (v === 0 ? " zero" : "") },
-        h("span", { class: "wiki-mult-label" }, roleIcon(role), label),
-        h("span", { class: "wiki-mult-value" }, v.toString()),
-      );
-    });
-    const sections = [
-      h("section", { class: "wiki-section" },
-        h("h3", {}, "VP multipliers"),
-        h("div", { class: "wiki-multipliers" }, ...mults),
-      ),
-    ];
-    const special = (card.special_duke_payout || "").toString().trim();
-    if (card.has_special_duke_payout && special) {
-      sections.push(h("section", { class: "wiki-section" },
-        h("h3", {}, "Special payout"),
-        h("div", { class: "wiki-effect" }, special),
-      ));
-    }
-    return h("div", {}, ...sections);
+  if (state.activeType !== RULEBOOKS_TAB) {
+    renderFilters();
+    applyFilters();
+    wireGridClicks();
+    wireArtworkControls(document);
+  } else {
+    wireRuleCardControls(document);
+    wireRuleCardGridClicks();
   }
+
+  if (el.modalBody && el.modalBody.innerHTML.trim()) {
+    wireArtworkControls(el.modalBody);
+    if (el.modal.classList.contains("open")) {
+      // Deep-linked card page: modal already rendered server-side.
+    }
+  }
+
+  el.search.addEventListener("input", (e) => {
+    state.search = e.target.value.trim().toLowerCase();
+    applyFilters();
+  });
+  el.modalClose.addEventListener("click", closeModal);
+  el.modal.addEventListener("click", (e) => {
+    if (e.target === el.modal) closeModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeModal();
+  });
+  window.addEventListener("popstate", applyRoute);
 })();

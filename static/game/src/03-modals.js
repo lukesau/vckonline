@@ -1622,7 +1622,14 @@ function mountCardInspectOverlay(overlay, modal) {
 }
 
 function openPromptOverlayShell(opts) {
-  const { title, subtitle, dismissible, bodyEl, footerEl } = opts;
+  const { title, subtitle, bodyEl, footerEl } = opts;
+  // Spectators are never the acting player, so the prompt bodies always render
+  // their read-only "waiting on …" branch. We force those overlays to behave
+  // like an active-player prompt (non-dismissible + a "Peek board" minimize
+  // button) so a spectator can hide a board-blocking prompt, browse, and have
+  // it auto-restore when the prompt changes — instead of click-to-dismiss
+  // overlays that just pop back on the next state push.
+  const dismissible = SPECTATOR ? false : opts.dismissible;
   const newTitle = (title || '').toString();
 
   function configureDismissBehavior(overlay) {

@@ -5,6 +5,27 @@ function idsMatch(a, b) {
   return String(a ?? '').trim() === String(b ?? '').trim();
 }
 
+// ── Spectator banner ───────────────────────────────────────────────────────
+// A persistent read-only indicator shown while spectating, with a "Leave"
+// link back to the lobby. Spectators take no actions, so this is the only
+// chrome they need beyond the board itself.
+function showSpectatorBanner() {
+  if (document.getElementById('spectator-banner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'spectator-banner';
+  bar.className = 'spectator-banner';
+  const label = document.createElement('span');
+  label.className = 'spectator-banner-label';
+  label.innerHTML = '<span class="spectator-banner-dot" aria-hidden="true"></span>Spectating · read only';
+  bar.appendChild(label);
+  const leave = document.createElement('a');
+  leave.href = '/';
+  leave.className = 'spectator-banner-leave';
+  leave.textContent = 'Leave';
+  bar.appendChild(leave);
+  document.body.appendChild(bar);
+}
+
 // Crimson Seas adds a whole bundle of mechanics (the Sail/island board, maps,
 // tomes, goods, nobles, …). All of that UI is gated on this single check so it
 // stays hidden unless the game was dealt from the Crimson Seas preset. The
@@ -949,6 +970,12 @@ function openDiceInfoModal(state) {
   lobby.addEventListener('click', ev => {
     ev.preventDefault();
     overlay.remove();
+    // Spectators are not players — leaving just returns them to the lobby and
+    // must never abandon the game for the people actually playing it.
+    if (SPECTATOR) {
+      window.location.href = '/';
+      return;
+    }
     if (latestGameState?.shutdown) {
       goToLobbyNow();
       return;

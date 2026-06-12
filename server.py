@@ -6,6 +6,7 @@ Simple REST API to replace the socket-based protocol
 
 import re
 import html
+import json
 import random
 import time
 import uuid
@@ -26,7 +27,6 @@ from game_serialization import (
     deserialize_save_dict_to_game,
     serialize_game_to_save_dict,
 )
-import json
 
 import build_game_js
 
@@ -1559,6 +1559,50 @@ async def lobby_background_cards():
     return JSONResponse({"ranges": _LOBBY_BG_CARD_RANGES})
 
 
+@app.get("/api/lobby/active-games")
+async def list_active_games():
+    """Active games that can be spectated.
+
+    Returns lightweight metadata only (no hidden info): players, preset,
+    turn/phase, and whose turn it is. The spectate link is the game URL
+    without a player_id, so the client just needs the game_id here.
+    Games that have ended or begun their shutdown countdown are omitted.
+    """
+    out = []
+    now = time.time()
+    for game_id, game in games.items():
+        phase = getattr(game, "phase", None)
+        if phase == "game_over":
+            continue
+        if getattr(game, "shutdown", None):
+            continue
+        try:
+            active_id = game.current_player_id() if hasattr(game, "current_player_id") else None
+        except Exception:
+            active_id = None
+        players = []
+        active_name = ""
+        for p in getattr(game, "player_list", []) or []:
+            pid = getattr(p, "player_id", None)
+            name = (getattr(p, "name", "") or "Player")
+            players.append(name)
+            if pid is not None and active_id is not None and str(pid) == str(active_id):
+                active_name = name
+        last_active = float(getattr(game, "last_active_time", 0.0) or 0.0)
+        out.append({
+            "game_id": game_id,
+            "preset": (getattr(game, "preset", "") or ""),
+            "phase": phase or "",
+            "turn_number": int(getattr(game, "turn_number", 0) or 0),
+            "player_count": len(players),
+            "players": players,
+            "active_player_name": active_name,
+            "idle_seconds": round(max(0.0, now - last_active), 1) if last_active else None,
+        })
+    out.sort(key=lambda g: (-g["player_count"], g["game_id"]))
+    return JSONResponse({"games": out})
+
+
 @app.websocket("/ws/lobby")
 async def ws_lobby(websocket: WebSocket):
     await lobby_ws_manager.connect(websocket)
@@ -2369,8 +2413,7 @@ _WIKI_TAB_ID_FIELD = {
     "nobles": "noble_id", "agents": "id_agents", "relics": "id_relics",
 }
 
-# Cached raw text of the wiki SPA shell so per-request Open Graph injection is a
-# cheap string op rather than a disk read each time.
+# Cached raw text of the wiki HTML shell template.
 _wiki_html_template = None
 
 
@@ -2405,14 +2448,23 @@ def _wiki_card_name(card_type: str, card_id: str):
     return None
 
 
-def _wiki_html_with_og(*, title, description, image_url=None, page_url, image_dims=None):
-    """Return the wiki SPA shell with Open Graph / Twitter meta tags injected so
-    link-unfurlers (iMessage, Slack, etc., which don't run the SPA's JS) show a
-    rich preview."""
+def _wiki_card_for_url(card_type: str, card_id: str):
+    """Return the cached wiki card dict for a deep-link URL, or None."""
+    try:
+        from wiki_render import find_card
+        return find_card(_load_wiki_cards(), card_type, card_id)
+    except Exception:
+        return None
+
+
+def _wiki_template():
     global _wiki_html_template
     if _wiki_html_template is None:
         _wiki_html_template = _WIKI_INDEX.read_text()
+    return _wiki_html_template
 
+
+def _wiki_og_tags(*, title, description, image_url=None, page_url, image_dims=None):
     def esc(v):
         return html.escape(str(v), quote=True)
 
@@ -2434,67 +2486,298 @@ def _wiki_html_with_og(*, title, description, image_url=None, page_url, image_di
         tags.append('<meta name="twitter:card" content="summary">')
     tags.append(f'<meta name="twitter:title" content="{esc(title)}">')
     tags.append(f'<meta name="twitter:description" content="{esc(description)}">')
+    return "\n  " + "\n  ".join(tags) + "\n"
 
-    block = "\n  " + "\n  ".join(tags) + "\n"
-    html_text = _wiki_html_template.replace("</head>", block + "</head>", 1)
+
+def _wiki_html_response(html_text, *, title, description, image_url=None, page_url, image_dims=None, json_ld=None):
+    og_block = _wiki_og_tags(
+        title=title,
+        description=description,
+        image_url=image_url,
+        page_url=page_url,
+        image_dims=image_dims,
+    )
+    html_text = html_text.replace("</head>", og_block + "</head>", 1)
+    if json_ld:
+        json_text = json.dumps(json_ld, ensure_ascii=False).replace("</", "<\\/")
+        script = (
+            '\n  <script type="application/ld+json">'
+            + json_text
+            + "</script>\n"
+        )
+        html_text = html_text.replace("</head>", script + "</head>", 1)
     return HTMLResponse(html_text)
+
+
+def _wiki_card_description(card):
+    """Short, human-readable text for JSON-LD descriptions."""
+    for key in (
+        "activation_effect_text",
+        "passive_effect_text",
+        "effect_text",
+        "text",
+        "special_payout_on_turn",
+        "special_payout_off_turn",
+        "special_reward_text",
+        "special_reward",
+        "roll_effect_text",
+        "roll_effect",
+        "special_duke_payout",
+    ):
+        val = str(card.get(key) or "").strip()
+        if val:
+            return val
+    return f"{card.get('name') or 'Card'} from the Valeria Card Kingdoms wiki."
+
+
+def _wiki_static_card_image_url(base, card_type, card_id):
+    """Absolute descriptive static image URL when available; endpoint fallback."""
+    kind = _WIKI_TAB_IMAGE_KIND.get(card_type)
+    if not kind:
+        return None
+    try:
+        from wiki_render import canonical_card_image_url
+        url = canonical_card_image_url(kind, card_id)
+        if url:
+            return f"{base}{url}"
+    except Exception:
+        pass
+    return f"{base}/card-image/{kind}/{card_id}"
+
+
+def _wiki_card_json_ld(*, base, card_type, card_id, card, image_url, page_url):
+    return {
+        "@context": "https://schema.org",
+        "@type": "CreativeWork",
+        "name": card.get("name") or f"{card_type} #{card_id}",
+        "description": _wiki_card_description(card),
+        "image": image_url,
+        "url": page_url,
+        "isPartOf": {
+            "@type": "WebSite",
+            "name": "Valeria Card Kingdoms Wiki",
+            "url": f"{base}/wiki",
+        },
+        "genre": "Board game card",
+        "keywords": [
+            "Valeria Card Kingdoms",
+            card_type,
+            str(card.get("name") or ""),
+        ],
+    }
+
+
+def _load_wiki_cards():
+    global _wiki_cards_cache
+    if _wiki_cards_cache is None:
+        from wiki_data import load_all_cards_for_wiki
+        _wiki_cards_cache = load_all_cards_for_wiki()
+    return _wiki_cards_cache
+
+
+def _scan_rulebooks():
+    books = []
+    pairs = {}
+    if _RULEBOOKS_DIR.is_dir():
+        for f in sorted(_RULEBOOKS_DIR.iterdir()):
+            if not f.is_file():
+                continue
+            m = _RULE_CARD_RE.match(f.name)
+            if m:
+                side, slug = m.group(1).lower(), m.group(2)
+                url = "/static/rulebooks/" + urllib.parse.quote(f.name)
+                pairs.setdefault(slug, {})[side] = url
+            elif f.suffix.lower() == ".pdf":
+                url = "/static/rulebooks/" + urllib.parse.quote(f.name)
+                books.append({"name": f.stem, "url": url})
+
+    rule_cards = []
+    for slug in sorted(pairs):
+        sides = pairs[slug]
+        rule_cards.append({
+            "name": _RULE_CARD_NAME_OVERRIDES.get(slug, slug.replace("_", " ").title()),
+            "slug": slug,
+            "front_url": sides.get("front"),
+            "back_url": sides.get("back"),
+        })
+    return {"rulebooks": books, "rule_cards": rule_cards}
+
+
+def _render_wiki_page_response(
+    request,
+    *,
+    active_tab,
+    card_id=None,
+    og_title,
+    og_description,
+    og_image_url=None,
+    og_image_dims=None,
+    json_ld=None,
+):
+    from wiki_render import render_wiki_page, RULEBOOKS_TAB
+
+    page_url = f"{_public_base_url(request)}/wiki"
+    if active_tab != "citizens" or card_id is not None:
+        page_url += f"/{active_tab}"
+    if card_id is not None:
+        page_url += f"/{card_id}"
+
+    try:
+        if active_tab == RULEBOOKS_TAB:
+            html_text = render_wiki_page(
+                _wiki_template(),
+                active_tab=active_tab,
+                rulebooks_data=_scan_rulebooks(),
+                page_title=og_title,
+            )
+        else:
+            cards_data = _load_wiki_cards()
+            if card_id is not None and not _wiki_card_name(active_tab, card_id):
+                return RedirectResponse("/wiki")
+            html_text = render_wiki_page(
+                _wiki_template(),
+                active_tab=active_tab,
+                cards_data=cards_data,
+                card_id=card_id,
+                page_title=og_title,
+            )
+    except Exception as exc:
+        html_text = render_wiki_page(
+            _wiki_template(),
+            active_tab=active_tab if active_tab in _WIKI_TABS else "citizens",
+            error_message=f"Failed to load card data from database: {exc}. Is the DB tunnel up?",
+            page_title=og_title,
+        )
+
+    return _wiki_html_response(
+        html_text,
+        title=og_title,
+        description=og_description,
+        image_url=og_image_url,
+        page_url=page_url,
+        image_dims=og_image_dims,
+        json_ld=json_ld,
+    )
 
 
 @app.get("/wiki")
 async def wiki_client(request: Request):
-    return _wiki_html_with_og(
-        title="Valeria Card Kingdoms Wiki",
-        description="Browse every card in the Valeria Card Kingdoms database — citizens, monsters, domains, dukes, starters, events, nobles, agents, and relics.",
-        image_url=f"{_public_base_url(request)}/images/valeria_logo.png",
-        page_url=f"{_public_base_url(request)}/wiki",
+    base = _public_base_url(request)
+    return _render_wiki_page_response(
+        request,
+        active_tab="citizens",
+        og_title="Valeria Card Kingdoms Wiki",
+        og_description=(
+            "Browse every card in the Valeria Card Kingdoms database — citizens, "
+            "monsters, domains, dukes, starters, events, nobles, agents, and relics."
+        ),
+        og_image_url=f"{base}/images/valeria_logo.png",
     )
 
 
 @app.get("/wiki/{card_type}")
 async def wiki_client_type(card_type: str, request: Request):
-    """Deep-link to a wiki tab (e.g. /wiki/agents). Serves the same SPA;
-    the client reads the path to select the tab. Unknown tabs redirect to
-    the wiki root."""
     if card_type not in _WIKI_TABS:
         return RedirectResponse("/wiki")
     base = _public_base_url(request)
     label = card_type[:1].upper() + card_type[1:]
-    return _wiki_html_with_og(
-        title=f"{label} — Valeria Card Kingdoms Wiki",
-        description=f"Browse {label} in the Valeria Card Kingdoms database.",
-        image_url=f"{base}/images/valeria_logo.png",
-        page_url=f"{base}/wiki/{card_type}",
+    return _render_wiki_page_response(
+        request,
+        active_tab=card_type,
+        og_title=f"{label} — Valeria Card Kingdoms Wiki",
+        og_description=f"Browse {label} in the Valeria Card Kingdoms database.",
+        og_image_url=f"{base}/images/valeria_logo.png",
     )
 
 
 @app.get("/wiki/{card_type}/{card_id}")
 async def wiki_client_card(card_type: str, card_id: str, request: Request):
-    """Deep-link to a single card's modal (e.g. /wiki/citizens/21). Serves the
-    same SPA (which opens the matching card and itself redirects to the wiki
-    root if the id resolves to no card), with Open Graph tags pointing at the
-    card art so link previews show the card. Unknown tabs redirect to root."""
     if card_type not in _WIKI_TABS:
         return RedirectResponse("/wiki")
     base = _public_base_url(request)
     kind = _WIKI_TAB_IMAGE_KIND.get(card_type)
-    # The rulebooks tab has no DB cards / numeric ids; fall back to a tab preview.
     if not kind:
-        return _wiki_html_with_og(
-            title="Valeria Card Kingdoms Wiki",
-            description="Browse every card in the Valeria Card Kingdoms database.",
-            image_url=f"{base}/images/valeria_logo.png",
-            page_url=f"{base}/wiki/{card_type}",
+        return _render_wiki_page_response(
+            request,
+            active_tab=card_type,
+            og_title="Valeria Card Kingdoms Wiki",
+            og_description="Browse every card in the Valeria Card Kingdoms database.",
+            og_image_url=f"{base}/images/valeria_logo.png",
         )
-    name = _wiki_card_name(card_type, card_id)
+    card = _wiki_card_for_url(card_type, card_id)
+    if not card:
+        return RedirectResponse("/wiki")
+    name = card.get("name")
     title = f"{name} — Valeria Card Kingdoms Wiki" if name else "Valeria Card Kingdoms Wiki"
-    description = f"{name} — view this card in the Valeria Card Kingdoms wiki." if name else "View this card in the Valeria Card Kingdoms wiki."
-    return _wiki_html_with_og(
-        title=title,
-        description=description,
-        image_url=f"{base}/card-image/{kind}/{card_id}",
-        page_url=f"{base}/wiki/{card_type}/{card_id}",
-        image_dims=(400, 571),
+    description = (
+        f"{name} — view this card in the Valeria Card Kingdoms wiki."
+        if name else "View this card in the Valeria Card Kingdoms wiki."
     )
+    page_url = f"{base}/wiki/{card_type}/{card_id}"
+    image_url = _wiki_static_card_image_url(base, card_type, card_id)
+    return _render_wiki_page_response(
+        request,
+        active_tab=card_type,
+        card_id=card_id,
+        og_title=title,
+        og_description=description,
+        og_image_url=image_url,
+        og_image_dims=(400, 571),
+        json_ld=_wiki_card_json_ld(
+            base=base,
+            card_type=card_type,
+            card_id=card_id,
+            card=card,
+            image_url=image_url,
+            page_url=page_url,
+        ),
+    )
+
+
+@app.get("/api/wiki/card-detail/{card_type}/{card_id}")
+async def wiki_card_detail_fragment(card_type: str, card_id: str):
+    """HTML fragment for a single card's detail panel (modal content)."""
+    if card_type not in _WIKI_TAB_IMAGE_KIND:
+        raise HTTPException(status_code=404, detail="Unknown card type")
+    try:
+        from wiki_render import find_card, render_card_detail
+        cards_data = _load_wiki_cards()
+        card = find_card(cards_data, card_type, card_id)
+        if not card:
+            raise HTTPException(status_code=404, detail="Card not found")
+        return HTMLResponse(render_card_detail(card_type, card))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@app.get("/sitemap.xml")
+async def wiki_sitemap(request: Request):
+    """Sitemap of wiki tab and card URLs for crawlers."""
+    from wiki_render import TYPE_ORDER, TYPE_TO_ID_FIELD, RULEBOOKS_TAB
+
+    base = _public_base_url(request)
+    urls = [f"{base}/wiki"]
+    try:
+        cards_data = _load_wiki_cards()
+        for tab in TYPE_ORDER:
+            urls.append(f"{base}/wiki/{tab}")
+            id_field = TYPE_TO_ID_FIELD[tab]
+            for card in cards_data.get("cards", {}).get(tab, []):
+                cid = card.get(id_field)
+                if cid is not None:
+                    urls.append(f"{base}/wiki/{tab}/{cid}")
+        urls.append(f"{base}/wiki/{RULEBOOKS_TAB}")
+    except Exception:
+        pass
+
+    body = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    for url in urls:
+        body += f"  <url><loc>{html.escape(url)}</loc></url>\n"
+    body += "</urlset>"
+    return HTMLResponse(body, media_type="application/xml")
 
 
 @app.get("/wiki/{full_path:path}")
@@ -2515,7 +2798,9 @@ async def wiki_cards(refresh: bool = False):
     if _wiki_cards_cache is None or refresh:
         try:
             from wiki_data import load_all_cards_for_wiki
+            from wiki_render import clear_render_cache
             _wiki_cards_cache = load_all_cards_for_wiki()
+            clear_render_cache()
         except Exception as exc:
             raise HTTPException(
                 status_code=503,

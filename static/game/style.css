@@ -4965,3 +4965,229 @@ body.is-virtual-keyboard-open .card-modal {
     gap: 8px;
   }
 }
+
+/* ── Spectator banner ─────────────────────────────────────────────────────── */
+.spectator-banner {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 11000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px 6px 14px;
+  border-radius: 999px;
+  background: rgba(16, 20, 26, 0.92);
+  border: 1px solid rgba(240, 192, 64, 0.4);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+}
+
+.spectator-banner-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  letter-spacing: 0.02em;
+}
+
+.spectator-banner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 6px rgba(223, 177, 82, 0.8);
+}
+
+.spectator-banner-leave {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 700;
+  transition: background 0.15s, color 0.15s;
+}
+
+.spectator-banner-leave:hover,
+.spectator-banner-leave:focus-visible {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  outline: none;
+}
+
+@media (max-width: 640px) {
+  .spectator-banner {
+    top: 6px;
+    padding: 5px 6px 5px 11px;
+    font-size: 12px;
+    gap: 8px;
+  }
+}
+
+/* ── Active games / spectate dialog ───────────────────────────────────────── */
+.lobby-active-games-link {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--gold);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.lobby-active-games-link:hover,
+.lobby-active-games-link:focus-visible {
+  color: #f1cd72;
+  outline: none;
+}
+
+.active-games-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4vh 3vw;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(6px);
+}
+
+.active-games-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 96vw);
+  max-height: 90dvh;
+  background: rgba(16, 20, 26, 0.99);
+  border: 1px solid rgba(240, 192, 64, 0.3);
+  border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.75);
+  overflow: hidden;
+}
+
+.active-games-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.active-games-heading {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.active-games-close {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.active-games-close:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.active-games-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px 16px 18px;
+}
+
+.active-games-status {
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  padding: 24px 0;
+}
+
+.active-games-status--error {
+  color: #e8a0a0;
+}
+
+.active-games-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.active-games-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.active-games-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.active-games-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.active-games-meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.active-games-roster {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.active-games-spectate-btn {
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .active-games-panel {
+    width: 100vw;
+    max-height: 100dvh;
+    height: 100dvh;
+    border-radius: 0;
+    border: none;
+  }
+}

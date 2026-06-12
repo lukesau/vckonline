@@ -49,6 +49,9 @@ Endpoints:
 - `POST /api/lobby/ready` body `{player_id, debug_mode?}` — marks the player ready. When every member of the lobby is ready and the member count is at least `lobby.min_players`, a game is started: a new `game_id` (uuid4) is generated, the members are moved into `gamers`, the lobby is dissolved, and `load_game_data(game_id, lobby.preset, game_gamers, debug_mode=any_member_debug)` builds the initial `Game`.
 - `POST /api/lobby/unready` body `{player_id}` — clears the ready flag.
 - `GET /api/lobby/status?player_id=...` — returns `{lobbies, game_count, valid_presets, min_players_range, in_game, game_id, lobby_id}`. The `lobbies` array contains every open lobby with its members; each lobby payload includes `lobby_id`, `owner_id`, `preset`, `min_players`, and `members`. If `player_id` is supplied, the response also reports whether the player is already in a game and which lobby (if any) they currently belong to.
+- `GET /api/lobby/active-games` — returns `{games: [...]}` with lightweight metadata for every active, non-shutdown game. The lobby client uses this when the user clicks the active-games count and offers a Spectate button for each row.
+
+Spectator mode uses the normal game page with only `game_id` in the query string (`/?game_id=...`) and no `player_id`. Spectators receive the same hidden-info-safe projection used for non-owning viewers (notably hidden duke stubs), connect to `/ws/game/{game_id}` without a player id, and can fetch `/api/game/{game_id}/state` without a `player_id`. The client treats this mode as read-only: prompts render as observer/waiting prompts, "Peek board" is available for blocking prompts, and market/action controls are suppressed.
 
 Lobby cleanup:
 
