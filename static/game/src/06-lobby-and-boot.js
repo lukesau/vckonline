@@ -401,10 +401,11 @@ function syncPresetWarning(preset, warningEl) {
 }
 
 // ── Draft mode client state ──────────────────────────────────────────────────
-let _draftPhaseKey = '';      // 'monsters', 'starters', or 'citizens_1' etc — reset votes on change
+let _draftPhaseKey = '';      // 'agents', 'monsters', 'starters', or 'citizens_1' etc
 let _draftMonsterVotes = [];  // area names the player has locally selected (up to 5)
 let _draftStarterVote = null; // starter_id the player has locally selected
 let _draftCitizenVote = null; // citizen_id the player has locally selected
+let _draftAgentsVote = null;  // true = yes, false = no
 let _draftVoteSubmitted = false;
 let _draftTimerInterval = null;
 let _draftTimerEnd = 0;
@@ -431,6 +432,7 @@ function _startDraftTimer(timerEl) {
 
 function _getDraftPhaseKey(draft) {
   if (!draft) return '';
+  if (draft.phase === 'agents') return 'agents';
   if (draft.phase === 'monsters') return 'monsters';
   if (draft.phase === 'starters') return 'starters';
   if (draft.phase === 'citizens') return `citizens_${draft.current_roll}`;
@@ -439,6 +441,7 @@ function _getDraftPhaseKey(draft) {
 
 function _draftHasServerVote(draft) {
   if (!draft) return false;
+  if (draft.phase === 'agents') return draft.my_agents_vote != null;
   if (draft.phase === 'monsters') return !!(draft.my_monster_votes && draft.my_monster_votes.length > 0);
   if (draft.phase === 'starters') return draft.my_starter_vote != null;
   if (draft.phase === 'citizens') return draft.my_citizen_vote != null;
@@ -447,7 +450,9 @@ function _draftHasServerVote(draft) {
 
 function _syncDraftVoteFromServer(draft) {
   if (!_draftHasServerVote(draft)) return;
-  if (draft.phase === 'monsters') {
+  if (draft.phase === 'agents') {
+    _draftAgentsVote = draft.my_agents_vote;
+  } else if (draft.phase === 'monsters') {
     _draftMonsterVotes = [...draft.my_monster_votes];
   } else if (draft.phase === 'starters') {
     _draftStarterVote = draft.my_starter_vote;
@@ -801,6 +806,7 @@ function handleDraftState(draft, selfId) {
     _draftMonsterVotes = [];
     _draftStarterVote = null;
     _draftCitizenVote = null;
+    _draftAgentsVote = null;
     _draftVoteSubmitted = false;
     _syncDraftVoteFromServer(draft);
     _draftVoteSubmitted = _draftHasServerVote(draft);
@@ -827,7 +833,9 @@ function handleDraftState(draft, selfId) {
   // Last result banner
   if (lastResultEl) {
     const lr = draft.last_result;
-    if (lr && lr.phase === 'monsters' && lr.selected && lr.selected.length) {
+    if (lr && lr.phase === 'agents') {
+      lastResultEl.textContent = lr.include_agents ? 'Agents: Yes' : 'Agents: No';
+    } else if (lr && lr.phase === 'monsters' && lr.selected && lr.selected.length) {
       lastResultEl.textContent = `Monsters selected: ${lr.selected.join(', ')}`;
     } else if (lr && lr.phase === 'starters' && lr.winner_id != null) {
       const allS = draft.available_starters || [];
@@ -846,7 +854,15 @@ function handleDraftState(draft, selfId) {
     }
   }
 
-  if (draft.phase === 'monsters') {
+  if (draft.phase === 'agents') {
+    if (titleEl) titleEl.textContent = 'Use Agents?';
+    if (progressEl) progressEl.textContent = 'Optional module vote';
+    if (instrEl) instrEl.textContent = _draftVoteSubmitted
+      ? 'Vote submitted — waiting for others or timer'
+      : 'Should this game include the Agents module?';
+    _renderAgentsVote(draft, gridEl, selfId);
+    _updateDraftAgentsFooter(draft, statusEl, voteBtn, selfId);
+  } else if (draft.phase === 'monsters') {
     if (titleEl) titleEl.textContent = 'Monster Draft';
     if (progressEl) progressEl.textContent = `Select your top 5 monster stacks`;
     if (instrEl) instrEl.textContent = _draftVoteSubmitted
@@ -873,6 +889,65 @@ function handleDraftState(draft, selfId) {
       : `Choose which citizen fills the roll ${roll} slot`;
     _renderCitizenGrid(draft, gridEl, selfId);
     _updateDraftCitizensFooter(draft, statusEl, voteBtn, selfId);
+  }
+}
+
+function _renderAgentsVote(draft, gridEl, selfId) {
+  gridEl.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'draft-agents-vote';
+
+  const desc = document.createElement('p');
+  desc.className = 'draft-agents-desc';
+  desc.textContent = 'Agents are an optional module: four face-up cards you may Engage during your turn for their listed effect.';
+  wrap.appendChild(desc);
+
+  const choices = document.createElement('div');
+  choices.className = 'draft-agents-choices';
+
+  [
+    { value: true, label: 'Yes — include Agents' },
+    { value: false, label: 'No — skip Agents' },
+  ].forEach(opt => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'draft-agents-choice';
+    if (_draftAgentsVote === opt.value) btn.classList.add('draft-agents-choice--selected');
+    if (_draftVoteSubmitted) btn.disabled = true;
+    btn.textContent = opt.label;
+    const yesVotes = draft.agents_yes_votes || 0;
+    const noVotes = draft.agents_no_votes || 0;
+    if (opt.value === true && yesVotes > 0) btn.textContent += ` (${yesVotes})`;
+    if (opt.value === false && noVotes > 0) btn.textContent += ` (${noVotes})`;
+    if (!_draftVoteSubmitted) {
+      btn.addEventListener('click', () => {
+        _draftAgentsVote = opt.value;
+        _renderAgentsVote(draft, gridEl, selfId);
+        const statusEl = document.getElementById('draft-vote-status');
+        const voteBtn = document.getElementById('draft-vote-btn');
+        _updateDraftAgentsFooter(draft, statusEl, voteBtn, selfId);
+      });
+    }
+    choices.appendChild(btn);
+  });
+
+  wrap.appendChild(choices);
+  gridEl.appendChild(wrap);
+}
+
+function _updateDraftAgentsFooter(draft, statusEl, voteBtn, selfId) {
+  const submitted = draft.votes_submitted_count || 0;
+  const total = draft.total_players || 1;
+  if (statusEl) {
+    if (_draftVoteSubmitted) {
+      statusEl.textContent = `✓ Vote submitted (${submitted}/${total} players voted)`;
+    } else {
+      statusEl.textContent = `${submitted}/${total} players voted`;
+    }
+  }
+  if (voteBtn) {
+    voteBtn.textContent = 'Confirm Vote';
+    voteBtn.disabled = _draftVoteSubmitted || _draftAgentsVote == null || !draft.am_participant;
   }
 }
 
@@ -2163,7 +2238,13 @@ function initLobbyModal() {
       }
 
       let vote;
-      if (draft.phase === 'monsters') {
+      if (draft.phase === 'agents') {
+        if (_draftAgentsVote == null) {
+          showLobbyError('Choose Yes or No before voting.');
+          return;
+        }
+        vote = _draftAgentsVote;
+      } else if (draft.phase === 'monsters') {
         if (_draftMonsterVotes.length === 0) {
           showLobbyError('Pick at least one monster stack before voting.');
           return;

@@ -1207,6 +1207,196 @@ html, body {
   margin-bottom: 2px;
 }
 
+/* Agents board tab */
+.board-agents {
+  height: 100%;
+  box-sizing: border-box;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.board-agents .agents-row {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 8px;
+  padding: 6px 4px;
+  overflow-x: auto;
+}
+
+.board-agents .agent-slot {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 120px;
+  display: flex;
+}
+
+.board-agents .agent-slot-empty {
+  border: 1px dashed rgba(255,255,255,0.12);
+  border-radius: 8px;
+  background: rgba(0,0,0,0.15);
+}
+
+.board-agents .agent-card {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 8px;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  background: linear-gradient(160deg, rgba(40,32,24,0.95), rgba(20,16,12,0.95));
+  box-sizing: border-box;
+}
+
+.board-agents .agent-name {
+  font-weight: 800;
+  font-size: clamp(11px, 2.8vw, 14px);
+  color: var(--text);
+}
+
+.board-agents .agent-text {
+  flex: 1 1 auto;
+  font-size: clamp(10px, 2.4vw, 12px);
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.board-agents .agent-card.agent-unimplemented {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+}
+
+.board-agents .agent-card.agent-unaffordable {
+  opacity: 0.65;
+}
+
+.board-agents .agent-card.agent-clickable {
+  cursor: pointer;
+}
+
+.board-agents .agent-card.agent-clickable:hover {
+  border-color: rgba(255,220,140,0.45);
+  filter: brightness(1.06);
+}
+
+.board-agents .agents-deck {
+  flex: 0 0 auto;
+  width: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.board-agents .agents-deck-back {
+  width: 48px;
+  height: 68px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: linear-gradient(145deg, #3a2a1a, #1a1208);
+  box-shadow: inset 0 0 0 2px rgba(0,0,0,0.35);
+}
+
+.board-agents .agents-deck-count {
+  font-weight: 800;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.board-agents .agents-deck-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.agent-engage-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.65);
+  padding: 16px;
+}
+
+.agent-engage-panel {
+  max-width: 360px;
+  width: 100%;
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: var(--panel-bg, #1a1410);
+}
+
+.agent-engage-panel h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.agent-engage-body {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.agent-engage-hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.agent-engage-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.draft-agents-vote {
+  padding: 12px 8px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.draft-agents-desc {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+  margin: 0 0 16px;
+}
+
+.draft-agents-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.draft-agents-choice {
+  padding: 14px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(0,0,0,0.35);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.draft-agents-choice:hover:not(:disabled) {
+  border-color: rgba(255,220,140,0.4);
+}
+
+.draft-agents-choice--selected {
+  border-color: rgba(255,200,80,0.65);
+  background: rgba(80,60,20,0.45);
+}
+
 /* Crimson Seas island board (Sail tab): the mat is much wider than it is tall,
    so fit it to the single-card section height and let it overflow horizontally
    (wheel-to-horizontal scroll is wired up in JS, matching the tableaus). */

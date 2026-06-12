@@ -751,6 +751,8 @@ class PlayerActionsEngine:
                         self.game.pending_action_end_queue.pop(0) if self.game.pending_action_end_queue else None
                         if not self.game.domain_effects._drain_action_end_manipulate_queue():
                             pass  # advance_tick handles turn end
+                    elif ctx == "agent_engage":
+                        self.game.agents._finish_agent_engage_and_resume()
                     else:
                         self.game.domain_effects._resume_after_domain_activation_follow_up()
                     return
@@ -776,6 +778,8 @@ class PlayerActionsEngine:
                     self.game.pending_action_end_queue.pop(0) if self.game.pending_action_end_queue else None
                     if not self.game.domain_effects._drain_action_end_manipulate_queue():
                         pass  # advance_tick handles turn end
+                elif ctx == "agent_engage":
+                    self.game.agents._finish_agent_engage_and_resume()
                 else:
                     self.game.domain_effects._resume_after_domain_activation_follow_up()
                 return

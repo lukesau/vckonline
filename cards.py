@@ -279,6 +279,36 @@ class Domain(Card):
         return _apply_persisted_card_flags(card, dict_)
 
 
+class Agent(Card):
+    """Optional board module: face-up agents are engaged for an action."""
+
+    def __init__(self, agent_id, name, activation_effect, activation_effect_text):
+        super().__init__()
+        self.agent_id = agent_id
+        self.name = name
+        self.activation_effect = activation_effect
+        self.activation_effect_text = activation_effect_text
+
+    def to_dict(self):
+        return {
+            **super().to_dict(),
+            "agent_id": self.agent_id,
+            "name": self.name,
+            "activation_effect": self.activation_effect,
+            "activation_effect_text": self.activation_effect_text,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        card = cls(
+            agent_id=data["agent_id"],
+            name=data["name"],
+            activation_effect=data.get("activation_effect"),
+            activation_effect_text=data.get("activation_effect_text") or "",
+        )
+        return _apply_persisted_card_flags(card, data)
+
+
 class Monster(Card):
     def __init__(self, monster_id, name, area, monster_type, order, strength_cost, magic_cost, vp_reward, gold_reward,
                  strength_reward, magic_reward, has_special_reward, special_reward, has_special_cost, special_cost,

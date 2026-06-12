@@ -118,6 +118,26 @@ function crimsonSeasEnabled(state) {
   return String(state?.preset ?? '').trim().toLowerCase() === 'crimsonseas';
 }
 
+function agentsEnabled(state) {
+  return !!(state && state.agents_enabled);
+}
+
+function _agentPayCost(agent) {
+  const eff = String((agent && agent.activation_effect) || '').trim().toLowerCase();
+  const m = eff.match(/pay=([gsm]):(\d+)/);
+  if (!m) return null;
+  return { kind: m[1], amount: parseInt(m[2], 10) };
+}
+
+function _playerCanAffordAgent(state, agent) {
+  const pay = _agentPayCost(agent);
+  if (!pay) return true;
+  const me = (state.player_list || []).find(p => idsMatch(p.player_id, PLAYER_ID));
+  if (!me) return false;
+  const key = pay.kind === 'g' ? 'gold_score' : pay.kind === 's' ? 'strength_score' : 'magic_score';
+  return Number(me[key] || 0) >= pay.amount;
+}
+
 function playerIndexInList(state, player) {
   if (!player) return -1;
   const all = state.player_list || [];
@@ -764,9 +784,14 @@ const BOARD_SECTIONS = [
 ];
 
 function boardSectionsForState(state) {
-  return crimsonSeasEnabled(state)
-    ? [{ key: 'sail', label: 'Sail' }, ...BOARD_SECTIONS]
-    : BOARD_SECTIONS;
+  let sections = [...BOARD_SECTIONS];
+  if (crimsonSeasEnabled(state)) {
+    sections = [{ key: 'sail', label: 'Sail' }, ...sections];
+  }
+  if (agentsEnabled(state)) {
+    sections = [{ key: 'agents', label: 'Agents' }, ...sections];
+  }
+  return sections;
 }
 
 function renderCenter(state) {
@@ -789,6 +814,7 @@ function renderCenter(state) {
     makeGridSection('Domains',       state.domain_grid  || [], 'domain',  5, 'board-domains'),
   ];
   if (crimsonSeasEnabled(state)) sections.unshift(makeSailSection(state));
+  if (agentsEnabled(state)) sections.unshift(makeAgentsSection(state));
   boardSections.forEach(({ key }, i) => {
     sections[i].dataset.boardSection = key;
     const slide = mk('center-board-slide');
@@ -1266,6 +1292,96 @@ function placeSailAsset(overlay, box, node) {
 
 function sailBoxOf(group, slot) {
   return { left: slot.left, top: slot.top, w: group.w, h: group.h };
+}
+
+function makeAgentsSection(state) {
+  const sec = mk('center-section board-agents');
+  const lbl = mk('section-label');
+  lbl.textContent = 'Agents';
+  sec.appendChild(lbl);
+
+  const row = mk('agents-row');
+  const slots = state.agents_slots || [];
+  const canEngage = canOfferTakeResourceAction(state);
+
+  for (let i = 0; i < 4; i++) {
+    const slot = mk('agent-slot');
+    const agent = slots[i] || null;
+    if (agent) {
+      const card = mk('agent-card');
+      const nameEl = mk('agent-name');
+      nameEl.textContent = agent.name || 'Agent';
+      const textEl = mk('agent-text');
+      textEl.textContent = agent.activation_effect_text || '';
+      card.appendChild(nameEl);
+      card.appendChild(textEl);
+
+      const engageable = agent.engageable !== false;
+      const affordable = _playerCanAffordAgent(state, agent);
+      if (!engageable) card.classList.add('agent-unimplemented');
+      else if (!affordable) card.classList.add('agent-unaffordable');
+      if (engageable && affordable && canEngage) {
+        card.classList.add('agent-clickable');
+        card.addEventListener('click', e => {
+          e.stopPropagation();
+          openEngageAgentModal(i, agent);
+        });
+      }
+      slot.appendChild(card);
+    } else {
+      slot.classList.add('agent-slot-empty');
+    }
+    row.appendChild(slot);
+  }
+
+  const deckWrap = mk('agents-deck');
+  const deckBack = mk('agents-deck-back');
+  deckWrap.appendChild(deckBack);
+  const deckCount = mk('agents-deck-count');
+  deckCount.textContent = String(state.agents_deck_size || 0);
+  deckWrap.appendChild(deckCount);
+  const deckLabel = mk('agents-deck-label');
+  deckLabel.textContent = 'Deck';
+  deckWrap.appendChild(deckLabel);
+  row.appendChild(deckWrap);
+
+  sec.appendChild(row);
+  return sec;
+}
+
+function openEngageAgentModal(slotIndex, agent) {
+  const overlay = mk('agent-engage-overlay');
+  const panel = mk('agent-engage-panel');
+
+  const title = document.createElement('h3');
+  title.textContent = `Engage ${agent.name || 'Agent'}?`;
+  panel.appendChild(title);
+
+  const body = mk('agent-engage-body');
+  body.textContent = agent.activation_effect_text || '';
+  panel.appendChild(body);
+
+  const hint = mk('agent-engage-hint');
+  hint.textContent = 'Costs 1 action.';
+  panel.appendChild(hint);
+
+  const actions = mk('agent-engage-actions');
+  const engageBtn = promptButton('Engage', () => {
+    postGameAction({
+      player_id: PLAYER_ID,
+      action_type: 'engage_agent',
+      agent_slot_index: slotIndex,
+    });
+    overlay.remove();
+  });
+  const cancelBtn = promptButton('Cancel', () => overlay.remove(), true);
+  actions.appendChild(engageBtn);
+  actions.appendChild(cancelBtn);
+  panel.appendChild(actions);
+
+  overlay.appendChild(panel);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
 }
 
 function makeSailSection(state) {

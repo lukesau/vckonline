@@ -1,8 +1,19 @@
 import json
 from json import JSONEncoder
 
-from cards import Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Starter, Tome
+from card_filters import is_unimplemented_agent
+from cards import Agent, Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Starter, Tome
 from game_models import GameMember, LobbyMember, Player
+
+
+def _agent_slot_to_wire(agent):
+    if not agent:
+        return None
+    effect = getattr(agent, "activation_effect", None)
+    engageable = not is_unimplemented_agent({"activation_effect": effect})
+    d = agent.to_dict() if hasattr(agent, "to_dict") else {}
+    d["engageable"] = engageable
+    return d
 
 
 def _tome_to_dict(t):
@@ -173,6 +184,11 @@ class GameObjectEncoder(JSONEncoder):
                 # Crimson Seas 6-roll obligation: placements still owed + who owes them.
                 "pending_exekratys_offerings": int(getattr(obj, "pending_exekratys_offerings", 0) or 0),
                 "pending_exekratys_offering_player": getattr(obj, "pending_exekratys_offering_player", None),
+                "agents_slots": [
+                    _agent_slot_to_wire(a) for a in (getattr(obj, "agents_slots", None) or [])
+                ],
+                "agents_deck_size": len(getattr(obj, "agents_deck", None) or []),
+                "agents_enabled": bool(getattr(obj, "agents_enabled", lambda: False)()),
                 "pending_reroll_twilight_used": bool(getattr(obj, "_pending_reroll_twilight_used", False)),
                 "pending_reroll_blood_moon_used": bool(getattr(obj, "_pending_reroll_blood_moon_used", False)),
             }
@@ -215,6 +231,8 @@ def _rehydrate_card_from_dict(d):
         return Duke.from_dict(d)
     if "noble_id" in d:
         return Noble.from_dict(d)
+    if "agent_id" in d:
+        return Agent.from_dict(d)
     if "monster_id" in d:
         return Monster.from_dict(d)
     if "exhausted_id" in d or d.get("name") == "Exhausted":
@@ -266,6 +284,11 @@ def serialize_game_to_save_dict(game):
     base["noble_slots"] = [(n.to_dict() if n else None) for n in (getattr(game, "noble_slots", []) or [])]
     base["noble_supply"] = [n.to_dict() for n in (getattr(game, "noble_supply", []) or [])]
 
+    base["agents_slots"] = [(a.to_dict() if a else None) for a in (getattr(game, "agents_slots", []) or [])]
+    base["agents_deck"] = [a.to_dict() for a in (getattr(game, "agents_deck", []) or [])]
+    base["include_agents"] = bool(getattr(game, "include_agents", False))
+    base["pending_agent_engage"] = getattr(game, "pending_agent_engage", None)
+
     return base
 
 
@@ -312,6 +335,12 @@ def deserialize_save_dict_to_game(data):
     ]
     state["noble_supply"] = [
         _rehydrate_card_from_dict(c) for c in (state.get("noble_supply") or [])
+    ]
+    state["agents_slots"] = [
+        _rehydrate_card_from_dict(c) for c in (state.get("agents_slots") or [])
+    ]
+    state["agents_deck"] = [
+        _rehydrate_card_from_dict(c) for c in (state.get("agents_deck") or [])
     ]
 
     return Game(state)

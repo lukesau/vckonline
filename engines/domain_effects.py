@@ -30,6 +30,9 @@ class DomainEffectsEngine:
 
     def _resume_after_domain_activation_follow_up(self):
         """Clear optional domain activation prompts and restore action/end-turn resolution."""
+        if getattr(self.game, "pending_agent_engage", None):
+            self.game.agents._finish_agent_engage_and_resume()
+            return
         self.game.pending_required_choice = None
         if getattr(self.game, "phase", None) == "action" and int(getattr(self.game, "actions_remaining", 0) or 0) > 0:
             self.game.action_required["id"] = self.game.lifecycle.current_player_id()

@@ -726,6 +726,7 @@ async def _hurry_up_apply(game_id: str, deadline: float) -> None:
 # Dukes and domains remain randomised. Each phase has a 30-second timer; the
 # server advances immediately if all players vote before time runs out.
 
+_DRAFT_AGENTS_VOTE_SECONDS = 30
 _DRAFT_MONSTER_VOTE_SECONDS = 120
 _DRAFT_STARTER_VOTE_SECONDS = 30
 _DRAFT_CITIZEN_VOTE_SECONDS = 30
@@ -822,6 +823,14 @@ def _serialize_draft_state_for_player(state: dict, player_id: Optional[str]) -> 
     for sid in state.get("votes_starters", {}).values():
         starter_vote_counts[int(sid)] = starter_vote_counts.get(int(sid), 0) + 1
 
+    agents_yes_votes = 0
+    agents_no_votes = 0
+    for v in state.get("votes_agents", {}).values():
+        if v:
+            agents_yes_votes += 1
+        else:
+            agents_no_votes += 1
+
     available_monsters = []
     available_citizens = []
     available_starters = []
@@ -856,12 +865,17 @@ def _serialize_draft_state_for_player(state: dict, player_id: Optional[str]) -> 
         "my_monster_votes": list(state["votes_monsters"].get(pid, [])),
         "my_citizen_vote": state["votes_citizens"].get(pid),
         "my_starter_vote": state.get("votes_starters", {}).get(pid),
+        "my_agents_vote": state.get("votes_agents", {}).get(pid),
+        "agents_yes_votes": agents_yes_votes,
+        "agents_no_votes": agents_no_votes,
+        "selected_include_agents": state.get("selected_include_agents"),
         "selected_monster_areas": list(state.get("selected_monster_areas", [])),
         "selected_citizens": {str(k): v for k, v in state.get("selected_citizens", {}).items()},
         "citizen_draft_round": len(state.get("selected_citizens", {})) + (1 if phase == "citizens" else 0),
         "citizen_draft_total": len(state.get("citizen_rolls_all", [])),
         "votes_submitted_count": (
-            len(state["votes_monsters"]) if phase == "monsters"
+            len(state.get("votes_agents", {})) if phase == "agents"
+            else len(state["votes_monsters"]) if phase == "monsters"
             else len(state.get("votes_starters", {})) if phase == "starters"
             else len(state["votes_citizens"])
         ),
@@ -869,6 +883,12 @@ def _serialize_draft_state_for_player(state: dict, player_id: Optional[str]) -> 
         "am_participant": pid in state["player_ids"],
         "last_result": state.get("last_result"),
     }
+
+
+def _tally_agents_votes(state: dict) -> bool:
+    yes = sum(1 for v in state.get("votes_agents", {}).values() if v)
+    no = sum(1 for v in state.get("votes_agents", {}).values() if not v)
+    return yes > no
 
 
 def _tally_monster_votes(state: dict) -> list:
@@ -961,12 +981,14 @@ async def _start_draft(lb: "Lobby"):
         await lobby_ws_manager.broadcast_lobby()
         return
 
-    timer_end = time.time() + _DRAFT_MONSTER_VOTE_SECONDS
+    timer_end = time.time() + _DRAFT_AGENTS_VOTE_SECONDS
     _draft_states[lobby_id] = {
         "lobby_id": lobby_id,
         "n_players": n_players,
         "debug_mode": debug_mode,
-        "phase": "monsters",
+        "phase": "agents",
+        "votes_agents": {},
+        "selected_include_agents": False,
         "monster_areas": monsters_by_area,
         "votes_monsters": {},
         "selected_monster_areas": [],
@@ -1000,7 +1022,14 @@ async def _advance_draft(lobby_id: str):
 
     phase = state["phase"]
 
-    if phase == "monsters":
+    if phase == "agents":
+        include = _tally_agents_votes(state)
+        state["selected_include_agents"] = include
+        state["last_result"] = {"phase": "agents", "include_agents": include}
+        state["phase"] = "monsters"
+        state["votes_monsters"] = {}
+
+    elif phase == "monsters":
         selected = _tally_monster_votes(state)
         state["selected_monster_areas"] = selected
         state["last_result"] = {"phase": "monsters", "selected": selected}
@@ -1036,7 +1065,11 @@ async def _advance_draft(lobby_id: str):
     else:
         return
 
-    if state["phase"] == "starters":
+    if state["phase"] == "agents":
+        timer_secs = _DRAFT_AGENTS_VOTE_SECONDS
+    elif state["phase"] == "monsters":
+        timer_secs = _DRAFT_MONSTER_VOTE_SECONDS
+    elif state["phase"] == "starters":
         timer_secs = _DRAFT_STARTER_VOTE_SECONDS
     elif state["phase"] == "citizens":
         timer_secs = _DRAFT_CITIZEN_VOTE_SECONDS
@@ -1063,6 +1096,8 @@ async def _finish_draft(lobby_id: str):
     }
     if state.get("selected_starter_id") is not None:
         draft_selections["starter_id"] = state["selected_starter_id"]
+    if state.get("selected_include_agents"):
+        draft_selections["include_agents"] = True
     debug_mode = state["debug_mode"]
     new_game_id = str(uuid.uuid4())
 
@@ -1202,6 +1237,7 @@ class GameActionRequest(BaseModel):
     slot_indices: Optional[List[int]] = None
     # rescue_noble: which Amarynth noble slot (0-based) to rescue.
     slot_index: Optional[int] = None
+    agent_slot_index: Optional[int] = None
     gold_cost: Optional[int] = None
     strength_cost: Optional[int] = None
     magic_cost: Optional[int] = None
@@ -1574,7 +1610,21 @@ async def submit_draft_vote(request: DraftVoteRequest):
     phase = state["phase"]
     vote = request.vote
 
-    if phase == "monsters":
+    if phase == "agents":
+        if isinstance(vote, bool):
+            choice = vote
+        elif isinstance(vote, str):
+            low = vote.strip().lower()
+            if low in ("yes", "true", "1"):
+                choice = True
+            elif low in ("no", "false", "0"):
+                choice = False
+            else:
+                raise HTTPException(status_code=400, detail="Agents vote must be yes or no")
+        else:
+            raise HTTPException(status_code=400, detail="Agents vote must be yes or no (boolean)")
+        state.setdefault("votes_agents", {})[pid] = bool(choice)
+    elif phase == "monsters":
         if not isinstance(vote, list):
             raise HTTPException(status_code=400, detail="Monster vote must be a list of area names")
         valid_areas = set(state["monster_areas"].keys())
@@ -1605,7 +1655,9 @@ async def submit_draft_vote(request: DraftVoteRequest):
         raise HTTPException(status_code=409, detail="Draft is not in an active voting phase")
 
     n_players = len(state["player_ids"])
-    if phase == "monsters" and len(state["votes_monsters"]) >= n_players:
+    if phase == "agents" and len(state.get("votes_agents", {})) >= n_players:
+        await _advance_draft(lb.lobby_id)
+    elif phase == "monsters" and len(state["votes_monsters"]) >= n_players:
         await _advance_draft(lb.lobby_id)
     elif phase == "starters" and len(state.get("votes_starters", {})) >= n_players:
         await _advance_draft(lb.lobby_id)
@@ -2002,6 +2054,22 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             except Exception:
                 if redeemed:
                     game.refund_tomes_from_score(request.player_id, redeemed)
+                _rollback_consumed_action(game)
+                raise
+            game.finish_turn_if_no_actions_remaining()
+            should_snapshot = True
+
+        elif request.action_type == "engage_agent":
+            if request.agent_slot_index is None:
+                raise HTTPException(status_code=400, detail="agent_slot_index required")
+            if not game.consume_player_action(request.player_id, action_type="engage_agent"):
+                raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
+            try:
+                game.engage_agent(request.player_id, request.agent_slot_index)
+            except ValueError as e:
+                _rollback_consumed_action(game)
+                raise HTTPException(status_code=400, detail=str(e))
+            except Exception:
                 _rollback_consumed_action(game)
                 raise
             game.finish_turn_if_no_actions_remaining()

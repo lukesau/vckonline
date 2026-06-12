@@ -3,7 +3,8 @@ from typing import List
 
 from banned_cards import banned_domain_ids, banned_duke_ids
 from card_filters import is_unimplemented_event, keep_for_random
-from cards import Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Starter
+from card_filters import is_unimplemented_agent
+from cards import Agent, Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Starter
 from game_models import Player
 
 # Domain IDs granted (one extra copy per player) when the lobby's
@@ -80,6 +81,10 @@ NOBLE_SLOT_COUNT = 3
 # standard resource ordering used everywhere else in the UI.
 EXEKRATYS_STARTING_RESOURCES = {"gold": 2, "strength": 2, "magic": 2}
 
+# Agents optional module: 4 face-up slots above the monster stacks; the rest
+# stay face-down in a deck. Used only when `include_agents` is true at setup.
+AGENT_SLOT_COUNT = 4
+
 # Starters split into two groups by roll_match:
 #   - "core" starters (Peasant/Knight, real roll numbers) are mandatory: every
 #     player always gets all of them.
@@ -146,6 +151,26 @@ def _choose_one_citizen_per_roll(rows):
     for row in rows:
         rows_by_roll.setdefault(int(row["roll_match1"]), []).append(row)
     return [random.choice(rows_by_roll[roll]) for roll in sorted(rows_by_roll)]
+
+
+def _should_include_agents(preset, debug_mode=False, draft_selections=None):
+    """True when this game should deal the Agents module onto the board."""
+    if debug_mode and (preset or "").strip().lower() != "crimsonseas":
+        return True
+    if (preset or "").strip().lower() == "random":
+        return random.random() < 0.5
+    if (preset or "").strip().lower() == "draft":
+        return bool((draft_selections or {}).get("include_agents"))
+    return False
+
+
+def _agent_from_row(row):
+    return Agent(
+        row["id_agents"],
+        row["name"],
+        row.get("activation_effect"),
+        row.get("activation_effect_text") or "",
+    )
 
 
 def _filter_monster_areas_for_random(rows, n_players):
@@ -278,6 +303,8 @@ def load_game_data(
     if duke_select_count not in (2, 3):
         raise ValueError(f"duke_select_count must be 2 or 3, got {duke_select_count}")
 
+    include_agents = _should_include_agents(preset, debug_mode, draft_selections)
+
     monster_query = ""
     monster_stack = []
     citizen_query = ""
@@ -344,6 +371,7 @@ def load_game_data(
     # Crimson Seas Nobles (Amarynth). Materialized Noble objects loaded while the
     # DB cursor is open; only shuffled/dealt for the crimsonseas preset.
     noble_pool = []
+    agent_pool = []
     starter_query = "SELECT * FROM starters ORDER BY id_starters"
     starter_stack = []
     player_list = []
@@ -857,6 +885,11 @@ def load_game_data(
                     row["expansion"],
                 ))
 
+        if include_agents:
+            my_cursor.execute("SELECT * FROM agents ORDER BY id_agents")
+            for row in (my_cursor.fetchall() or []):
+                agent_pool.append(_agent_from_row(row))
+
         my_cursor.close()
         my_connect.close()
     except Exception as e:
@@ -1134,6 +1167,17 @@ def load_game_data(
             # Strength, Magic to match the rest of the game's resource order).
             exekratys_resources = dict(EXEKRATYS_STARTING_RESOURCES)
 
+        agents_slots = []
+        agents_deck = []
+        if include_agents and agent_pool:
+            agents_deck = list(agent_pool)
+            random.shuffle(agents_deck)
+            for _ in range(min(AGENT_SLOT_COUNT, len(agents_deck))):
+                agent = agents_deck.pop()
+                agent.toggle_visibility(True)
+                agent.toggle_accessibility(True)
+                agents_slots.append(agent)
+
         game_state = {
             "game_id": game_id,
             "debug_mode": bool(debug_mode),
@@ -1145,6 +1189,9 @@ def load_game_data(
             "noble_supply": noble_supply,
             "noble_slots": noble_slots,
             "exekratys_resources": exekratys_resources,
+            "agents_slots": agents_slots,
+            "agents_deck": agents_deck,
+            "include_agents": bool(include_agents),
             "pending_required_choice": None,
             "player_list": player_list,
             "all_dukes": all_dukes,

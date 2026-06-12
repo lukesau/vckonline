@@ -45,6 +45,7 @@ from engines.domain_effects import DomainEffectsEngine
 from engines.player_actions import PlayerActionsEngine
 from engines.endgame import EndgameEngine
 from engines.events import EventsEngine
+from engines.agents import AgentsEngine
 
 
 class Game:
@@ -59,6 +60,7 @@ class Game:
         "player_actions",
         "endgame",
         "events",
+        "agents",
     )
 
     def __init__(self, game_state):
@@ -99,6 +101,12 @@ class Game:
         # feed it on rolling 6s and clear it by sailing there. Empty outside the
         # Crimson Seas preset.
         self.exekratys_resources = dict(game_state.get('exekratys_resources') or {})
+        # Agents optional module: 4 face-up slots + face-down deck. Empty when
+        # the module was not included at setup.
+        self.agents_slots = list(game_state.get('agents_slots') or [])
+        self.agents_deck = list(game_state.get('agents_deck') or [])
+        self.include_agents = bool(game_state.get('include_agents', False))
+        self.pending_agent_engage = game_state.get('pending_agent_engage')
         # Crimson Seas roll obligation: each 6 rolled (each die plus the dice
         # sum, counted separately) forces the active player to place 1 of their
         # resources into the Exekratys pool. `pending_exekratys_offerings` is the
@@ -256,6 +264,7 @@ class Game:
         self.player_actions = PlayerActionsEngine(self)
         self.endgame = EndgameEngine(self)
         self.events = EventsEngine(self)
+        self.agents = AgentsEngine(self)
         self._assert_no_engine_method_conflicts()
 
     def _assert_no_engine_method_conflicts(self):
@@ -456,6 +465,13 @@ class Game:
         incidental map gain still tracks silently on `map_score`.
         """
         return (self.preset or "").strip().lower() == "crimsonseas"
+
+    def agents_enabled(self):
+        """True when the Agents module was dealt at setup."""
+        return bool(self.include_agents and (self.agents_slots or self.agents_deck))
+
+    def engage_agent(self, player_id, slot_index):
+        return self.agents.engage_agent(player_id, slot_index)
 
     def _pirate_blockade_in_play(self):
         """True if a Pirate Blockade monster event is currently on the board.
