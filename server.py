@@ -5,6 +5,7 @@ Simple REST API to replace the socket-based protocol
 """
 
 import re
+import html
 import random
 import time
 import uuid
@@ -13,10 +14,10 @@ import urllib.parse
 from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 import shortuuid
 
@@ -2354,31 +2355,146 @@ _WIKI_TABS = frozenset({
     "events", "nobles", "agents", "relics", "rulebooks",
 })
 
+# Tab (plural, as it appears in the URL) -> singular image kind for the
+# `/card-image/{kind}/{id}` endpoint, and -> the id field name used in the
+# cached wiki payload so we can resolve a card's display name for previews.
+_WIKI_TAB_IMAGE_KIND = {
+    "citizens": "citizen", "monsters": "monster", "domains": "domain",
+    "dukes": "duke", "starters": "starter", "events": "event",
+    "nobles": "noble", "agents": "agent", "relics": "relic",
+}
+_WIKI_TAB_ID_FIELD = {
+    "citizens": "citizen_id", "monsters": "monster_id", "domains": "domain_id",
+    "dukes": "duke_id", "starters": "starter_id", "events": "id_events",
+    "nobles": "noble_id", "agents": "id_agents", "relics": "id_relics",
+}
+
+# Cached raw text of the wiki SPA shell so per-request Open Graph injection is a
+# cheap string op rather than a disk read each time.
+_wiki_html_template = None
+
+
+def _public_base_url(request: Request) -> str:
+    """Best-effort public origin (scheme://host) honoring reverse-proxy headers
+    so Open Graph URLs are absolute and point at the public domain."""
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or request.url.netloc
+    )
+    return f"{proto}://{host}".rstrip("/")
+
+
+def _wiki_card_name(card_type: str, card_id: str):
+    """Display name for a wiki card, or None if it can't be resolved (bad id or
+    DB down). Uses the same in-memory cache as /api/wiki/cards."""
+    global _wiki_cards_cache
+    try:
+        if _wiki_cards_cache is None:
+            from wiki_data import load_all_cards_for_wiki
+            _wiki_cards_cache = load_all_cards_for_wiki()
+        field = _WIKI_TAB_ID_FIELD.get(card_type)
+        if not field:
+            return None
+        for c in _wiki_cards_cache["cards"].get(card_type, []):
+            if str(c.get(field)) == str(card_id):
+                return c.get("name")
+    except Exception:
+        return None
+    return None
+
+
+def _wiki_html_with_og(*, title, description, image_url=None, page_url, image_dims=None):
+    """Return the wiki SPA shell with Open Graph / Twitter meta tags injected so
+    link-unfurlers (iMessage, Slack, etc., which don't run the SPA's JS) show a
+    rich preview."""
+    global _wiki_html_template
+    if _wiki_html_template is None:
+        _wiki_html_template = _WIKI_INDEX.read_text()
+
+    def esc(v):
+        return html.escape(str(v), quote=True)
+
+    tags = [
+        '<meta property="og:type" content="website">',
+        '<meta property="og:site_name" content="Valeria Card Kingdoms Wiki">',
+        f'<meta property="og:title" content="{esc(title)}">',
+        f'<meta property="og:description" content="{esc(description)}">',
+        f'<meta property="og:url" content="{esc(page_url)}">',
+    ]
+    if image_url:
+        tags.append(f'<meta property="og:image" content="{esc(image_url)}">')
+        if image_dims:
+            tags.append(f'<meta property="og:image:width" content="{image_dims[0]}">')
+            tags.append(f'<meta property="og:image:height" content="{image_dims[1]}">')
+        tags.append('<meta name="twitter:card" content="summary_large_image">')
+        tags.append(f'<meta name="twitter:image" content="{esc(image_url)}">')
+    else:
+        tags.append('<meta name="twitter:card" content="summary">')
+    tags.append(f'<meta name="twitter:title" content="{esc(title)}">')
+    tags.append(f'<meta name="twitter:description" content="{esc(description)}">')
+
+    block = "\n  " + "\n  ".join(tags) + "\n"
+    html_text = _wiki_html_template.replace("</head>", block + "</head>", 1)
+    return HTMLResponse(html_text)
+
 
 @app.get("/wiki")
-async def wiki_client():
-    return FileResponse(_WIKI_INDEX, media_type="text/html")
+async def wiki_client(request: Request):
+    return _wiki_html_with_og(
+        title="Valeria Card Kingdoms Wiki",
+        description="Browse every card in the Valeria Card Kingdoms database — citizens, monsters, domains, dukes, starters, events, nobles, agents, and relics.",
+        image_url=f"{_public_base_url(request)}/images/valeria_logo.png",
+        page_url=f"{_public_base_url(request)}/wiki",
+    )
 
 
 @app.get("/wiki/{card_type}")
-async def wiki_client_type(card_type: str):
+async def wiki_client_type(card_type: str, request: Request):
     """Deep-link to a wiki tab (e.g. /wiki/agents). Serves the same SPA;
     the client reads the path to select the tab. Unknown tabs redirect to
     the wiki root."""
     if card_type not in _WIKI_TABS:
         return RedirectResponse("/wiki")
-    return FileResponse(_WIKI_INDEX, media_type="text/html")
+    base = _public_base_url(request)
+    label = card_type[:1].upper() + card_type[1:]
+    return _wiki_html_with_og(
+        title=f"{label} — Valeria Card Kingdoms Wiki",
+        description=f"Browse {label} in the Valeria Card Kingdoms database.",
+        image_url=f"{base}/images/valeria_logo.png",
+        page_url=f"{base}/wiki/{card_type}",
+    )
 
 
 @app.get("/wiki/{card_type}/{card_id}")
-async def wiki_client_card(card_type: str, card_id: str):
+async def wiki_client_card(card_type: str, card_id: str, request: Request):
     """Deep-link to a single card's modal (e.g. /wiki/citizens/21). Serves the
-    same SPA; the client reads the path to open the matching card (and itself
-    redirects to the wiki root if the id resolves to no card). Unknown tabs
-    redirect here too."""
+    same SPA (which opens the matching card and itself redirects to the wiki
+    root if the id resolves to no card), with Open Graph tags pointing at the
+    card art so link previews show the card. Unknown tabs redirect to root."""
     if card_type not in _WIKI_TABS:
         return RedirectResponse("/wiki")
-    return FileResponse(_WIKI_INDEX, media_type="text/html")
+    base = _public_base_url(request)
+    kind = _WIKI_TAB_IMAGE_KIND.get(card_type)
+    # The rulebooks tab has no DB cards / numeric ids; fall back to a tab preview.
+    if not kind:
+        return _wiki_html_with_og(
+            title="Valeria Card Kingdoms Wiki",
+            description="Browse every card in the Valeria Card Kingdoms database.",
+            image_url=f"{base}/images/valeria_logo.png",
+            page_url=f"{base}/wiki/{card_type}",
+        )
+    name = _wiki_card_name(card_type, card_id)
+    title = f"{name} — Valeria Card Kingdoms Wiki" if name else "Valeria Card Kingdoms Wiki"
+    description = f"{name} — view this card in the Valeria Card Kingdoms wiki." if name else "View this card in the Valeria Card Kingdoms wiki."
+    return _wiki_html_with_og(
+        title=title,
+        description=description,
+        image_url=f"{base}/card-image/{kind}/{card_id}",
+        page_url=f"{base}/wiki/{card_type}/{card_id}",
+        image_dims=(400, 571),
+    )
 
 
 @app.get("/wiki/{full_path:path}")
