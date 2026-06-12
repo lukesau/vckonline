@@ -872,7 +872,7 @@ function fillCardModalInspectInfo(infoEl, card, ownerPlayerId) {
     const note = document.createElement('p');
     note.className = 'modal-card-text';
     if (isDomainStackFaceDown(card)) {
-      note.textContent = 'The next domain in this pile stays face-down until the end of the turn of the player who built from here.';
+      note.textContent = 'This domain is face-down. It is revealed as soon as the domain above it in this pile is built.';
     } else if (isHiddenDuke) {
       note.textContent = dukeTableData
         ? "This duke is hidden, but here's how every duke except yours would score for this tableau right now."

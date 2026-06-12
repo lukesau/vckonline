@@ -486,7 +486,7 @@ function openBoardMarketStackModal(initialTopCard) {
       const note = document.createElement('p');
       note.className = 'modal-card-text';
       note.textContent =
-        'The next domain in this pile stays face-down until the end of the turn of the player who built from here.';
+        'This domain is face-down. It is revealed as soon as the domain above it in this pile is built.';
       info.appendChild(note);
       return;
     }
@@ -1404,7 +1404,7 @@ function openMarketCardModal(card) {
       const note = document.createElement('p');
       note.className = 'modal-card-text';
       note.textContent =
-        'The next domain in this pile stays face-down until the end of the turn of the player who built from here.';
+        'This domain is face-down. It is revealed as soon as the domain above it in this pile is built.';
       info.appendChild(note);
     } else if (cardObscuredFromViewer(card)) {
       const note = document.createElement('p');

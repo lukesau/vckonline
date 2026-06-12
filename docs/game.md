@@ -295,9 +295,12 @@ DB rows continue to work — but every new card or migration should use
 At 2-4 players each of the five domain stacks is dealt 3 cards deep with
 the top face-up (15 domains total). At 5 players each stack is dealt 4
 cards deep with 3 hidden + 1 face-up (20 domains total) — see
-`game_setup.py` (`domain_stack_depth = 4 if n == 5 else 3`). The face-up
-top still rotates through `_reveal_hidden_domain_stack_tops` after a
-purchase.
+`game_setup.py` (`domain_stack_depth = 4 if n == 5 else 3`). When a domain
+is built, the next card in that stack is revealed immediately as the final
+step of the Build a Domain action (base-rules step 5), so a buried domain
+becomes face-up the moment the card above it is purchased.
+`_reveal_hidden_domain_stack_tops` runs at turn end only as a defensive
+no-op safety net.
 
 ### Harvest steal pre-phase
 

@@ -1897,7 +1897,15 @@ class PlayerActionsEngine:
             # collide with the domain's prompt (the event defers if a prompt is open).
             self.game.domain_effects._apply_domain_activation_effect(player, bought)
             self.game.domain_effects._apply_action_event_gain_passives(player, "build")
-            if not domain_stack and self.game.exhausted_stack:
+            # Build a Domain step 5 (base rules): reveal the next Domain in the
+            # stack immediately as the final step of this action — not deferred
+            # to turn end. An emptied stack refills from the exhausted deck.
+            if domain_stack:
+                new_top = domain_stack[-1]
+                if getattr(new_top, "domain_id", None) is not None:
+                    new_top.toggle_visibility(True)
+                    new_top.toggle_accessibility(True)
+            elif self.game.exhausted_stack:
                 self.game.events.reveal_exhausted_onto_stack(domain_stack)
             after = self.game._player_scores_line(player)
             pay = self.game._format_resource_payment(gp, sp, mp)

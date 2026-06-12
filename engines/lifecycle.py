@@ -632,7 +632,11 @@ class LifecycleEngine:
         )
 
     def _reveal_hidden_domain_stack_tops(self):
-        """Face up domain stack tops that were left hidden after a purchase (until turn end)."""
+        """Defensive end-of-turn sweep: face up any domain stack top still hidden.
+
+        Building a Domain now reveals the next card immediately (base-rules step
+        5), so this should be a no-op in normal play. Kept as a safety net for
+        any path that leaves a domain top face-down."""
         for domain_stack in getattr(self.game, "domain_grid", None) or []:
             if not domain_stack:
                 continue
