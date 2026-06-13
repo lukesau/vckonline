@@ -12,6 +12,13 @@ function tableauCardFullText(card) {
   const rawText = (card.text ?? '').toString().trim();
   if (rawText) return rawText;
 
+  // Relics carry their power as `passive_effect_text` (the `passive_effect`
+  // string is reserved for future execution and is empty for now).
+  if (card.relic_id != null) {
+    const relicText = (card.passive_effect_text ?? '').toString().trim();
+    if (relicText) return relicText;
+  }
+
   const parts = [];
   pushHarvestHints(parts, card);
   if (card.monster_id !== undefined && card.monster_id !== null) {
@@ -74,7 +81,7 @@ function renderDetailCardItem(card, count = 1) {
     return `<div class="player-detail-item"><div class="player-detail-item-title">${escapeHtml(String(card))}</div></div>`;
   }
   const name = card.name || card.title || '(unnamed)';
-  const id = card.starter_id || card.citizen_id || card.monster_id || card.domain_id || card.duke_id || card.id || '';
+  const id = card.starter_id || card.citizen_id || card.monster_id || card.domain_id || card.duke_id || card.relic_id || card.id || '';
   const isCitizen = card.citizen_id !== undefined && card.citizen_id !== null;
 
   const hints = [];

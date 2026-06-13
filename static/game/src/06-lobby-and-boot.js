@@ -406,6 +406,7 @@ let _draftMonsterVotes = [];  // area names the player has locally selected (up 
 let _draftStarterVote = null; // starter_id the player has locally selected
 let _draftCitizenVote = null; // citizen_id the player has locally selected
 let _draftAgentsVote = null;  // true = yes, false = no
+let _draftRelicsVote = null;  // true = yes, false = no
 let _draftVoteSubmitted = false;
 let _draftTimerInterval = null;
 let _draftTimerEnd = 0;
@@ -433,6 +434,7 @@ function _startDraftTimer(timerEl) {
 function _getDraftPhaseKey(draft) {
   if (!draft) return '';
   if (draft.phase === 'agents') return 'agents';
+  if (draft.phase === 'relics') return 'relics';
   if (draft.phase === 'monsters') return 'monsters';
   if (draft.phase === 'starters') return 'starters';
   if (draft.phase === 'citizens') return `citizens_${draft.current_roll}`;
@@ -442,6 +444,7 @@ function _getDraftPhaseKey(draft) {
 function _draftHasServerVote(draft) {
   if (!draft) return false;
   if (draft.phase === 'agents') return draft.my_agents_vote != null;
+  if (draft.phase === 'relics') return draft.my_relics_vote != null;
   if (draft.phase === 'monsters') return !!(draft.my_monster_votes && draft.my_monster_votes.length > 0);
   if (draft.phase === 'starters') return draft.my_starter_vote != null;
   if (draft.phase === 'citizens') return draft.my_citizen_vote != null;
@@ -452,6 +455,8 @@ function _syncDraftVoteFromServer(draft) {
   if (!_draftHasServerVote(draft)) return;
   if (draft.phase === 'agents') {
     _draftAgentsVote = draft.my_agents_vote;
+  } else if (draft.phase === 'relics') {
+    _draftRelicsVote = draft.my_relics_vote;
   } else if (draft.phase === 'monsters') {
     _draftMonsterVotes = [...draft.my_monster_votes];
   } else if (draft.phase === 'starters') {
@@ -807,6 +812,7 @@ function handleDraftState(draft, selfId) {
     _draftStarterVote = null;
     _draftCitizenVote = null;
     _draftAgentsVote = null;
+    _draftRelicsVote = null;
     _draftVoteSubmitted = false;
     _syncDraftVoteFromServer(draft);
     _draftVoteSubmitted = _draftHasServerVote(draft);
@@ -835,6 +841,8 @@ function handleDraftState(draft, selfId) {
     const lr = draft.last_result;
     if (lr && lr.phase === 'agents') {
       lastResultEl.textContent = lr.include_agents ? 'Agents: Yes' : 'Agents: No';
+    } else if (lr && lr.phase === 'relics') {
+      lastResultEl.textContent = lr.include_relics ? 'Relics: Yes' : 'Relics: No';
     } else if (lr && lr.phase === 'monsters' && lr.selected && lr.selected.length) {
       lastResultEl.textContent = `Monsters selected: ${lr.selected.join(', ')}`;
     } else if (lr && lr.phase === 'starters' && lr.winner_id != null) {
@@ -862,6 +870,14 @@ function handleDraftState(draft, selfId) {
       : 'Should this game include the Agents module?';
     _renderAgentsVote(draft, gridEl, selfId);
     _updateDraftAgentsFooter(draft, statusEl, voteBtn, selfId);
+  } else if (draft.phase === 'relics') {
+    if (titleEl) titleEl.textContent = 'Use Relics?';
+    if (progressEl) progressEl.textContent = 'Optional module vote';
+    if (instrEl) instrEl.textContent = _draftVoteSubmitted
+      ? 'Vote submitted — waiting for others or timer'
+      : 'Should this game include the Relics module?';
+    _renderRelicsVote(draft, gridEl, selfId);
+    _updateDraftRelicsFooter(draft, statusEl, voteBtn, selfId);
   } else if (draft.phase === 'monsters') {
     if (titleEl) titleEl.textContent = 'Monster Draft';
     if (progressEl) progressEl.textContent = `Select your top 5 monster stacks`;
@@ -948,6 +964,65 @@ function _updateDraftAgentsFooter(draft, statusEl, voteBtn, selfId) {
   if (voteBtn) {
     voteBtn.textContent = 'Confirm Vote';
     voteBtn.disabled = _draftVoteSubmitted || _draftAgentsVote == null || !draft.am_participant;
+  }
+}
+
+function _renderRelicsVote(draft, gridEl, selfId) {
+  gridEl.innerHTML = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'draft-agents-vote';
+
+  const desc = document.createElement('p');
+  desc.className = 'draft-agents-desc';
+  desc.textContent = 'Relics are an optional module: at setup each player is dealt several relics and keeps one face-up in their kingdom for the rest of the game.';
+  wrap.appendChild(desc);
+
+  const choices = document.createElement('div');
+  choices.className = 'draft-agents-choices';
+
+  [
+    { value: true, label: 'Yes — include Relics' },
+    { value: false, label: 'No — skip Relics' },
+  ].forEach(opt => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'draft-agents-choice';
+    if (_draftRelicsVote === opt.value) btn.classList.add('draft-agents-choice--selected');
+    if (_draftVoteSubmitted) btn.disabled = true;
+    btn.textContent = opt.label;
+    const yesVotes = draft.relics_yes_votes || 0;
+    const noVotes = draft.relics_no_votes || 0;
+    if (opt.value === true && yesVotes > 0) btn.textContent += ` (${yesVotes})`;
+    if (opt.value === false && noVotes > 0) btn.textContent += ` (${noVotes})`;
+    if (!_draftVoteSubmitted) {
+      btn.addEventListener('click', () => {
+        _draftRelicsVote = opt.value;
+        _renderRelicsVote(draft, gridEl, selfId);
+        const statusEl = document.getElementById('draft-vote-status');
+        const voteBtn = document.getElementById('draft-vote-btn');
+        _updateDraftRelicsFooter(draft, statusEl, voteBtn, selfId);
+      });
+    }
+    choices.appendChild(btn);
+  });
+
+  wrap.appendChild(choices);
+  gridEl.appendChild(wrap);
+}
+
+function _updateDraftRelicsFooter(draft, statusEl, voteBtn, selfId) {
+  const submitted = draft.votes_submitted_count || 0;
+  const total = draft.total_players || 1;
+  if (statusEl) {
+    if (_draftVoteSubmitted) {
+      statusEl.textContent = `✓ Vote submitted (${submitted}/${total} players voted)`;
+    } else {
+      statusEl.textContent = `${submitted}/${total} players voted`;
+    }
+  }
+  if (voteBtn) {
+    voteBtn.textContent = 'Confirm Vote';
+    voteBtn.disabled = _draftVoteSubmitted || _draftRelicsVote == null || !draft.am_participant;
   }
 }
 
@@ -2244,6 +2319,12 @@ function initLobbyModal() {
           return;
         }
         vote = _draftAgentsVote;
+      } else if (draft.phase === 'relics') {
+        if (_draftRelicsVote == null) {
+          showLobbyError('Choose Yes or No before voting.');
+          return;
+        }
+        vote = _draftRelicsVote;
       } else if (draft.phase === 'monsters') {
         if (_draftMonsterVotes.length === 0) {
           showLobbyError('Pick at least one monster stack before voting.');

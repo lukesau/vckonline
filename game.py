@@ -106,7 +106,9 @@ class Game:
         self.agents_slots = list(game_state.get('agents_slots') or [])
         self.agents_deck = list(game_state.get('agents_deck') or [])
         self.include_agents = bool(game_state.get('include_agents', False))
-        self.pending_agent_engage = game_state.get('pending_agent_engage')
+        # Relics optional module: each player keeps one of their dealt relics
+        # (held in `player.owned_relics`); no board-level deck is kept.
+        self.include_relics = bool(game_state.get('include_relics', False))
         # Crimson Seas roll obligation: each 6 rolled (each die plus the dice
         # sum, counted separately) forces the active player to place 1 of their
         # resources into the Exekratys pool. `pending_exekratys_offerings` is the
@@ -157,6 +159,12 @@ class Game:
         # spending a regular action, and resolving the sail clears this + resumes
         # the domain activation follow-up. None when no bonus sail is pending.
         self.pending_bonus_sail = game_state.get('pending_bonus_sail')
+        # "You may recruit a Citizen" bonus (Town Crier agent). Holds the
+        # player_id who has one free Citizen recruit available while the
+        # `may_recruit` prompt is open: hire_citizen runs without spending a
+        # regular action and waives the +1-per-owned-copy surcharge, then clears
+        # this + resumes the activation follow-up. None when no bonus is pending.
+        self.pending_bonus_recruit = game_state.get('pending_bonus_recruit')
         self.end_game_triggered = game_state.get('end_game_triggered', False)
         self.final_scores = game_state.get('final_scores', None)
         self.final_result = game_state.get('final_result', None)
@@ -246,11 +254,17 @@ class Game:
                 # Make sure setup-phase advance_tick blocks on the concurrent action.
                 if self.phase in ("roll", "harvest", "action"):
                     self.phase = "setup"
+            else:
+                # No duke choice needed (e.g. 1 duke each); relic selection, if
+                # any, becomes the first setup gate.
+                self._begin_relic_selection_if_pending()
 
         if not self.game_log:
             self._log_game_event("Game started.")
         if self.concurrent_action and self.concurrent_action.get("kind") == "choose_duke":
             self._log_game_event("Waiting for each player to choose a duke to keep.")
+        elif self.concurrent_action and self.concurrent_action.get("kind") == "choose_relic":
+            self._log_game_event("Waiting for each player to choose a relic to keep.")
 
         # Wire up composed sub-engines. Each engine is a focused class holding
         # a back-reference to this Game instance.
@@ -301,6 +315,9 @@ class Game:
 
     def resolve_bonus_sail_if_consumed(self):
         return self.lifecycle.resolve_bonus_sail_if_consumed()
+
+    def resolve_bonus_recruit_if_consumed(self):
+        return self.lifecycle.resolve_bonus_recruit_if_consumed()
 
     def finalize_roll(self, player_id, die_one=None, die_two=None):
         return self.lifecycle.finalize_roll(player_id, die_one=die_one, die_two=die_two)
@@ -428,6 +445,32 @@ class Game:
         if any_flipped:
             self._log_game_event("Final scoring: restored all flipped citizens face-up.")
 
+    def _domain_set_flipped(self, domain, flipped):
+        """Face-down domains (Sapper) have their passive power disabled and are
+        hidden on the tableau. Mirrors `_citizen_set_flipped`."""
+        domain.is_flipped = bool(flipped)
+        if domain.is_flipped:
+            domain.toggle_visibility(False)
+            domain.toggle_accessibility(False)
+        else:
+            domain.toggle_visibility(True)
+            domain.toggle_accessibility(True)
+
+    def unflip_all_domains_for_final_scoring(self):
+        """Face-up every flipped tableau domain before final scoring (engine-only).
+
+        Sapper rules: a flipped Domain is restored face-up and scored as usual at
+        the end of the game.
+        """
+        any_flipped = False
+        for p in list(getattr(self, "player_list", []) or []):
+            for d in list(getattr(p, "owned_domains", []) or []):
+                if getattr(d, "is_flipped", False):
+                    any_flipped = True
+                    self._domain_set_flipped(d, False)
+        if any_flipped:
+            self._log_game_event("Final scoring: restored all flipped domains face-up.")
+
     def _domain_recurring_passive_on_build_turn_cooldown(self, domain):
         """Recurring domain passives cannot be used on the turn the domain was purchased."""
         acq = getattr(domain, "acquired_turn_number", None)
@@ -437,6 +480,14 @@ class Game:
             return int(acq) == int(getattr(self, "turn_number", 0) or 0)
         except (TypeError, ValueError):
             return False
+
+    def _domain_power_suppressed(self, domain):
+        """Single chokepoint consulted by every domain-passive application loop:
+        a domain's power does not fire if it is on its build-turn cooldown or if
+        it has been flipped face-down by an opponent's Sapper agent."""
+        if bool(getattr(domain, "is_flipped", False)):
+            return True
+        return self._domain_recurring_passive_on_build_turn_cooldown(domain)
 
     def _player_by_id(self, player_id):
         for p in self.player_list:
@@ -469,6 +520,31 @@ class Game:
     def agents_enabled(self):
         """True when the Agents module was dealt at setup."""
         return bool(self.include_agents and (self.agents_slots or self.agents_deck))
+
+    def relics_enabled(self):
+        """True when the Relics module was dealt at setup."""
+        return bool(self.include_relics)
+
+    def _begin_relic_selection_if_pending(self):
+        """Open the `choose_relic` concurrent gate if any player still holds
+        more than one dealt relic. Returns True when a gate was opened.
+
+        Called once at construction (when there is no duke choice) and again
+        when duke selection finalizes, so relic selection always follows duke
+        selection."""
+        ca = getattr(self, "concurrent_action", None) or None
+        if ca and (ca.get("pending") or []):
+            return False
+        relic_choosers = [
+            p.player_id for p in self.player_list
+            if getattr(p, "owned_relics", None) and len(p.owned_relics) > 1
+        ]
+        if not relic_choosers:
+            return False
+        self.concurrent_action = _new_concurrent_action("choose_relic", relic_choosers)
+        if self.phase in ("roll", "harvest", "action"):
+            self.phase = "setup"
+        return True
 
     def engage_agent(self, player_id, slot_index):
         return self.agents.engage_agent(player_id, slot_index)
@@ -741,7 +817,7 @@ class Game:
         DB rows keep working until they're migrated to `immunity.take`.
         """
         for d in list(getattr(player, "owned_domains", []) or []):
-            if self._domain_recurring_passive_on_build_turn_cooldown(d):
+            if self._domain_power_suppressed(d):
                 continue
             raw = (getattr(d, "passive_effect", None) or "")
             effect = str(raw).strip().lower()
@@ -759,7 +835,7 @@ class Game:
             if str(g or "").strip().lower() == target:
                 return True
         for d in list(getattr(player, "owned_domains", []) or []):
-            if self._domain_recurring_passive_on_build_turn_cooldown(d):
+            if self._domain_power_suppressed(d):
                 continue
             name = str(getattr(d, "name", "") or "").strip().lower()
             text = str(getattr(d, "text", "") or "").strip().lower()

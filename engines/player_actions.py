@@ -28,6 +28,16 @@ class PlayerActionsEngine:
     def __init__(self, game):
         self.game = game
 
+    def _resume_after_steal_choice(self):
+        """Resume after a `harvest_steal` choice is applied. During harvest this
+        hands control back to the harvest automation; when a steal is triggered
+        outside harvest (the Bishop agent's action-phase steal) it instead
+        resumes the activation follow-up so the action phase / turn continues."""
+        if getattr(self.game, "phase", None) == "harvest":
+            self.game.harvest._maybe_resume_harvest_prompt()
+        else:
+            self.game.domain_effects._resume_after_domain_activation_follow_up()
+
     def wait_for_input(self, command, player_id):
         print("waiting for input")
         while self.game.action_required["id"] != self.game.game_id:
@@ -251,8 +261,9 @@ class PlayerActionsEngine:
                             victim_opt_s.get("victim_id"),
                             res_opt_s.get("resource"),
                             res_opt_s.get("amount"),
+                            prc_s.get("victim_vp", 0),
                         )
-                        self.game.harvest._maybe_resume_harvest_prompt()
+                        self._resume_after_steal_choice()
                         return
                     self.game.pending_required_choice = {
                         "kind": "harvest_steal",
@@ -260,6 +271,7 @@ class PlayerActionsEngine:
                         "player_id": player_id,
                         "victim": victim_opt_s,
                         "resource_options": resource_opts_s,
+                        "victim_vp": prc_s.get("victim_vp", 0),
                     }
                     self.game.action_required["action"] = "harvest_steal"
                     self.game.action_required["id"] = player_id
@@ -281,8 +293,9 @@ class PlayerActionsEngine:
                         victim_opt_s.get("victim_id"),
                         res_opt_s.get("resource"),
                         res_opt_s.get("amount"),
+                        prc_s.get("victim_vp", 0),
                     )
-                    self.game.harvest._maybe_resume_harvest_prompt()
+                    self._resume_after_steal_choice()
                     return
                 # Backward compatibility for the old flat "steal N" client action.
                 opts_s = list(prc_s.get("options") or [])
@@ -302,8 +315,9 @@ class PlayerActionsEngine:
                         opt_s.get("victim_id"),
                         opt_s.get("resource"),
                         opt_s.get("amount"),
+                        prc_s.get("victim_vp", 0),
                     )
-                    self.game.harvest._maybe_resume_harvest_prompt()
+                    self._resume_after_steal_choice()
                     return
                 return
 
@@ -427,6 +441,24 @@ class PlayerActionsEngine:
                     self.game.action_required["id"] = self.game.game_id
                     self.game._log_game_event(
                         f"{self.game._player_label(player_id)} declined to Sail (Dampiar's Workshop)."
+                    )
+                    self.game.domain_effects._resume_after_domain_activation_follow_up()
+                return
+
+            if current_required == "may_recruit":
+                # The free recruit itself goes through hire_citizen (consuming the
+                # bonus instead of a regular action); here we only handle declining.
+                prc_mr = getattr(self.game, "pending_required_choice", None) or {}
+                if prc_mr.get("kind") != "recruit_opportunity" or prc_mr.get("player_id") != player_id:
+                    return
+                act_mr = (action or "").strip().lower()
+                if act_mr in ("skip", "decline", "no", "pass"):
+                    self.game.pending_required_choice = None
+                    self.game.pending_bonus_recruit = None
+                    self.game.action_required["action"] = ""
+                    self.game.action_required["id"] = self.game.game_id
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} declined to recruit a Citizen (Town Crier)."
                     )
                     self.game.domain_effects._resume_after_domain_activation_follow_up()
                 return
@@ -751,8 +783,6 @@ class PlayerActionsEngine:
                         self.game.pending_action_end_queue.pop(0) if self.game.pending_action_end_queue else None
                         if not self.game.domain_effects._drain_action_end_manipulate_queue():
                             pass  # advance_tick handles turn end
-                    elif ctx == "agent_engage":
-                        self.game.agents._finish_agent_engage_and_resume()
                     else:
                         self.game.domain_effects._resume_after_domain_activation_follow_up()
                     return
@@ -778,8 +808,6 @@ class PlayerActionsEngine:
                     self.game.pending_action_end_queue.pop(0) if self.game.pending_action_end_queue else None
                     if not self.game.domain_effects._drain_action_end_manipulate_queue():
                         pass  # advance_tick handles turn end
-                elif ctx == "agent_engage":
-                    self.game.agents._finish_agent_engage_and_resume()
                 else:
                     self.game.domain_effects._resume_after_domain_activation_follow_up()
                 return
@@ -922,6 +950,114 @@ class PlayerActionsEngine:
                 self.game._log_game_event(
                     f"{self.game._player_label(player_id)} flipped citizen "
                     f"\"{getattr(citizen, 'name', '?')}\" face-down on "
+                    f"{self.game._player_label(target_pid)}'s tableau."
+                )
+                self.game.action_required["action"] = ""
+                self.game.action_required["id"] = self.game.game_id
+                self.game.pending_required_choice = None
+                self.game.payouts._resume_payout_continuation()
+                return
+
+            if prc0.get("kind") == "flip_domain_targeted" and str(current_required).strip() == "choose_player":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                if prc0.get("allow_skip") and act == "skip":
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} declined to flip a domain."
+                    )
+                    self.game.action_required["action"] = ""
+                    self.game.action_required["id"] = self.game.game_id
+                    self.game.pending_required_choice = None
+                    return
+                if not act.startswith("choose_player "):
+                    return
+                opts = list(prc0.get("options") or [])
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if sel < 0 or sel >= len(opts):
+                    return
+                target_pid = opts[sel].get("player_id")
+                target = self.game._player_by_id(target_pid)
+                if not target:
+                    return
+                domain_opts = []
+                for i, d in enumerate(list(getattr(target, "owned_domains", []) or [])):
+                    if getattr(d, "is_flipped", False):
+                        continue
+                    domain_opts.append({
+                        "token": "domain.owned",
+                        "idx": i,
+                        "name": getattr(d, "name", "?"),
+                        "domain_id": int(getattr(d, "domain_id", -1)),
+                    })
+                if not domain_opts:
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} could not flip a domain from "
+                        f"{self.game._player_label(target_pid)} (no eligible domains); effect lost."
+                    )
+                    self.game.action_required["action"] = ""
+                    self.game.action_required["id"] = self.game.game_id
+                    self.game.pending_required_choice = None
+                    return
+                self.game.pending_required_choice = {
+                    "kind": "flip_domain_targeted",
+                    "player_id": player_id,
+                    "stage": "domain",
+                    "target_player_id": target_pid,
+                    "options": domain_opts,
+                    "allow_skip": bool(prc0.get("allow_skip")),
+                    "card_kind": "domain",
+                }
+                self.game.action_required["id"] = player_id
+                self.game.action_required["action"] = "choose_owned_card"
+                self.game._log_game_event(
+                    f"{self.game._player_label(player_id)} chose {self.game._player_label(target_pid)} "
+                    f"and is now picking a domain to flip."
+                )
+                return
+
+            if prc0.get("kind") == "flip_domain_targeted" and str(current_required).strip() == "choose_owned_card":
+                if player_id != prc0.get("player_id"):
+                    return
+                act = (action or "").strip().lower()
+                if prc0.get("allow_skip") and act == "skip":
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} declined to flip a domain."
+                    )
+                    self.game.action_required["action"] = ""
+                    self.game.action_required["id"] = self.game.game_id
+                    self.game.pending_required_choice = None
+                    return
+                if not act.startswith("choose_owned_card "):
+                    return
+                opts = list(prc0.get("options") or [])
+                try:
+                    sel = int(act.split()[1]) - 1
+                except (IndexError, ValueError):
+                    return
+                if sel < 0 or sel >= len(opts):
+                    return
+                target_pid = prc0.get("target_player_id")
+                target = self.game._player_by_id(target_pid)
+                if not target:
+                    return
+                src_idx = int(opts[sel].get("idx", -1))
+                owned = list(getattr(target, "owned_domains", []) or [])
+                if src_idx < 0 or src_idx >= len(owned):
+                    return
+                domain = owned[src_idx]
+                if getattr(domain, "is_flipped", False):
+                    self.game.action_required["action"] = ""
+                    self.game.action_required["id"] = self.game.game_id
+                    self.game.pending_required_choice = None
+                    return
+                self.game._domain_set_flipped(domain, True)
+                self.game._log_game_event(
+                    f"{self.game._player_label(player_id)} flipped domain "
+                    f"\"{getattr(domain, 'name', '?')}\" face-down on "
                     f"{self.game._player_label(target_pid)}'s tableau."
                 )
                 self.game.action_required["action"] = ""
@@ -1229,15 +1365,37 @@ class PlayerActionsEngine:
                     src_idx = 0
                 card = owned[src_idx]
                 card_label = getattr(card, "name", "?")
+                destination = (prc0.get("destination") or "self").lower()
+                victim_vp = int(prc0.get("victim_vp", 0) or 0)
                 del getattr(target, attr)[src_idx]
-                getattr(active, attr).append(card)
+                if destination == "stack" and card_kind == "monster":
+                    returned = self.game.domain_effects._return_monster_to_stack(card)
+                    if not returned:
+                        # No matching board stack (defensive): hand it to the
+                        # activator rather than losing the card entirely.
+                        getattr(active, attr).append(card)
+                        destination = "self"
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} took {card_kind} \"{card_label}\" from "
+                        f"{self.game._player_label(target_pid)} and returned it to its stack via \"{domain_name}\"."
+                    )
+                else:
+                    destination = "self"
+                    getattr(active, attr).append(card)
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} took {card_kind} \"{card_label}\" from "
+                        f"{self.game._player_label(target_pid)} via \"{domain_name}\"."
+                    )
                 if card_kind == "monster":
                     target.owned_monster_attributes = self.game.owned_monster_attributes(target_pid)
-                    active.owned_monster_attributes = self.game.owned_monster_attributes(player_id)
-                self.game._log_game_event(
-                    f"{self.game._player_label(player_id)} stole {card_kind} \"{card_label}\" from "
-                    f"{self.game._player_label(target_pid)} via \"{domain_name}\"."
-                )
+                    if destination == "self":
+                        active.owned_monster_attributes = self.game.owned_monster_attributes(player_id)
+                if victim_vp > 0:
+                    target.victory_score = int(getattr(target, "victory_score", 0) or 0) + victim_vp
+                    self.game._log_game_event(
+                        f"{self.game._player_label(target_pid)} gained {victim_vp} VP "
+                        f"from \"{domain_name}\"."
+                    )
                 self.game.action_required["action"] = ""
                 self.game.action_required["id"] = self.game.game_id
                 self.game.pending_required_choice = None
@@ -1653,7 +1811,10 @@ class PlayerActionsEngine:
                 raise ValueError("Player not found.")
 
             owned_same_name = 0
-            has_emerald = self.game._player_has_action_effect_flag(player, "action.emeraldstronghold")
+            # Town Crier's one-shot bonus recruit waives the duplicate surcharge
+            # exactly like Emerald Stronghold's passive does.
+            bonus_recruit = getattr(self.game, "pending_bonus_recruit", None) == player_id
+            has_emerald = bonus_recruit or self.game._player_has_action_effect_flag(player, "action.emeraldstronghold")
             if not has_emerald:
                 for c in getattr(player, "owned_citizens", []) or []:
                     if getattr(c, "is_flipped", False):

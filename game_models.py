@@ -1,4 +1,4 @@
-from cards import Citizen, Domain, Duke, Event, Monster, Noble, Starter, Tome
+from cards import Citizen, Domain, Duke, Event, Monster, Noble, Relic, Starter, Tome
 
 _MONSTER_TYPE_COUNT_KEYS = {
     "Minion": "minion_count",
@@ -17,6 +17,9 @@ class Player:
         self.owned_citizens = []
         self.owned_domains = []
         self.owned_dukes = []
+        # Optional Relics module: a player is dealt several relics at setup and
+        # keeps exactly one for the rest of the game (the rest are discarded).
+        self.owned_relics = []
         self.owned_monsters = []
         # Crimson Seas tableau pieces. Goods are plain type strings (see
         # game_setup.GOODS_TYPES); Tomes are flippable Tome card objects (a
@@ -64,6 +67,7 @@ class Player:
         player.owned_citizens = [Citizen.from_dict(c) for c in data["owned_citizens"]]
         player.owned_domains = [Domain.from_dict(d) for d in data["owned_domains"]]
         player.owned_dukes = [Duke.from_dict(d) for d in data["owned_dukes"]]
+        player.owned_relics = [Relic.from_dict(r) for r in (data.get("owned_relics") or [])]
         player.owned_monsters = [
             Event.from_dict(m) if m.get("card_class") == "event" else Monster.from_dict(m)
             for m in data["owned_monsters"]

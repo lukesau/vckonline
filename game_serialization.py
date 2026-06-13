@@ -2,7 +2,7 @@ import json
 from json import JSONEncoder
 
 from card_filters import is_unimplemented_agent
-from cards import Agent, Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Starter, Tome
+from cards import Agent, Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Relic, Starter, Tome
 from game_models import GameMember, LobbyMember, Player
 
 
@@ -70,6 +70,7 @@ class GameObjectEncoder(JSONEncoder):
                 "owned_citizens": [citizen.to_dict() for citizen in obj.owned_citizens],
                 "owned_domains": [domain.to_dict() for domain in obj.owned_domains],
                 "owned_dukes": [duke.to_dict() for duke in obj.owned_dukes],
+                "owned_relics": [relic.to_dict() for relic in (getattr(obj, "owned_relics", None) or [])],
                 "owned_monsters": [monster.to_dict() for monster in obj.owned_monsters],
                 # Crimson Seas tableau pieces (Goods are type strings; Tomes and
                 # Nobles are cards).
@@ -96,6 +97,8 @@ class GameObjectEncoder(JSONEncoder):
                 "harvest_delta": getattr(obj, "harvest_delta", {"gold": 0, "strength": 0, "magic": 0, "victory": 0, "map": 0}),
             }
         if isinstance(obj, Duke):
+            return obj.to_dict()
+        if isinstance(obj, Relic):
             return obj.to_dict()
         if isinstance(obj, Noble):
             return obj.to_dict()
@@ -188,6 +191,7 @@ class GameObjectEncoder(JSONEncoder):
                     _agent_slot_to_wire(a) for a in (getattr(obj, "agents_slots", None) or [])
                 ],
                 "agents_enabled": bool(getattr(obj, "agents_enabled", lambda: False)()),
+                "relics_enabled": bool(getattr(obj, "relics_enabled", lambda: False)()),
                 "pending_reroll_twilight_used": bool(getattr(obj, "_pending_reroll_twilight_used", False)),
                 "pending_reroll_blood_moon_used": bool(getattr(obj, "_pending_reroll_blood_moon_used", False)),
             }
@@ -228,6 +232,8 @@ def _rehydrate_card_from_dict(d):
         return Domain.from_dict(d)
     if "duke_id" in d:
         return Duke.from_dict(d)
+    if "relic_id" in d:
+        return Relic.from_dict(d)
     if "noble_id" in d:
         return Noble.from_dict(d)
     if "agent_id" in d:
@@ -263,6 +269,7 @@ def serialize_game_to_save_dict(game):
     base["exhausted_stack"] = [c.to_dict() for c in (getattr(game, "exhausted_stack", []) or [])]
     base["pending_payout_continuation"] = getattr(game, "pending_payout_continuation", None)
     base["pending_bonus_sail"] = getattr(game, "pending_bonus_sail", None)
+    base["pending_bonus_recruit"] = getattr(game, "pending_bonus_recruit", None)
     base["pending_harvest_choices"] = list(getattr(game, "pending_harvest_choices", []) or [])
     base["harvest_processed"] = bool(getattr(game, "harvest_processed", False))
     base["_harvest_steal_phase_done"] = bool(getattr(game, "_harvest_steal_phase_done", False))
@@ -286,7 +293,7 @@ def serialize_game_to_save_dict(game):
     base["agents_slots"] = [(a.to_dict() if a else None) for a in (getattr(game, "agents_slots", []) or [])]
     base["agents_deck"] = [a.to_dict() for a in (getattr(game, "agents_deck", []) or [])]
     base["include_agents"] = bool(getattr(game, "include_agents", False))
-    base["pending_agent_engage"] = getattr(game, "pending_agent_engage", None)
+    base["include_relics"] = bool(getattr(game, "include_relics", False))
 
     return base
 

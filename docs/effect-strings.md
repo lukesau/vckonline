@@ -389,22 +389,142 @@ The `may_sail` prompt is minimizable, so the player can also pick a specific
 target (e.g. a particular Amarynth Noble) directly on the Sail mat instead of
 using the prompt's destination buttons.
 
-### 4a. `steal` — only exists in citizens
+### 4d. `recruit` — bare verb that opens an immediate may-recruit-a-Citizen prompt
+
+Used by the **Town Crier** agent (`g -3 + v 1 + recruit`). It is the one-shot
+version of Emerald Stronghold's passive (`action.emeraldstronghold`): the
+controlling player may immediately recruit one Citizen, paying its normal Gold
+cost but **ignoring the +1-per-owned-copy duplicate surcharge**. Like
+`slay` / `sail` / `build_domain` it is the tail of a compound so the resource
+legs apply first (here `g -3` pays the engage cost and `v 1` grants the VP).
+
+```
+recruit             # bare verb; tail of a compound, e.g. "g -3 + v 1 + recruit"
+```
+
+Resolution (action phase only):
+
+- Opens `action_required.action = "may_recruit"` with
+  `pending_required_choice.kind = "recruit_opportunity"`, and flags
+  `pending_bonus_recruit = <player_id>`. If no accessible Citizen is on the
+  board the effect is silently skipped (no prompt) and the turn resumes.
+- While that flag is set, `consume_player_action` lets exactly one `hire_citizen`
+  run **without spending a regular action** and without being blocked by the
+  prompt; `hire_citizen` waives the duplicate surcharge for that recruit (same
+  code path as the Emerald Stronghold flag). The recruit still pays the
+  Citizen's base Gold cost.
+- On success the server calls `resolve_bonus_recruit_if_consumed`, which clears
+  the flag + prompt and resumes the activation follow-up (restores
+  `standard_action` or ends the turn). A failed hire rolls back to the still-open
+  prompt so the player can retry.
+- Declining (`act_on_required_action` with `skip`) clears the bonus and resumes.
+
+The `may_recruit` prompt is minimizable, so the player picks the Citizen via the
+normal market UI rather than from the prompt itself.
+
+### 4e. `flip_opponent_domain` / `flip_domain targeted` — flip an opponent's Domain face-down
+
+Used by the **Sapper** agent (`s -3 + flip_opponent_domain`). The domain analogue
+of `flip_opponent_citizen` / `flip_citizen targeted`: a two-stage targeted prompt
+(`choose_player` → `choose_owned_card`) that flips one of a chosen opponent's
+face-up tableau Domains face-down. `flip_opponent_domain` is the agent-friendly
+alias that injects the `choose_player` `explain` line; `flip_domain targeted
+[optional]` is the canonical form.
+
+```
+flip_opponent_domain          # alias used by Sapper
+flip_domain targeted          # canonical; `optional` adds a skip button
+```
+
+Resolution and semantics:
+
+- Eligible targets are opponents who are negative-effect targets and own at least
+  one unflipped Domain. If none exist the effect is silently lost (logged); the
+  agent target gate (`_agent_has_valid_target`) also blocks engaging Sapper when
+  there is no legal target.
+- The flip sets `Domain.is_flipped = True` and hides the card (face-down). While
+  flipped the Domain's power is **suppressed everywhere**: every passive-application
+  loop (action.start/hire/build/slay events, the action.end manipulate queue,
+  roll-phase die/doubles passives, harvest passives, and `_player_has_action_effect_flag`)
+  consults the shared `_domain_power_suppressed(d)` chokepoint, which returns true
+  for a flipped domain (and for the existing build-turn cooldown).
+- A flipped Domain still **counts** as an owned domain for "per owned domain"
+  effects and its build-time VP is unaffected — only its ongoing power is disabled.
+- At the end of the game `unflip_all_domains_for_final_scoring()` restores every
+  flipped Domain face-up before scoring, so it is scored as usual.
+
+### 4f. `take_owned monster random` — take a random Monster from a tableau (Green Witch / Huntress)
+
+The agent **Green Witch** (`take_owned monster random to=stack victim_vp=1`) and
+**Huntress** (`take_owned monster random to=self victim_vp=1`) reuse the existing
+`take_owned` operator (also used by some domain/monster effects). They are
+"take" effects, so **Castle of the Seven Suns (`immunity.take`)** blocks them and
+resting seats are not eligible targets.
+
+```
+take_owned <kind> <pick> [optional] [to=self|stack] [victim_vp=N]
+  kind:       monster | citizen
+  pick:       random
+  optional:   activator may decline
+  to=:        destination of the taken card — self (default; joins the
+              activator's tableau) or stack (monster only; returned to its
+              board stack). Omitting `to=` preserves the legacy "to self" behavior.
+  victim_vp=  non-negative VP granted to the player the card was taken from
+              (default 0).
+```
+
+Resolution: opens a `choose_player` prompt (`pending_required_choice.kind =
+"domain_take_owned"`) listing eligible opponents who own ≥1 card of the kind; a
+random card is then transferred to the chosen destination and the victim gains
+`victim_vp`. The agent target gate refuses to engage when no eligible opponent
+exists, so the player never spends an action for nothing.
+
+### 4g. Final base agents: Baron / Brute Squad / King's Herald
+
+These agents use existing compound payout grammar:
+
+```
+g -5 + count owned_domains v 1              # Baron
+g -10 + <citizens> + banish_center citizen  # Brute Squad
+banish_owned citizen + v 2                  # King's Herald
+```
+
+Notes:
+
+- `count owned_domains v 1` counts whole owned Domain cards (flipped domains still
+  count as owned; only their passive power is suppressed).
+- Brute Squad chains two blocking legs: the first prompt gains a Citizen from the
+  center stacks, then the continuation opens a `banish_center citizen` prompt.
+  The agent target gate requires at least one accessible center Citizen before
+  the agent can be engaged.
+- King's Herald opens a `banish_owned citizen` prompt, then the continuation
+  grants 2 VP. Its agent target gate requires the player to own at least one
+  Citizen, preventing a free 2 VP when there is nothing to banish.
+
+### 4a. `steal` — citizens (harvest) and the Bishop agent (action phase)
 
 The thief-style verb. Lists one or more resource options the controller may
 steal from a single chosen opponent. The controller picks the opponent first,
 then (if multiple resource options are given) which resource to take.
 Stealing is capped at the victim's current pool, so a victim with fewer than
-`N` of the requested resource just loses what they have.
+`N` of the requested resource just loses what they have. `immunity.take`
+holders and resting seats are excluded as victims.
 
 ```
-steal g 3        # steal up to 3g from a chosen opponent
-steal g 3 m 3    # steal up to 3g OR up to 3m from a chosen opponent
+steal g 3                  # steal up to 3g from a chosen opponent
+steal g 3 m 3              # steal up to 3g OR up to 3m from a chosen opponent
+steal g 5 m 5 victim_vp=1  # Bishop agent: + grant the victim 1 VP as compensation
 ```
 
-Steal effects fire in a dedicated pre-phase at the start of harvest before
-any normal citizen payouts — see "Harvest steal pre-phase" in
-`docs/game.md`.
+The optional `victim_vp=N` trailer grants the stolen-from player N VP (the
+**Bishop** agent gives 1 VP). Default 0.
+
+On citizens, steal effects fire in a dedicated pre-phase at the start of harvest
+before any normal citizen payouts — see "Harvest steal pre-phase" in
+`docs/game.md`. The Bishop agent reuses the same victim→resource prompt during
+the **action phase**; when the choice is applied outside harvest the engine
+resumes the activation follow-up instead of the harvest pipeline. Its agent
+target gate refuses to engage when no eligible victim exists.
 
 ### 5. `.` is doing three different jobs
 

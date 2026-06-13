@@ -20,6 +20,7 @@ TABLES = [
     ("events",   "id_events",    []),
     ("nobles",   "id_nobles",    []),
     ("agents",   "id_agents",    []),
+    ("relics",   "id_relics",    []),
 ]
 
 BATCH_SIZE = 10

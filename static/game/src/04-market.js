@@ -578,6 +578,12 @@ function evaluateMarketCardContext(card, state) {
     phase === 'action' && reqAction === 'standard_action' && reqId && reqId !== state?.game_id;
   const isYourTurn = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
   const actionsRemaining = Number(state?.actions_remaining || 0);
+  // Town Crier's "you may recruit a Citizen" bonus: while the may_recruit prompt
+  // is open for this player, one Citizen hire runs free of a regular action and
+  // ignores the duplicate surcharge (treated like Emerald Stronghold below).
+  const bonusRecruitPhase =
+    phase === 'action' && reqAction === 'may_recruit' && reqId && reqId !== state?.game_id
+    && !!(card && card.citizen_id != null);
 
   const players = state?.player_list || [];
   const actingPlayer = players.find(p => idsMatch(p.player_id, reqId)) || null;
@@ -602,7 +608,7 @@ function evaluateMarketCardContext(card, state) {
   }
 
   const tn = Number(state?.turn_number);
-  const emeraldActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.emeraldstronghold', tn) : false;
+  const emeraldActive = bonusRecruitPhase || (actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.emeraldstronghold', tn) : false);
   const pratchettActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.pratchettsplateau', tn) : false;
   const shilinaActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.newshilinatower', tn) : false;
   const defiantActive = actingPlayer ? hasActionEffectFlag(actingPlayer, 'action.defiantridge', tn) : false;
@@ -684,15 +690,15 @@ function evaluateMarketCardContext(card, state) {
   }
 
   const canActThisCard =
-    standardActionPhase &&
+    ((standardActionPhase && actionsRemaining > 0) || bonusRecruitPhase) &&
     isYourTurn &&
-    actionsRemaining > 0 &&
     loc &&
     !blockReason;
 
   return {
     phase,
     standardActionPhase,
+    bonusRecruitPhase,
     isYourTurn,
     actionsRemaining,
     actingPlayer,
@@ -1023,7 +1029,7 @@ function appendMarketActionUI(infoEl, card, ctx) {
   const Smax = Number(effPlayer?.strength_score || 0);
   const Mmax = Number(effPlayer?.magic_score || 0);
   const pay = ctx.evalRes;
-  const inputsDisabled = !ctx.standardActionPhase;
+  const inputsDisabled = !(ctx.standardActionPhase || ctx.bonusRecruitPhase);
 
   let primaryLabel = '';
 
@@ -1252,6 +1258,7 @@ function appendMarketCompactStatLine(infoEl, card, ctx) {
   else if (card.citizen_id != null) typeLabel = 'Citizen';
   else if (card.domain_id != null) typeLabel = 'Domain';
   else if (card.duke_id != null) typeLabel = 'Duke';
+  else if (card.relic_id != null) typeLabel = 'Relic';
   else if (card.starter_id != null) typeLabel = 'Starter';
   if (typeLabel) {
     const el = document.createElement('span');

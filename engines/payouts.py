@@ -214,6 +214,43 @@ class PayoutsEngine:
         self.game.action_required["action"] = "may_sail"
         return [0, 0, 0, 0]
 
+    def _execute_may_recruit_payout(self, player_id):
+        """Offer the active player one optional free Citizen recruit (Town Crier).
+
+        Town Crier is the one-shot version of Emerald Stronghold's passive: the
+        recruit pays the Citizen's normal Gold cost but ignores the +1-per-owned-
+        copy surcharge. Opens the `may_recruit` prompt and flags
+        `pending_bonus_recruit` so a single hire_citizen runs without spending a
+        regular action (mirrors the may_sail bonus). If no Citizen is accessible
+        on the board, the effect is silently skipped.
+        """
+        player = self.game._player_by_id(player_id)
+        if not player:
+            return [-9999, 0, 0, 0]
+        has_recruit_target = False
+        for stack in list(getattr(self.game, "citizen_grid", []) or []):
+            if not stack:
+                continue
+            top = stack[-1]
+            if getattr(top, "citizen_id", None) is None:
+                continue
+            if getattr(top, "is_accessible", False):
+                has_recruit_target = True
+                break
+        if not has_recruit_target:
+            self.game._log_game_event(
+                f"{self.game._player_label(player_id)} had no Citizen available to recruit (Town Crier); effect skipped."
+            )
+            return [0, 0, 0, 0]
+        self.game.pending_bonus_recruit = player_id
+        self.game.pending_required_choice = {
+            "kind": "recruit_opportunity",
+            "player_id": player_id,
+        }
+        self.game.action_required["id"] = player_id
+        self.game.action_required["action"] = "may_recruit"
+        return [0, 0, 0, 0]
+
     def _execute_banish_center_payout(self, command, player_id):
         """Parse `banish_center <kind> [optional]` and prompt for a center-stack card.
 
@@ -564,6 +601,60 @@ class PayoutsEngine:
         }
         self.game._log_game_event(
             f"{self.game._player_label(player_id)} is choosing a player to flip a citizen from."
+        )
+        return [0, 0, 0, 0]
+
+    def _execute_flip_domain_payout(self, command, player_id):
+        """Parse `flip_domain <variant> [optional]` and open the targeting prompt.
+
+        Variants:
+          targeted   -- acting player picks one player, then one of that player's
+                        unflipped tableau domains, and flips it face-down (its
+                        passive power is disabled until end of game, when it is
+                        restored face-up and scored as usual).
+                        Two-stage prompt: choose_player -> choose_owned_card.
+
+        Mirrors `_execute_flip_citizen_payout`. Always returns [0,0,0,0]; if no
+        eligible target exists the effect is silently lost (logged).
+        """
+        parts = (command or "").strip().split()
+        if not parts or parts[0].lower() != "flip_domain":
+            return [-9999, 0, 0, 0]
+        variant = (parts[1].lower() if len(parts) >= 2 else "")
+        optional = any(p.lower() == "optional" for p in parts[2:])
+        if variant != "targeted":
+            return [-9999, 0, 0, 0]
+        options = []
+        for p in self.game.player_list:
+            if p.player_id == player_id:
+                continue
+            if not self.game._player_is_negative_effect_target(p):
+                continue
+            owned = list(getattr(p, "owned_domains", []) or [])
+            if not any(not getattr(d, "is_flipped", False) for d in owned):
+                continue
+            options.append({
+                "token": "player",
+                "player_id": p.player_id,
+                "name": getattr(p, "name", "?"),
+            })
+        if not options:
+            self.game._log_game_event(
+                f"{self.game._player_label(player_id)} could not flip a domain (no eligible tableau)."
+            )
+            return [0, 0, 0, 0]
+        self.game.action_required["id"] = player_id
+        self.game.action_required["action"] = "choose_player"
+        self.game.pending_required_choice = {
+            "kind": "flip_domain_targeted",
+            "player_id": player_id,
+            "stage": "player",
+            "options": options,
+            "allow_skip": optional,
+            "card_kind": "domain",
+        }
+        self.game._log_game_event(
+            f"{self.game._player_label(player_id)} is choosing a player to flip a domain from."
         )
         return [0, 0, 0, 0]
 
@@ -957,25 +1048,10 @@ class PayoutsEngine:
         print("executing special payout")
         raw = (command or "").strip()
         low = raw.lower()
-        if low.startswith("manipulate_resources"):
-            return self.game.domain_effects._execute_manipulate_resources_payout(raw, player_id)
-        if low == "slay":
-            return self.game.slay._execute_slay_payout(player_id)
-        if low == "sail":
-            return self._execute_may_sail_payout(player_id)
-        if low == "refresh_tomes":
-            return self._execute_refresh_tomes_payout(player_id)
-        if low.startswith("steal_citizen"):
-            return self._execute_steal_citizen_payout(raw, player_id)
-        if low.startswith("steal"):
-            return self.game.harvest._execute_steal_payout(raw, player_id)
-        if low.startswith("take_owned"):
-            return self.game.domain_effects._execute_take_owned_payout(raw, player_id)
-        # Compound payouts split on top-level " + " must be dispatched BEFORE
-        # the bracket shortcuts (`<domains>`, `<citizens>`) so a string like
-        # `<domains> + <citizens>` doesn't get hijacked by the first shortcut
-        # and lose the rest of the compound. We use a top-level scanner so
-        # we don't split on `+` that lives inside a `<citizens + v 1>` clause.
+        # Compound payouts must split before any leading-verb shortcut,
+        # including `manipulate_resources`, otherwise a string like
+        # `manipulate_resources ... + <citizens where ...>` only resolves the
+        # first leg and silently drops the rest.
         if not low.startswith("choose") and self._has_top_level_plus(raw):
             return self._execute_compound_payout(
                 raw,
@@ -984,6 +1060,22 @@ class PayoutsEngine:
                 balance_hint=balance_hint,
                 suppress_exchange_optional_prompt=suppress_exchange_optional_prompt,
             )
+        if low.startswith("manipulate_resources"):
+            return self.game.domain_effects._execute_manipulate_resources_payout(raw, player_id)
+        if low == "slay":
+            return self.game.slay._execute_slay_payout(player_id)
+        if low == "sail":
+            return self._execute_may_sail_payout(player_id)
+        if low == "recruit":
+            return self._execute_may_recruit_payout(player_id)
+        if low == "refresh_tomes":
+            return self._execute_refresh_tomes_payout(player_id)
+        if low.startswith("steal_citizen"):
+            return self._execute_steal_citizen_payout(raw, player_id)
+        if low.startswith("steal"):
+            return self.game.harvest._execute_steal_payout(raw, player_id)
+        if low.startswith("take_owned"):
+            return self.game.domain_effects._execute_take_owned_payout(raw, player_id)
         if low == "<domains>" or low.startswith("<domains"):
             return self._execute_grant_domain_payout(player_id)
         # Defensive fallback for a bare `<citizens ...>` token (no leading
@@ -1016,6 +1108,14 @@ class PayoutsEngine:
             prc = getattr(self.game, "pending_required_choice", None)
             if prc and prc.get("kind") == "monster_flip_citizen_targeted":
                 prc["explain"] = "Choose a player to flip one of their citizens face-down (Laborium)."
+            return result
+        if low.startswith("flip_domain"):
+            return self._execute_flip_domain_payout(raw, player_id)
+        if low == "flip_opponent_domain":
+            result = self._execute_flip_domain_payout("flip_domain targeted", player_id)
+            prc = getattr(self.game, "pending_required_choice", None)
+            if prc and prc.get("kind") == "flip_domain_targeted":
+                prc["explain"] = "Choose a player to flip one of their domains face-down (Sapper)."
             return result
         if low == "banish_player_citizen":
             return self._execute_banish_player_citizen_payout(player_id)

@@ -30,9 +30,6 @@ class DomainEffectsEngine:
 
     def _resume_after_domain_activation_follow_up(self):
         """Clear optional domain activation prompts and restore action/end-turn resolution."""
-        if getattr(self.game, "pending_agent_engage", None):
-            self.game.agents._finish_agent_engage_and_resume()
-            return
         self.game.pending_required_choice = None
         if getattr(self.game, "phase", None) == "action" and int(getattr(self.game, "actions_remaining", 0) or 0) > 0:
             self.game.action_required["id"] = self.game.lifecycle.current_player_id()
@@ -225,7 +222,7 @@ class DomainEffectsEngine:
             return
         prefix = f"action.{str(event_name).lower()}"
         for d in list(getattr(player, "owned_domains", []) or []):
-            if self.game._domain_recurring_passive_on_build_turn_cooldown(d):
+            if self.game._domain_power_suppressed(d):
                 continue
             raw = (getattr(d, "passive_effect", None) or "").strip()
             if not raw:
@@ -252,7 +249,7 @@ class DomainEffectsEngine:
         if not player or getattr(self.game, "phase", None) != "action":
             return
         for d in list(getattr(player, "owned_domains", []) or []):
-            if self.game._domain_recurring_passive_on_build_turn_cooldown(d):
+            if self.game._domain_power_suppressed(d):
                 continue
             raw = (getattr(d, "passive_effect", None) or "").strip()
             if not raw:
@@ -321,7 +318,7 @@ class DomainEffectsEngine:
     def _collect_action_end_manipulate_queue(self, active_player):
         out = []
         for d in list(getattr(active_player, "owned_domains", []) or []):
-            if self.game._domain_recurring_passive_on_build_turn_cooldown(d):
+            if self.game._domain_power_suppressed(d):
                 continue
             raw = (getattr(d, "passive_effect", None) or "").strip()
             # Try choose_resource first (action.end choose ...)
@@ -782,18 +779,24 @@ class DomainEffectsEngine:
         )
 
     def _parse_take_owned_effect(self, effect):
-        """Parse `take_owned <kind> <pick> [optional]`.
+        """Parse `take_owned <kind> <pick> [optional] [to=self|stack] [victim_vp=N]`.
 
         Symmetric inverse of `return_owned`: instead of returning one of your own
         cards to its board stack for a reward, you transfer one of someone else's
-        owned cards to yourself.
+        owned cards somewhere else.
 
         Args:
-          kind:     "monster" (future: "citizen")
-          pick:     "random"  (future: "choose" -- let the activating player pick the specific card)
-          optional: literal "optional" flag (when present, activator may decline)
+          kind:      "monster" (future: "citizen")
+          pick:      "random"  (future: "choose" -- let the activating player pick the specific card)
+          optional:  literal "optional" flag (when present, activator may decline)
+          to=:       destination of the taken card -- "self" (default; the card
+                     joins the activator's tableau, as in the Huntress agent and
+                     existing domain/monster take_owned) or "stack" (the card is
+                     returned to its board stack, as in the Green Witch agent).
+          victim_vp= non-negative VP granted to the player the card was taken from
+                     (Green Witch / Huntress give the victim 1 VP). Default 0.
 
-        Returns dict {kind, pick, optional} or None if malformed.
+        Returns dict {kind, pick, optional, destination, victim_vp} or None.
         """
         parts = (effect or "").strip().split()
         if len(parts) < 3 or parts[0].lower() != "take_owned":
@@ -804,8 +807,32 @@ class DomainEffectsEngine:
         pick = parts[2].lower()
         if pick not in ("random",):
             return None
-        optional = len(parts) >= 4 and parts[3].lower() == "optional"
-        return {"kind": kind, "pick": pick, "optional": optional}
+        optional = False
+        destination = "self"
+        victim_vp = 0
+        for tok in parts[3:]:
+            low = tok.lower()
+            if low == "optional":
+                optional = True
+            elif low.startswith("to="):
+                dest = low[len("to="):]
+                if dest in ("self", "stack"):
+                    destination = dest
+            elif low.startswith("victim_vp="):
+                try:
+                    victim_vp = max(0, int(low[len("victim_vp="):]))
+                except (TypeError, ValueError):
+                    victim_vp = 0
+        if destination == "stack" and kind != "monster":
+            # Only monster stack-return is supported today.
+            return None
+        return {
+            "kind": kind,
+            "pick": pick,
+            "optional": optional,
+            "destination": destination,
+            "victim_vp": victim_vp,
+        }
 
     def _execute_take_owned_payout(self, command, player_id):
         """Route `take_owned <kind> <pick> [optional]` through execute_special_payout.
@@ -866,6 +893,14 @@ class DomainEffectsEngine:
                 f"(no other player owns a {kind})."
             )
             return
+        destination = parsed.get("destination", "self")
+        victim_vp = int(parsed.get("victim_vp", 0) or 0)
+        if destination == "stack":
+            explain = f"Choose a player; a random {kind} is returned from their tableau to its stack."
+        else:
+            explain = f"Choose a player to take a random {kind} from their tableau."
+        if victim_vp > 0:
+            explain += f" That player gains {victim_vp} VP."
         self.game.action_required["id"] = active_pid
         self.game.action_required["action"] = "choose_player"
         self.game.pending_required_choice = {
@@ -877,10 +912,13 @@ class DomainEffectsEngine:
             "allow_skip": optional,
             "options": options,
             "from_activation": True,
+            "destination": destination,
+            "victim_vp": victim_vp,
+            "explain": explain,
         }
         self.game._log_game_event(
             f"{self.game._player_label(active_pid)} triggered activation effect on \"{domain_name}\" "
-            f"and is choosing a player to steal a {kind} from."
+            f"and is choosing a player to take a {kind} from."
         )
 
     def _monster_stack_index_for_area(self, area):

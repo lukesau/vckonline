@@ -727,6 +727,7 @@ async def _hurry_up_apply(game_id: str, deadline: float) -> None:
 # server advances immediately if all players vote before time runs out.
 
 _DRAFT_AGENTS_VOTE_SECONDS = 30
+_DRAFT_RELICS_VOTE_SECONDS = 30
 _DRAFT_MONSTER_VOTE_SECONDS = 120
 _DRAFT_STARTER_VOTE_SECONDS = 30
 _DRAFT_CITIZEN_VOTE_SECONDS = 30
@@ -831,6 +832,14 @@ def _serialize_draft_state_for_player(state: dict, player_id: Optional[str]) -> 
         else:
             agents_no_votes += 1
 
+    relics_yes_votes = 0
+    relics_no_votes = 0
+    for v in state.get("votes_relics", {}).values():
+        if v:
+            relics_yes_votes += 1
+        else:
+            relics_no_votes += 1
+
     available_monsters = []
     available_citizens = []
     available_starters = []
@@ -869,12 +878,17 @@ def _serialize_draft_state_for_player(state: dict, player_id: Optional[str]) -> 
         "agents_yes_votes": agents_yes_votes,
         "agents_no_votes": agents_no_votes,
         "selected_include_agents": state.get("selected_include_agents"),
+        "my_relics_vote": state.get("votes_relics", {}).get(pid),
+        "relics_yes_votes": relics_yes_votes,
+        "relics_no_votes": relics_no_votes,
+        "selected_include_relics": state.get("selected_include_relics"),
         "selected_monster_areas": list(state.get("selected_monster_areas", [])),
         "selected_citizens": {str(k): v for k, v in state.get("selected_citizens", {}).items()},
         "citizen_draft_round": len(state.get("selected_citizens", {})) + (1 if phase == "citizens" else 0),
         "citizen_draft_total": len(state.get("citizen_rolls_all", [])),
         "votes_submitted_count": (
             len(state.get("votes_agents", {})) if phase == "agents"
+            else len(state.get("votes_relics", {})) if phase == "relics"
             else len(state["votes_monsters"]) if phase == "monsters"
             else len(state.get("votes_starters", {})) if phase == "starters"
             else len(state["votes_citizens"])
@@ -888,6 +902,12 @@ def _serialize_draft_state_for_player(state: dict, player_id: Optional[str]) -> 
 def _tally_agents_votes(state: dict) -> bool:
     yes = sum(1 for v in state.get("votes_agents", {}).values() if v)
     no = sum(1 for v in state.get("votes_agents", {}).values() if not v)
+    return yes > no
+
+
+def _tally_relics_votes(state: dict) -> bool:
+    yes = sum(1 for v in state.get("votes_relics", {}).values() if v)
+    no = sum(1 for v in state.get("votes_relics", {}).values() if not v)
     return yes > no
 
 
@@ -989,6 +1009,8 @@ async def _start_draft(lb: "Lobby"):
         "phase": "agents",
         "votes_agents": {},
         "selected_include_agents": False,
+        "votes_relics": {},
+        "selected_include_relics": False,
         "monster_areas": monsters_by_area,
         "votes_monsters": {},
         "selected_monster_areas": [],
@@ -1026,6 +1048,13 @@ async def _advance_draft(lobby_id: str):
         include = _tally_agents_votes(state)
         state["selected_include_agents"] = include
         state["last_result"] = {"phase": "agents", "include_agents": include}
+        state["phase"] = "relics"
+        state["votes_relics"] = {}
+
+    elif phase == "relics":
+        include = _tally_relics_votes(state)
+        state["selected_include_relics"] = include
+        state["last_result"] = {"phase": "relics", "include_relics": include}
         state["phase"] = "monsters"
         state["votes_monsters"] = {}
 
@@ -1067,6 +1096,8 @@ async def _advance_draft(lobby_id: str):
 
     if state["phase"] == "agents":
         timer_secs = _DRAFT_AGENTS_VOTE_SECONDS
+    elif state["phase"] == "relics":
+        timer_secs = _DRAFT_RELICS_VOTE_SECONDS
     elif state["phase"] == "monsters":
         timer_secs = _DRAFT_MONSTER_VOTE_SECONDS
     elif state["phase"] == "starters":
@@ -1098,6 +1129,8 @@ async def _finish_draft(lobby_id: str):
         draft_selections["starter_id"] = state["selected_starter_id"]
     if state.get("selected_include_agents"):
         draft_selections["include_agents"] = True
+    if state.get("selected_include_relics"):
+        draft_selections["include_relics"] = True
     debug_mode = state["debug_mode"]
     new_game_id = str(uuid.uuid4())
 
@@ -1624,6 +1657,20 @@ async def submit_draft_vote(request: DraftVoteRequest):
         else:
             raise HTTPException(status_code=400, detail="Agents vote must be yes or no (boolean)")
         state.setdefault("votes_agents", {})[pid] = bool(choice)
+    elif phase == "relics":
+        if isinstance(vote, bool):
+            choice = vote
+        elif isinstance(vote, str):
+            low = vote.strip().lower()
+            if low in ("yes", "true", "1"):
+                choice = True
+            elif low in ("no", "false", "0"):
+                choice = False
+            else:
+                raise HTTPException(status_code=400, detail="Relics vote must be yes or no")
+        else:
+            raise HTTPException(status_code=400, detail="Relics vote must be yes or no (boolean)")
+        state.setdefault("votes_relics", {})[pid] = bool(choice)
     elif phase == "monsters":
         if not isinstance(vote, list):
             raise HTTPException(status_code=400, detail="Monster vote must be a list of area names")
@@ -1656,6 +1703,8 @@ async def submit_draft_vote(request: DraftVoteRequest):
 
     n_players = len(state["player_ids"])
     if phase == "agents" and len(state.get("votes_agents", {})) >= n_players:
+        await _advance_draft(lb.lobby_id)
+    elif phase == "relics" and len(state.get("votes_relics", {})) >= n_players:
         await _advance_draft(lb.lobby_id)
     elif phase == "monsters" and len(state["votes_monsters"]) >= n_players:
         await _advance_draft(lb.lobby_id)
@@ -2031,7 +2080,8 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                     game.refund_tomes_from_score(request.player_id, redeemed)
                 _rollback_consumed_action(game)
                 raise
-            game.finish_turn_if_no_actions_remaining()
+            if not game.resolve_bonus_recruit_if_consumed():
+                game.finish_turn_if_no_actions_remaining()
             should_snapshot = True
 
         elif request.action_type == "build_domain":

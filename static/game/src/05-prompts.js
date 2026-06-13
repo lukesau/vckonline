@@ -666,6 +666,114 @@ function renderConcurrentChooseDuke(state, concurrent) {
   });
 }
 
+function renderConcurrentChooseRelic(state, concurrent) {
+  const pending = Array.isArray(concurrent.pending) ? concurrent.pending : [];
+  const completed = Array.isArray(concurrent.completed) ? concurrent.completed : [];
+  const isPending = !!(PLAYER_ID && pending.some(pid => idsMatch(pid, PLAYER_ID)));
+  const totalParticipants = pending.length + completed.length;
+
+  const players = state?.player_list || [];
+  const you = players.find(p => idsMatch(p.player_id, PLAYER_ID)) || null;
+  const waitingLabels = pendingPlayerLabels(state, pending);
+
+  const body = mk('prompt-modal-body');
+
+  const status = mk('prompt-modal-note');
+  status.textContent =
+    `Starting setup: ${completed.length}/${totalParticipants} relic choice(s) submitted.` +
+    (pending.length ? ` Waiting on: ${waitingLabels.join(', ')}.` : '');
+  body.appendChild(status);
+
+  if (!isPending) {
+    const youDone = !!(PLAYER_ID && completed.some(pid => idsMatch(pid, PLAYER_ID)));
+    const line = mk('prompt-modal-note');
+    line.textContent = youDone
+      ? 'You have already chosen your relic. Waiting on the other player(s).'
+      : 'Starting setup is in progress.';
+    body.appendChild(line);
+    openPromptOverlayShell({
+      title: 'Choose your Relic',
+      subtitle: null,
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const relics = Array.isArray(you?.owned_relics) ? you.owned_relics : [];
+  if (!relics.length) {
+    body.appendChild(document.createTextNode('No relics found to choose from.'));
+    openPromptOverlayShell({
+      title: 'Choose your Relic',
+      dismissible: false,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const list = mk('prompt-choice-list');
+  relics.forEach(r => {
+    const id = r?.relic_id;
+    const name = r?.name || `Relic #${id}`;
+    const cardEl = mk('prompt-choice-card');
+
+    const inner = mk('prompt-choice-card-inner');
+    const url = cardImageUrl(r);
+    if (url) {
+      const wrap = mk('prompt-choice-card-img-wrap');
+      const img = document.createElement('img');
+      img.className = 'prompt-choice-card-img';
+      img.alt = '';
+      img.loading = 'eager';
+      img.src = url;
+      img.onerror = () => wrap.remove();
+      wrap.appendChild(img);
+      inner.appendChild(wrap);
+    }
+
+    const main = mk('prompt-choice-card-main');
+    const nm = mk('prompt-choice-card-title');
+    nm.textContent = `${name} (#${id})`;
+    main.appendChild(nm);
+    const blurb = (r?.passive_effect_text || '').toString().trim();
+    if (blurb) {
+      const tx = mk('prompt-choice-card-text');
+      tx.textContent = blurb;
+      main.appendChild(tx);
+    }
+    const row = mk('prompt-choice-card-actions');
+    row.appendChild(promptButton('Keep this relic', () => {
+      confirmAndPostGameAction(
+        {
+          player_id: PLAYER_ID,
+          action_type: 'submit_concurrent_action',
+          kind: 'choose_relic',
+          response: String(id),
+        },
+        {
+          title: 'Keep this Relic?',
+          message: `Keep ${name} (#${id}) and return your other Relic card(s) to the box.`,
+        },
+      );
+    }));
+    main.appendChild(row);
+    inner.appendChild(main);
+    cardEl.appendChild(inner);
+    list.appendChild(cardEl);
+  });
+  body.appendChild(list);
+
+  openPromptOverlayShell({
+    title: 'Choose 1 Relic to keep',
+    subtitle: null,
+    dismissible: false,
+    bodyEl: body,
+    footerEl: null,
+  });
+}
+
 function renderConcurrentFlipCitizen(state, concurrent) {
   const pending = Array.isArray(concurrent.pending) ? concurrent.pending : [];
   const completed = Array.isArray(concurrent.completed) ? concurrent.completed : [];
@@ -1231,6 +1339,7 @@ function renderConcurrentHarvestChoices(state, concurrent) {
 function renderConcurrentPanel(state, concurrent) {
   const kind = concurrent?.kind || '';
   if (kind === 'choose_duke') return renderConcurrentChooseDuke(state, concurrent);
+  if (kind === 'choose_relic') return renderConcurrentChooseRelic(state, concurrent);
   if (kind === 'flip_one_citizen') return renderConcurrentFlipCitizen(state, concurrent);
   if (kind === 'harvest_choices') return renderConcurrentHarvestChoices(state, concurrent);
   if (kind === 'event_self_convert') return renderConcurrentEventSelfConvert(state, concurrent);
@@ -2024,7 +2133,7 @@ function renderDomainChoosePlayer(state) {
   const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
   const prc = state?.pending_required_choice || null;
   const opts = Array.isArray(prc?.options) ? prc.options : [];
-  const dn = (prc?.item?.domain_name || 'Domain').toString();
+  const dn = (prc?.item?.domain_name || prc?.domain_name || 'Domain').toString();
   const explain = prc?.explain
     ? prc.explain.toString()
     : prc?.kind === 'domain_manipulate_player'
@@ -2627,6 +2736,22 @@ function chooseOwnedCardCopy(prc, state) {
     };
   }
 
+  if (kind === 'flip_domain_targeted') {
+    const targetName = prc?.target_player_id
+      ? playerDisplayName(state, prc.target_player_id)
+      : 'that player';
+    return {
+      title: `Flip a domain on ${targetName}'s tableau`,
+      explain: `Choose one of ${targetName}'s face-up domains. Its power is disabled while flipped face-down; at the end of the game it is restored face-up and scored as usual.`,
+      waiting: (label) => `Waiting on ${label} to flip a domain on ${targetName}'s tableau.`,
+      confirmTitle: 'Flip domain?',
+      confirmMessage: (nm) => `Flip "${nm}" face-down on ${targetName}'s tableau.`,
+      skipLabel: 'Skip',
+      skipMessage: 'Decline to flip a domain.',
+      tableauOwner: 'target',
+    };
+  }
+
   return {
     title: `Choose one of your ${noun}s`,
     explain: `Choose one of your owned ${noun}s.`,
@@ -3194,6 +3319,54 @@ function renderMaySailPrompt(state) {
   });
 }
 
+function renderMayRecruitPrompt(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+
+  const body = mk('prompt-modal-body');
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — may recruit a Citizen (Town Crier).`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({
+      title: 'Town Crier: may recruit',
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  const sub = mk('prompt-modal-note');
+  sub.textContent = 'Recruit one Citizen for free of the duplicate surcharge (you still pay its '
+    + 'normal Gold cost). Minimize this prompt, then click a Citizen on the board to recruit it. Or decline.';
+  body.appendChild(sub);
+  appendPromptResourcesPanel(body, state);
+
+  const foot = mk('prompt-modal-actions prompt-modal-actions--wrap');
+  foot.appendChild(promptButton('Decline (skip)', () => confirmAndPostGameAction(
+    {
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: 'skip',
+    },
+    {
+      title: 'Skip recruit?',
+      message: 'Decline the free Citizen recruit from Town Crier.',
+      confirmLabel: 'Skip',
+    },
+  ), true));
+
+  openPromptOverlayShell({
+    title: 'Town Crier: may recruit',
+    dismissible: true,
+    bodyEl: body,
+    footerEl: foot,
+  });
+}
+
 function renderBuildDomainPrompt(state) {
   const req = state?.action_required || {};
   const reqId = (req?.id || '').toString();
@@ -3518,6 +3691,15 @@ function renderPromptModal(state) {
     // closes without completing the bonus sail.
     if (document.getElementById('card-modal-overlay')) return;
     renderMaySailPrompt(state);
+    return;
+  }
+
+  if (reqAction === 'may_recruit') {
+    // Don't re-stack over an open market modal; the player recruits a Citizen
+    // through the normal market UI. The prompt re-renders once that modal
+    // closes without completing the bonus recruit.
+    if (document.getElementById('card-modal-overlay')) return;
+    renderMayRecruitPrompt(state);
     return;
   }
 

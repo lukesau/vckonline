@@ -59,6 +59,40 @@ class _ChooseDukeConcurrentHandler:
         raise ValueError("Player not found.")
 
     def finalize(self, game):
+        # Relic selection always follows duke selection. Opening the relic gate
+        # here (rather than clearing the concurrent action) keeps both setup
+        # prompts sequenced through the same machinery.
+        game._begin_relic_selection_if_pending()
+
+
+class _ChooseRelicConcurrentHandler:
+    """Each player keeps exactly one of their dealt relics."""
+
+    def apply(self, game, player_id, response):
+        try:
+            chosen_id = int(str(response).strip())
+        except Exception:
+            raise ValueError("Invalid relic selection.")
+        player = game._player_by_id(player_id)
+        if not player:
+            raise ValueError("Player not found.")
+        relics = list(getattr(player, "owned_relics", []) or [])
+        if not relics:
+            raise ValueError("No relics to choose from.")
+        chosen = None
+        for r in relics:
+            if int(getattr(r, "relic_id", -1)) == chosen_id:
+                chosen = r
+                break
+        if chosen is None:
+            raise ValueError("Selected relic not found.")
+        player.owned_relics = [chosen]
+        game._log_game_event(
+            f"{game._player_label(player_id)} kept relic \"{getattr(chosen, 'name', '?')}\"."
+        )
+        _mark_concurrent_player_done(game, player_id, response)
+
+    def finalize(self, game):
         return
 
 
@@ -420,6 +454,7 @@ class _HarvestChoicesConcurrentHandler:
 
 CONCURRENT_HANDLERS = {
     "choose_duke": _ChooseDukeConcurrentHandler(),
+    "choose_relic": _ChooseRelicConcurrentHandler(),
     "flip_one_citizen": _FlipOneCitizenConcurrentHandler(),
     "harvest_choices": _HarvestChoicesConcurrentHandler(),
     "event_self_convert": _EventSelfConvertConcurrentHandler(),

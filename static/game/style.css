@@ -939,6 +939,7 @@ html, body {
 .card-domain   { background: var(--card-d); border-color: var(--card-d-border); }
 .card-starter  { background: var(--card-s); border-color: var(--card-s-border); }
 .card-duke     { background: var(--card-k); border-color: var(--card-k-border); }
+.card-relic    { background: var(--card-k); border-color: var(--card-k-border); }
 .card-exhausted{ background: var(--card-x); border-color: var(--card-x-border); }
 .card-event    { background: var(--card-r); border-color: var(--card-x-border); }
 .card-exhausted .card-name { color: #444; }

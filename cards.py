@@ -213,7 +213,7 @@ class Citizen(Card):
 class Domain(Card):
     def __init__(self, domain_id, name, gold_cost, shadow_count, holy_count, soldier_count, worker_count, vp_reward,
                  has_activation_effect, has_passive_effect, passive_effect, activation_effect, text, expansion,
-                 acquired_turn_number=None):
+                 acquired_turn_number=None, is_flipped=False):
         super().__init__()
         self.domain_id = domain_id
         self.name = name
@@ -230,6 +230,10 @@ class Domain(Card):
         self.text = text
         self.expansion = expansion
         self.acquired_turn_number = acquired_turn_number
+        # Sapper agent: an owned domain flipped face-down by an opponent. While
+        # flipped its passive power is disabled; it is restored face-up and scored
+        # as usual at end of game.
+        self.is_flipped = bool(is_flipped)
 
     def to_dict(self):
         return {
@@ -255,6 +259,7 @@ class Domain(Card):
             "text": self.text,
             "expansion": self.expansion,
             "acquired_turn_number": getattr(self, "acquired_turn_number", None),
+            "is_flipped": bool(getattr(self, "is_flipped", False)),
         }
 
     @classmethod
@@ -275,6 +280,7 @@ class Domain(Card):
             text=dict_['text'],
             expansion=dict_['expansion'],
             acquired_turn_number=dict_.get('acquired_turn_number'),
+            is_flipped=bool(dict_.get('is_flipped', False)),
         )
         return _apply_persisted_card_flags(card, dict_)
 
@@ -305,6 +311,43 @@ class Agent(Card):
             name=data["name"],
             activation_effect=data.get("activation_effect"),
             activation_effect_text=data.get("activation_effect_text") or "",
+        )
+        return _apply_persisted_card_flags(card, data)
+
+
+class Relic(Card):
+    """Optional module: each player keeps one face-up Relic in their tableau.
+
+    A Relic carries a passive/activated power (text + an effect string for
+    future execution). Per the rulebook, Relics are public — a kept Relic is
+    placed face-up and any opponent may read its power, so Relics are always
+    visible.
+    """
+
+    def __init__(self, relic_id, name, passive_effect, passive_effect_text):
+        super().__init__()
+        self.relic_id = relic_id
+        self.name = name
+        self.passive_effect = passive_effect
+        self.passive_effect_text = passive_effect_text
+        self.toggle_visibility(True)
+
+    def to_dict(self):
+        return {
+            **super().to_dict(),
+            "relic_id": self.relic_id,
+            "name": self.name,
+            "passive_effect": self.passive_effect,
+            "passive_effect_text": self.passive_effect_text,
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        card = cls(
+            relic_id=data["relic_id"],
+            name=data["name"],
+            passive_effect=data.get("passive_effect"),
+            passive_effect_text=data.get("passive_effect_text") or "",
         )
         return _apply_persisted_card_flags(card, data)
 

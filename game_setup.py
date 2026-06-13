@@ -1,10 +1,10 @@
 import random
 from typing import List
 
-from banned_cards import banned_domain_ids, banned_duke_ids
+from banned_cards import banned_domain_ids, banned_duke_ids, banned_relic_ids
 from card_filters import is_unimplemented_event, keep_for_random
 from card_filters import is_unimplemented_agent
-from cards import Agent, Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Starter
+from cards import Agent, Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Relic, Starter
 from game_models import Player
 
 # Domain IDs granted (one extra copy per player) when the lobby's
@@ -173,6 +173,54 @@ def _agent_from_row(row):
     )
 
 
+def _should_include_relics(preset, debug_mode=False, draft_selections=None):
+    """True when this game should deal the Relics module to players.
+
+    Independent of the Agents decision: random games roll a separate 50/50,
+    draft games carry their own yes/no vote, and the 100-resource debug mode
+    always includes relics (except Crimson Seas)."""
+    if debug_mode and (preset or "").strip().lower() != "crimsonseas":
+        return True
+    if (preset or "").strip().lower() == "random":
+        return random.random() < 0.5
+    if (preset or "").strip().lower() == "draft":
+        return bool((draft_selections or {}).get("include_relics"))
+    return False
+
+
+def _relic_count_per_player(duke_select_count, n_players, available_relics=None):
+    """How many relics to deal each player before the choose-one prompt.
+
+    Mirrors the duke count (2 or 3) so a single lobby control configures both.
+    The relic pool is small (13 cards), so a 5-player game is capped at 2 each
+    (5 * 3 = 15 would exceed the pool). If bans shrink the pool below the
+    requested count for the player count, fall back to 2 each when possible;
+    otherwise return 0 to disable the module gracefully."""
+    n = int(duke_select_count or 2)
+    if int(n_players or 0) >= 5:
+        n = min(n, 2)
+    if available_relics is None:
+        return n
+    player_count = int(n_players or 0)
+    available = int(available_relics or 0)
+    if player_count <= 0:
+        return 0
+    if available >= n * player_count:
+        return n
+    if available >= 2 * player_count:
+        return 2
+    return 0
+
+
+def _relic_from_row(row):
+    return Relic(
+        row["id_relics"],
+        row["name"],
+        row.get("passive_effect"),
+        row.get("passive_effect_text") or "",
+    )
+
+
 def _filter_monster_areas_for_random(rows, n_players):
     """Drop every monster area where any playable card fails keep_for_random.
 
@@ -304,6 +352,7 @@ def load_game_data(
         raise ValueError(f"duke_select_count must be 2 or 3, got {duke_select_count}")
 
     include_agents = _should_include_agents(preset, debug_mode, draft_selections)
+    include_relics = _should_include_relics(preset, debug_mode, draft_selections)
 
     monster_query = ""
     monster_stack = []
@@ -372,6 +421,7 @@ def load_game_data(
     # DB cursor is open; only shuffled/dealt for the crimsonseas preset.
     noble_pool = []
     agent_pool = []
+    relic_pool = []
     starter_query = "SELECT * FROM starters ORDER BY id_starters"
     starter_stack = []
     player_list = []
@@ -890,6 +940,14 @@ def load_game_data(
             for row in (my_cursor.fetchall() or []):
                 agent_pool.append(_agent_from_row(row))
 
+        if include_relics:
+            my_cursor.execute("SELECT * FROM relics ORDER BY id_relics")
+            skip_relics = banned_relic_ids()
+            for row in (my_cursor.fetchall() or []):
+                if int(row["id_relics"]) in skip_relics:
+                    continue
+                relic_pool.append(_relic_from_row(row))
+
         my_cursor.close()
         my_connect.close()
     except Exception as e:
@@ -949,6 +1007,22 @@ def load_game_data(
                 player.owned_starters.append(chosen_optional)
             for _ in range(duke_select_count):
                 player.owned_dukes.append(duke_stack.pop())
+        # Deal relics (optional module). Same per-player count as dukes when
+        # possible, capped/fallbacked by the actual post-ban relic pool. The
+        # unchosen relics are simply not dealt (they "go back to the box").
+        relics_per_player = _relic_count_per_player(
+            duke_select_count,
+            len(player_list),
+            available_relics=len(relic_pool),
+        )
+        if include_relics and relic_pool and relics_per_player > 0:
+            relic_stack = list(relic_pool)
+            random.shuffle(relic_stack)
+            for player in player_list:
+                for _ in range(relics_per_player):
+                    player.owned_relics.append(relic_stack.pop())
+        else:
+            include_relics = False
         # deal monsters onto the board.
         # is_extra monsters only ship with the 5-player stack; at smaller player
         # counts each area drops its is_extra card so the stacks are one shorter.
@@ -1192,6 +1266,7 @@ def load_game_data(
             "agents_slots": agents_slots,
             "agents_deck": agents_deck,
             "include_agents": bool(include_agents),
+            "include_relics": bool(include_relics),
             "pending_required_choice": None,
             "player_list": player_list,
             "all_dukes": all_dukes,
@@ -1211,6 +1286,7 @@ def load_game_data(
             "banish_pile": [],
             "pending_payout_continuation": None,
             "pending_bonus_sail": None,
+            "pending_bonus_recruit": None,
             "end_game_triggered": False,
             "final_scores": None,
             "final_result": None,

@@ -925,6 +925,16 @@ class HarvestEngine:
             i += 2
         if not resource_opts:
             return [-9999, 0, 0, 0]
+        # Optional `victim_vp=N` trailer: VP granted to the victim as
+        # compensation (the Bishop agent gives the stolen-from player 1 VP).
+        victim_vp = 0
+        for tok in parts[i:]:
+            low = tok.lower()
+            if low.startswith("victim_vp="):
+                try:
+                    victim_vp = max(0, int(low[len("victim_vp="):]))
+                except (TypeError, ValueError):
+                    victim_vp = 0
         opponents = [p for p in self.game.player_list if p.player_id != player_id]
         if not opponents:
             return [0, 0, 0, 0]
@@ -968,12 +978,13 @@ class HarvestEngine:
             "victim_options": victim_options,
             "resource_options": resource_options,
             "options": options,
+            "victim_vp": victim_vp,
         }
         self.game.action_required["id"] = player_id
         self.game.action_required["action"] = "harvest_steal"
         return [0, 0, 0, 0]
 
-    def _apply_harvest_steal_choice(self, player_id, victim_id, resource, amount):
+    def _apply_harvest_steal_choice(self, player_id, victim_id, resource, amount, victim_vp=0):
         thief = self.game._player_by_id(player_id)
         victim = self.game._player_by_id(victim_id)
         if not thief or not victim:
@@ -995,12 +1006,16 @@ class HarvestEngine:
         dm = actual_s if res_s == "m" else 0
         dv = actual_s if res_s == "v" else 0
         self._bump_harvest_delta(thief, dg, ds, dm, dv)
+        vp = int(victim_vp or 0)
+        if vp > 0:
+            victim.victory_score = int(getattr(victim, "victory_score", 0) or 0) + vp
         after_thief = self.game._player_scores_line(thief)
         after_victim = self.game._player_scores_line(victim)
         self.game._log_game_event(
             f"{self.game._player_label(player_id)} stole {actual_s}{res_s} from "
-            f"{self.game._player_label(victim_id)}; "
-            f"thief {before_thief} -> {after_thief}, "
+            f"{self.game._player_label(victim_id)}"
+            + (f" (who gained {vp} VP)" if vp > 0 else "")
+            + f"; thief {before_thief} -> {after_thief}, "
             f"victim {before_victim} -> {after_victim}"
         )
         return True
@@ -1192,7 +1207,7 @@ class HarvestEngine:
         if not player:
             return
         for d in list(getattr(player, "owned_domains", []) or []):
-            if self.game._domain_recurring_passive_on_build_turn_cooldown(d):
+            if self.game._domain_power_suppressed(d):
                 continue
             raw = (getattr(d, "passive_effect", None) or "").strip()
             if not raw:
@@ -1269,7 +1284,7 @@ class HarvestEngine:
         if int(hd.get("magic", 0)) <= 0:
             return
         for d in list(getattr(player, "owned_domains", []) or []):
-            if self.game._domain_recurring_passive_on_build_turn_cooldown(d):
+            if self.game._domain_power_suppressed(d):
                 continue
             raw = (getattr(d, "passive_effect", None) or "").strip()
             if not raw:
@@ -1316,7 +1331,7 @@ class HarvestEngine:
             return
         for player in list(getattr(self.game, "player_list", []) or []):
             for d in list(getattr(player, "owned_domains", []) or []):
-                if self.game._domain_recurring_passive_on_build_turn_cooldown(d):
+                if self.game._domain_power_suppressed(d):
                     continue
                 raw = (getattr(d, "passive_effect", None) or "").strip()
                 if not raw:

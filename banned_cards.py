@@ -9,6 +9,11 @@ def banned_duke_ids():
     return _banned_ids_for_key("dukes")
 
 
+def banned_relic_ids():
+    """Ids from banned_cards.json 'relics' key; empty set if file missing or key absent."""
+    return _banned_ids_for_key("relics")
+
+
 def banned_domain_ids():
     """Ids from banned_cards.json 'domains' key; empty set if file missing or key absent."""
     return _banned_ids_for_key("domains")

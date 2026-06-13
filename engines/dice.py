@@ -64,7 +64,7 @@ class DiceEngine:
           cost=g:N | cost=g_per_owned_role:<role>    optional; omitted = free
         """
         for d in list(getattr(player, "owned_domains", []) or []):
-            if self.game._domain_recurring_passive_on_build_turn_cooldown(d):
+            if self.game._domain_power_suppressed(d):
                 continue
             raw = (getattr(d, "passive_effect", None) or "")
             effect = str(raw).strip()
@@ -281,7 +281,7 @@ class DiceEngine:
             return
         for p in list(getattr(self.game, "player_list", []) or []):
             for d in list(getattr(p, "owned_domains", []) or []):
-                if self.game._domain_recurring_passive_on_build_turn_cooldown(d):
+                if self.game._domain_power_suppressed(d):
                     continue
                 raw = (getattr(d, "passive_effect", None) or "").strip()
                 if not raw:

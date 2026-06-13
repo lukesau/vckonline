@@ -125,8 +125,11 @@ function agentsEnabled(state) {
 function _agentPayCost(agent) {
   const eff = String((agent && agent.activation_effect) || '').trim().toLowerCase();
   const m = eff.match(/pay=([gsm]):(\d+)/);
-  if (!m) return null;
-  return { kind: m[1], amount: parseInt(m[2], 10) };
+  if (m) return { kind: m[1], amount: parseInt(m[2], 10) };
+  // Leading bare cost leg, e.g. `g -3 + flip_opponent_citizen` (Assassin).
+  const bare = eff.match(/^([gsm])\s+-(\d+)/);
+  if (bare) return { kind: bare[1], amount: parseInt(bare[2], 10) };
+  return null;
 }
 
 function _playerCanAffordAgent(state, agent) {
@@ -191,7 +194,7 @@ function tableauGroupsForPlayer(player) {
     ['Domains', ['owned_domains']],
     ['Citizens', ['owned_citizens']],
     ['Monsters', ['owned_monsters']],
-    ['Starters', ['owned_starters', 'owned_dukes']],
+    ['Starters', ['owned_starters', 'owned_dukes', 'owned_relics']],
   ];
   const groups = defs
     .map(([label, keys]) => ({
@@ -1304,6 +1307,19 @@ function makeAgentsSection(state) {
   const slots = state.agents_slots || [];
   const canEngage = canOfferTakeResourceAction(state);
 
+  // Deck back as the first slot: purely decorative, represents the face-down
+  // agent deck so all 5 positions are filled.
+  const deckSlot = mk('agent-slot agent-slot-deck');
+  const deckCard = mk('agent-card');
+  const deckImg = document.createElement('img');
+  deckImg.className = 'agent-card-img';
+  deckImg.src = '/images/agents/agent_back.jpg';
+  deckImg.alt = 'Agent deck';
+  deckImg.loading = 'lazy';
+  deckCard.appendChild(deckImg);
+  deckSlot.appendChild(deckCard);
+  row.appendChild(deckSlot);
+
   for (let i = 0; i < 4; i++) {
     const slot = mk('agent-slot');
     const agent = slots[i] || null;
@@ -2414,6 +2430,9 @@ function obscuredTypeBackUrl(card) {
   if (card.duke_id !== undefined && card.duke_id !== null) {
     return '/images/dukes/duke_back.jpg';
   }
+  if (card.relic_id !== undefined && card.relic_id !== null) {
+    return '/images/relics/relic_back.jpg';
+  }
   if (card.starter_id !== undefined && card.starter_id !== null) {
     return '/images/starters/starter_back.jpg';
   }
@@ -2462,6 +2481,7 @@ function cardTypeAndId(card) {
   if (card.citizen_id != null) return { type: 'citizen', id: card.citizen_id };
   if (card.domain_id  != null) return { type: 'domain',  id: card.domain_id };
   if (card.duke_id    != null) return { type: 'duke',    id: card.duke_id };
+  if (card.relic_id   != null) return { type: 'relic',   id: card.relic_id };
   if (card.starter_id != null) return { type: 'starter', id: card.starter_id };
   if (card.event_id   != null) return { type: 'event',   id: card.event_id };
   return null;
@@ -2622,6 +2642,7 @@ function cardImageUrlBase(card) {
   if (card.citizen_id !== undefined) return `/card-image/citizen/${card.citizen_id}`;
   if (card.domain_id  !== undefined) return `/card-image/domain/${card.domain_id}`;
   if (card.duke_id    !== undefined) return `/card-image/duke/${card.duke_id}`;
+  if (card.relic_id   !== undefined) return `/card-image/relic/${card.relic_id}`;
   if (card.starter_id !== undefined) return `/card-image/starter/${card.starter_id}`;
   if (card.exhausted_id !== undefined) return `/card-image/exhausted/${card.exhausted_id}`;
   if (card.event_id     !== undefined) return `/card-image/event/${card.event_id}`;
@@ -2847,6 +2868,7 @@ function cardClass(card) {
   if (card.citizen_id   !== undefined) return 'card-citizen';
   if (card.domain_id    !== undefined) return 'card-domain';
   if (card.duke_id      !== undefined) return 'card-duke';
+  if (card.relic_id     !== undefined) return 'card-relic';
   return 'card-starter';
 }
 

@@ -335,6 +335,22 @@ class LifecycleEngine:
             self.game.tick_id += 1
             return True
 
+        # "You may recruit a Citizen" bonus (Town Crier agent). While the
+        # may_recruit prompt is open for this player, a single hire_citizen runs
+        # for free: no regular action spent, and not blocked by the may_recruit
+        # prompt below. Cleared once the recruit succeeds
+        # (resolve_bonus_recruit_if_consumed); a failed hire rolls back to the
+        # still-open prompt so the player can retry or decline.
+        if (
+            action_type == "hire_citizen"
+            and getattr(self.game, "pending_bonus_recruit", None) == player_id
+            and str((self.game.action_required or {}).get("action", "")) == "may_recruit"
+            and player_id == self.current_player_id()
+        ):
+            self.game._last_consumed_action_marker = ("bonus_recruit", None)
+            self.game.tick_id += 1
+            return True
+
         # Block while waiting on any active per-player prompt that isn't the
         # idle "standard_action" placeholder. This includes the new immediate
         # slay prompts (choose_monster_slay / slay_monster_payment), as well as
@@ -355,6 +371,7 @@ class LifecycleEngine:
                 "slay_monster_payment",
                 "choose_domain_to_build",
                 "may_sail",
+                "may_recruit",
                 "event_gain_action",
                 "event_active_choose",
                 "event_sequence",
@@ -408,6 +425,26 @@ class LifecycleEngine:
         self.game.pending_bonus_sail = None
         ar = self.game.action_required if isinstance(self.game.action_required, dict) else None
         if ar and str(ar.get("action", "")) == "may_sail":
+            ar["action"] = ""
+            ar["id"] = self.game.game_id
+        self.game.pending_required_choice = None
+        self.game.domain_effects._resume_after_domain_activation_follow_up()
+        return True
+
+    def resolve_bonus_recruit_if_consumed(self):
+        """Finalize a Town Crier free recruit after the hire action succeeded.
+
+        Returns True when the just-completed hire consumed the may_recruit bonus
+        (so the caller skips the normal finish_turn handling): clears the bonus
+        flag + the may_recruit prompt and resumes the activation follow-up, which
+        restores standard_action or ends the turn as appropriate.
+        """
+        if getattr(self.game, "_last_consumed_action_marker", None) != ("bonus_recruit", None):
+            return False
+        self.game._last_consumed_action_marker = None
+        self.game.pending_bonus_recruit = None
+        ar = self.game.action_required if isinstance(self.game.action_required, dict) else None
+        if ar and str(ar.get("action", "")) == "may_recruit":
             ar["action"] = ""
             ar["id"] = self.game.game_id
         self.game.pending_required_choice = None

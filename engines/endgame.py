@@ -429,6 +429,7 @@ class EndgameEngine:
     def _calculate_final_scores(self):
         """Compute final VP for each player including Duke multipliers. Returns ranked list."""
         self.game.unflip_all_citizens_for_final_scoring()
+        self.game.unflip_all_domains_for_final_scoring()
         crimson = self.game.crimson_seas_enabled()
         scores = []
         for player in self.game.player_list:
