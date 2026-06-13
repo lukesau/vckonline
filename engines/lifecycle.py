@@ -237,6 +237,18 @@ class LifecycleEngine:
         if self.game.phase == 'action':
             # Action ticks are driven by explicit player actions; if we're out of actions, advance seat.
             if int(self.game.actions_remaining) > 0:
+                # Don't clobber a live per-player prompt that is still awaiting
+                # input (e.g. a Dampiar's Workshop `may_sail` bonus, or a chained
+                # activation choose/banish prompt opened by a granted domain).
+                # Overwriting it with `standard_action` here breaks the bonus-sail
+                # detection so the next sail is charged as a regular action and
+                # silently eats the player's remaining action. Only (re)assert the
+                # idle placeholder when nothing else is being asked.
+                ar = self.game.action_required if isinstance(self.game.action_required, dict) else {}
+                aid = ar.get("id")
+                aact = str(ar.get("action", "") or "")
+                if aid and aid != self.game.game_id and aact and aact != "standard_action":
+                    return False
                 # Ensure action_required stays on the active player during their action window.
                 self.game.action_required["id"] = self.current_player_id()
                 self.game.action_required["action"] = "standard_action"

@@ -2084,6 +2084,7 @@ class PlayerActionsEngine:
                 missing.append(f"soldier {have['soldier']}/{req_soldier}")
             if have["worker"] < req_worker:
                 missing.append(f"worker {have['worker']}/{req_worker}")
+            evermap_ignored_requirement = False
             if missing:
                 # Evermap relic: ignore the shortfall when it is exactly one
                 # role icon. Anything larger still fails.
@@ -2098,6 +2099,7 @@ class PlayerActionsEngine:
                         f"{self.game._player_label(player_id)} ignored 1 Domain requirement "
                         f"(\"Evermap\"): {', '.join(missing)}."
                     )
+                    evermap_ignored_requirement = True
                 else:
                     raise ValueError(
                         "Domain role requirements not met (citizens and/or nobles): " + ", ".join(missing)
@@ -2131,6 +2133,17 @@ class PlayerActionsEngine:
                 self.game._log_game_event(
                     f"{self.game._player_label(player_id)} gained {relic_vp} VP from \"Violet Ring\"."
                 )
+
+            # Evermap relic: when the role-ignore was not needed, take its
+            # alternative reward instead (gain Magic).
+            if not evermap_ignored_requirement:
+                relic_magic = self.game.relics.relic_build_domain_magic_bonus(player)
+                if relic_magic:
+                    player.magic_score = int(getattr(player, "magic_score", 0) or 0) + relic_magic
+                    self.game.harvest._bump_harvest_delta(player, 0, 0, relic_magic, 0)
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} gained {relic_magic} Magic from \"Evermap\"."
+                    )
 
             # Resolve the purchased domain's own activation/passive first so that,
             # if buying empties this stack, a revealed Event's activation does not

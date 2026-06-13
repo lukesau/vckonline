@@ -359,10 +359,10 @@ class RelicBanishGainEffectTests(unittest.TestCase):
 
 class RelicThunderAxeTests(unittest.TestCase):
     """Thunder Axe: a passive slay-cost reducer. When slaying, the owner may
-    ignore up to 3 face-value Magic OR 1 face-value Strength. The waiver caps at
-    the monster's printed cost (never magic spent as wild Strength)."""
+    ignore 1 face-value Magic OR 1 face-value Strength. The waiver caps at the
+    monster's printed cost (never magic spent as wild Strength)."""
 
-    DISCOUNT = "action.slay_discount magic=3 strength=1"
+    DISCOUNT = "action.slay_discount magic=1 strength=1"
 
     def _slay_game(self, monster, *, resources=None, name="Thunder Axe", effect=None):
         eff = effect if effect is not None else self.DISCOUNT
@@ -372,7 +372,7 @@ class RelicThunderAxeTests(unittest.TestCase):
     def test_discount_caps_exposed(self):
         game = self._slay_game(_make_monster(70, "Imp", magic_cost=3))
         p1 = game.player_list[0]
-        self.assertEqual(game.relics.relic_slay_discount(p1), {"magic": 3, "strength": 1})
+        self.assertEqual(game.relics.relic_slay_discount(p1), {"magic": 1, "strength": 1})
 
     def test_passive_relic_not_click_usable(self):
         game = self._slay_game(_make_monster(70, "Imp", magic_cost=3))
@@ -380,17 +380,27 @@ class RelicThunderAxeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             game.use_relic("p1")
 
-    def test_magic_waiver_ignores_face_magic(self):
-        monster = _make_monster(70, "Imp", magic_cost=3, strength_cost=0)
+    def test_magic_waiver_ignores_one_face_magic(self):
+        monster = _make_monster(70, "Imp", magic_cost=1, strength_cost=0)
         game = self._slay_game(monster, resources={"magic_score": 0, "strength_score": 0})
         game.slay_monster("p1", 70, sp=0, mp=0, thunder_axe="magic")
         self.assertEqual([m.name for m in game.player_list[0].owned_monsters], ["Imp"])
 
-    def test_magic_waiver_partial_when_face_below_cap(self):
+    def test_magic_waiver_partial_when_face_above_cap(self):
+        # 2-face-Magic monster, only 1 waived: the remaining 1 Magic must be paid.
+        monster = _make_monster(70, "Imp", magic_cost=2, strength_cost=0)
+        game = self._slay_game(monster, resources={"magic_score": 1, "strength_score": 0})
+        game.slay_monster("p1", 70, sp=0, mp=1, thunder_axe="magic")
+        self.assertEqual(len(game.player_list[0].owned_monsters), 1)
+        self.assertEqual(game.player_list[0].magic_score, 0)
+
+    def test_magic_waiver_does_not_cover_full_cost(self):
+        # 2-face-Magic monster, only 1 waived: paying 0 Magic is still short.
         monster = _make_monster(70, "Imp", magic_cost=2, strength_cost=0)
         game = self._slay_game(monster, resources={"magic_score": 0, "strength_score": 0})
-        game.slay_monster("p1", 70, sp=0, mp=0, thunder_axe="magic")
-        self.assertEqual(len(game.player_list[0].owned_monsters), 1)
+        with self.assertRaises(ValueError):
+            game.slay_monster("p1", 70, sp=0, mp=0, thunder_axe="magic")
+        self.assertEqual(game.player_list[0].owned_monsters, [])
 
     def test_strength_waiver_ignores_one_strength(self):
         monster = _make_monster(70, "Ogre", strength_cost=3, magic_cost=0)
@@ -442,11 +452,11 @@ class RelicThunderAxeTests(unittest.TestCase):
         self.assertEqual(prc.get("face_strength_cost"), 1)
 
     def test_immediate_slay_applies_thunder_axe_magic(self):
-        monster = _make_monster(70, "Imp", magic_cost=3, strength_cost=0)
+        monster = _make_monster(70, "Imp", magic_cost=1, strength_cost=0)
         game = self._slay_game(monster, resources={"magic_score": 0, "strength_score": 0})
         game.slay._open_immediate_slay_prompt("p1", "Test Effect")
         game.act_on_required_action("p1", "choose_monster_slay 1")
-        # Pay nothing thanks to the magic waiver (3 face Magic ignored).
+        # Pay nothing thanks to the magic waiver (1 face Magic ignored).
         game.act_on_required_action("p1", "slay_pay 0 0 0 0 0 0 axe:magic")
         self.assertEqual([m.name for m in game.player_list[0].owned_monsters], ["Imp"])
 
@@ -584,17 +594,17 @@ class RelicDomainPassiveTests(unittest.TestCase):
         })
         return game, p1
 
+    EVERMAP = "action.build_domain ignore_requirement 1 or m 1"
+
     def test_evermap_allows_build_missing_exactly_one_icon(self):
         domain = _make_domain(99, "Keep", gold_cost=0, soldier=1)
-        game, p1 = self._build_game("action.build_domain ignore_requirement 1",
-                                    "Evermap", domain)
+        game, p1 = self._build_game(self.EVERMAP, "Evermap", domain)
         game.player_actions.build_domain("p1", 99)
         self.assertEqual([d.name for d in p1.owned_domains], ["Keep"])
 
     def test_evermap_does_not_allow_missing_two_icons(self):
         domain = _make_domain(99, "Keep", gold_cost=0, soldier=2)
-        game, p1 = self._build_game("action.build_domain ignore_requirement 1",
-                                    "Evermap", domain)
+        game, p1 = self._build_game(self.EVERMAP, "Evermap", domain)
         with self.assertRaises(ValueError):
             game.player_actions.build_domain("p1", 99)
         self.assertEqual(p1.owned_domains, [])
@@ -603,11 +613,29 @@ class RelicDomainPassiveTests(unittest.TestCase):
         # Needs soldier 1 + holy 1; player has the soldier, missing only holy (1).
         domain = _make_domain(99, "Keep", gold_cost=0, soldier=1, holy=1)
         game, p1 = self._build_game(
-            "action.build_domain ignore_requirement 1", "Evermap", domain,
+            self.EVERMAP, "Evermap", domain,
             citizens=[_make_citizen(50, "Footman", soldier=1)],
         )
         game.player_actions.build_domain("p1", 99)
         self.assertEqual(len(p1.owned_domains), 1)
+
+    def test_evermap_grants_magic_when_no_requirement_missing(self):
+        # Requirements fully met: take the "gain 1 Magic" alternative instead.
+        domain = _make_domain(99, "Keep", gold_cost=0)
+        game, p1 = self._build_game(self.EVERMAP, "Evermap", domain)
+        magic_before = p1.magic_score
+        game.player_actions.build_domain("p1", 99)
+        self.assertEqual(len(p1.owned_domains), 1)
+        self.assertEqual(p1.magic_score, magic_before + 1)
+
+    def test_evermap_ignore_does_not_also_grant_magic(self):
+        # Missing exactly 1 icon: the ignore is spent, so no Magic is gained.
+        domain = _make_domain(99, "Keep", gold_cost=0, soldier=1)
+        game, p1 = self._build_game(self.EVERMAP, "Evermap", domain)
+        magic_before = p1.magic_score
+        game.player_actions.build_domain("p1", 99)
+        self.assertEqual(len(p1.owned_domains), 1)
+        self.assertEqual(p1.magic_score, magic_before)
 
     def test_without_evermap_missing_one_icon_still_fails(self):
         domain = _make_domain(99, "Keep", gold_cost=0, soldier=1)
@@ -618,8 +646,7 @@ class RelicDomainPassiveTests(unittest.TestCase):
 
     def test_evermap_offered_through_bonus_build(self):
         domain = _make_domain(99, "Keep", gold_cost=0, soldier=1)
-        game, p1 = self._build_game("action.build_domain ignore_requirement 1",
-                                    "Evermap", domain)
+        game, p1 = self._build_game(self.EVERMAP, "Evermap", domain)
         game.payouts._execute_build_domain_activation_payout("p1")
         opts = (game.pending_required_choice or {}).get("options") or []
         self.assertTrue(any(int(o.get("domain_id", -1)) == 99 for o in opts))
@@ -639,7 +666,7 @@ class RelicDomainPassiveTests(unittest.TestCase):
     def test_passive_relic_not_click_usable(self):
         domain = _make_domain(99, "Keep", gold_cost=0)
         for effect, name in (("action.build_domain v 2", "Violet Ring"),
-                             ("action.build_domain ignore_requirement 1", "Evermap")):
+                             (self.EVERMAP, "Evermap")):
             game, p1 = self._build_game(effect, name, domain)
             self.assertFalse(game.relic_available_for("p1"))
             with self.assertRaises(ValueError):
@@ -724,7 +751,9 @@ class RelicBonusActionEffectTests(unittest.TestCase):
         grid = [[_make_domain(60, "Test Keep", gold_cost=3)]] + [[] for _ in range(4)]
         game = _make_effect_game("g 1 + build_domain", "Cornelius Ring",
                                  player_resources={"gold_score": 2, "magic_score": 0},
-                                 domain_grid=grid)
+                                 domain_grid=grid, consumes_action=True)
+        # Cornelius Ring is "as an action": the server spends the action first.
+        self.assertTrue(game.consume_player_action("p1", action_type="use_relic"))
         game.use_relic("p1")
         p1 = game.player_list[0]
         self.assertEqual(p1.gold_score, 3)
@@ -737,7 +766,8 @@ class RelicBonusActionEffectTests(unittest.TestCase):
         grid = [[_make_domain(60, "Test Keep", gold_cost=3)]] + [[] for _ in range(4)]
         game = _make_effect_game("g 1 + build_domain", "Cornelius Ring",
                                  player_resources={"gold_score": 2, "magic_score": 0},
-                                 domain_grid=grid)
+                                 domain_grid=grid, consumes_action=True)
+        self.assertTrue(game.consume_player_action("p1", action_type="use_relic"))
         game.use_relic("p1")
         game.act_on_required_action("p1", "build_domain_pick 1")
         self.assertEqual(game.action_required.get("action"), "build_domain_payment")
@@ -752,7 +782,8 @@ class RelicBonusActionEffectTests(unittest.TestCase):
         grid = [[_make_domain(60, "Test Keep", gold_cost=5)]] + [[] for _ in range(4)]
         game = _make_effect_game("g 1 + build_domain", "Cornelius Ring",
                                  player_resources={"gold_score": 1, "magic_score": 0},
-                                 domain_grid=grid)
+                                 domain_grid=grid, consumes_action=True)
+        self.assertTrue(game.consume_player_action("p1", action_type="use_relic"))
         game.use_relic("p1")
         self.assertEqual(game.player_list[0].gold_score, 2)
         self.assertNotEqual(game.action_required.get("action"), "choose_domain_to_build")
@@ -766,7 +797,8 @@ class RelicConsumesActionTests(unittest.TestCase):
     def test_flag_serialized_and_exposed(self):
         game = _make_effect_game("s 1 + g 1", "Gold Bastion", consumes_action=True)
         self.assertTrue(game.relic_consumes_action("p1"))
-        free = _make_effect_game("g 1 + build_domain", "Cornelius Ring", consumes_action=False)
+        # Hypothetical free click-usable relic exercising the consumes_action=False path.
+        free = _make_effect_game("g 1", "Test Trinket", consumes_action=False)
         self.assertFalse(free.relic_consumes_action("p1"))
 
     def test_flag_round_trips_through_save(self):
@@ -781,10 +813,11 @@ class RelicConsumesActionTests(unittest.TestCase):
         self.assertFalse(game.relic_available_for("p1"))
 
     def test_free_relic_available_with_no_actions_left(self):
-        game = _make_effect_game("g 1 + build_domain", "Cornelius Ring",
+        # A free (consumes_action=False) click-usable relic stays available even
+        # when the player has spent all their regular actions.
+        game = _make_effect_game("g 1", "Test Trinket",
                                  player_resources={"gold_score": 0},
-                                 consumes_action=False, actions_remaining=0,
-                                 domain_grid=[[] for _ in range(5)])
+                                 consumes_action=False, actions_remaining=0)
         self.assertTrue(game.relic_available_for("p1"))
 
     def test_server_flow_consumes_one_action(self):

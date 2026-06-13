@@ -921,7 +921,7 @@ function tomeSavedSetsForCard(card) {
 }
 
 // Thunder Axe relic: parse the owner's slay-cost waiver caps from owned_relics,
-// or null if they don't hold it. Marker: `action.slay_discount magic=3 strength=1`.
+// or null if they don't hold it. Marker: `action.slay_discount magic=1 strength=1`.
 function viewerThunderAxe(player) {
   const relics = Array.isArray(player?.owned_relics) ? player.owned_relics : [];
   for (const r of relics) {

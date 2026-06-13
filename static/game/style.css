@@ -1611,12 +1611,13 @@ html, body {
   gap: 3px;
   height: 100%;
   align-items: center;
-  overflow-x: auto;
-  overflow-y: hidden;
+  /* No internal scroll: the group is sized to its widest row (Nobles), and the
+     other rows cap at a handful of icons, so every row fits the group width. The
+     items' calc()/aspect-ratio sizing leaves sub-pixel slop, so clip it (as the
+     stacks box does above) to avoid a phantom barely-scrollable scrollbar. */
+  overflow: hidden;
   min-width: 0;
 }
-.cs-cell-items::-webkit-scrollbar { height: 3px; }
-.cs-cell-items::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
 .cs-item {
   flex-shrink: 0;
   display: flex;

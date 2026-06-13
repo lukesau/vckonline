@@ -29,7 +29,10 @@ _RESOURCE_SCORE_ATTR = {"g": "gold_score", "s": "strength_score", "m": "magic_sc
 _BUILD_DOMAIN_VP_RE = re.compile(r"^action\.build_domain\s+v\s+(\d+)$")
 # Passive "ignore 1 Domain requirement" relic marker prefix (Evermap).
 _IGNORE_REQUIREMENT_PREFIX = "action.build_domain ignore_requirement"
-# Passive slay-cost reducer (Thunder Axe): `action.slay_discount magic=3 strength=1`.
+# Evermap alternative: gain N Magic on a Domain build when the ignore is unused
+# (`action.build_domain ignore_requirement 1 or m 1`).
+_BUILD_DOMAIN_OR_MAGIC_RE = re.compile(r"\bor\s+m\s+(\d+)")
+# Passive slay-cost reducer (Thunder Axe): `action.slay_discount magic=1 strength=1`.
 _SLAY_DISCOUNT_PREFIX = "action.slay_discount"
 _SLAY_DISCOUNT_MAGIC_RE = re.compile(r"magic=(\d+)")
 _SLAY_DISCOUNT_STRENGTH_RE = re.compile(r"strength=(\d+)")
@@ -71,6 +74,18 @@ class RelicsEngine:
         if not relic:
             return 0
         m = _BUILD_DOMAIN_VP_RE.match(self._relic_effect(relic).lower())
+        return int(m.group(1)) if m else 0
+
+    def relic_build_domain_magic_bonus(self, player):
+        """Evermap: Magic gained on a Domain build when the role-ignore is not
+        used (the `or m N` alternative). 0 if the player owns no such relic."""
+        relic = self._owned_relic(player)
+        if not relic:
+            return 0
+        eff = self._relic_effect(relic).lower()
+        if not eff.startswith(_IGNORE_REQUIREMENT_PREFIX):
+            return 0
+        m = _BUILD_DOMAIN_OR_MAGIC_RE.search(eff)
         return int(m.group(1)) if m else 0
 
     def relic_slay_discount(self, player):

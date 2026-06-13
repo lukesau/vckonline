@@ -9,7 +9,7 @@ gold/map cost (the +1 Map funds it). Declining resumes the turn.
 
 import unittest
 
-from cards import Domain
+from cards import Domain, Event
 from game import Game
 from game_models import Player
 from game_serialization import (
@@ -169,6 +169,65 @@ class DampiarsWorkshopActivationTests(unittest.TestCase):
         reloaded = deserialize_save_dict_to_game(serialize_game_to_save_dict(game))
         self.assertEqual(reloaded.pending_bonus_sail, p.player_id)
         self.assertEqual(reloaded.action_required.get("action"), "may_sail")
+
+    def test_granted_via_reward_bonus_sail_preserves_remaining_action(self):
+        """Regression: slay a `<domains>` monster (Water Elemental), take Dampiar's
+        Workshop as the free domain, then take its bonus Sail to Exekratys. The
+        bonus Sail must NOT consume the player's still-available second action.
+
+        Previously the server's `advance_tick()` (run after the grant's
+        `act_on_required_action`) overwrote the open `may_sail` prompt with
+        `standard_action` because actions remained, so the Exekratys click fell
+        through to a regular action and ended the turn early.
+        """
+        # Two-action turn; the slay is action 1, leaving 1 action after.
+        game, players = make_game(actions_remaining=2,
+                                  exekratys={"gold": 0, "strength": 8, "magic": 0})
+        p = players[0]
+        # Center: a Water-Elemental-style event (slayable, special_reward <domains>)
+        # plus Dampiar's Workshop face-up in the domain grid to grant.
+        water = Event(160, "Water Elemental", None, "", 0, 1,
+                      0, 0, None, None, 3, 9, "Elemental", 3, 0, 0, 0, 1, "<domains>", "crimsonseas")
+        game.monster_grid[0] = [water]
+        dw = make_dampiars_workshop()
+        dw.toggle_visibility(True)
+        dw.toggle_accessibility(True)
+        game.domain_grid[0] = [dw]
+        # Plenty of resources to pay the slay.
+        p.strength_score = 20
+        p.magic_score = 20
+        # Bypass end-game so we observe the normal in-turn resume.
+        game.endgame._check_end_game_condition = lambda: None
+
+        # Action 1: slay Water Elemental → opens the <domains> grant prompt.
+        self.assertTrue(game.consume_player_action(p.player_id, action_type="slay_monster"))
+        game.slay_monster(p.player_id, None, sp=3, mp=9, event_id=160)
+        game.finish_turn_if_no_actions_remaining()
+        self.assertEqual(game.action_required.get("action"), "choose_domain_reward")
+        self.assertEqual(int(game.actions_remaining), 1)
+
+        # Take Dampiar's Workshop free; mirror the server by ticking afterwards.
+        opts = (game.pending_required_choice or {}).get("options") or []
+        sel = next(i for i, o in enumerate(opts) if o.get("name") == "Dampiar's Workshop")
+        game.act_on_required_action(p.player_id, f"grant_domain {sel + 1}")
+        game.advance_tick()
+
+        # The bonus Sail prompt must survive the tick (not be clobbered).
+        self.assertEqual(game.action_required.get("action"), "may_sail")
+        self.assertEqual(game.pending_bonus_sail, p.player_id)
+        self.assertEqual(int(game.actions_remaining), 1)
+
+        # Sail to Exekratys via the bonus; mirror the server's resolve/finish.
+        self.assertTrue(game.consume_player_action(p.player_id, action_type="sail_exekratys"))
+        self.assertEqual(game._last_consumed_action_marker, ("bonus_sail", None))
+        game.sail_exekratys(p.player_id, "strength")
+        self.assertTrue(game.resolve_bonus_sail_if_consumed())
+
+        # The second action is intact and the turn has NOT ended.
+        self.assertEqual(int(game.actions_remaining), 1)
+        self.assertEqual(game.phase, "action")
+        self.assertEqual(game.action_required.get("action"), "standard_action")
+        self.assertEqual(game.action_required.get("id"), p.player_id)
 
     def test_outside_crimson_seas_dropped(self):
         game, players = make_game(preset="random")
