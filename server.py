@@ -7,6 +7,7 @@ Simple REST API to replace the socket-based protocol
 import re
 import html
 import json
+import hashlib
 import random
 import time
 import uuid
@@ -39,6 +40,37 @@ except Exception as exc:
     print(f"[server] WARNING: failed to rebuild static/game/game.js bundle: {exc}")
 _DEV_CLIENT_INDEX = _REPO_ROOT / "static" / "dev-client" / "index.html"
 _GAME_CLIENT_INDEX = _REPO_ROOT / "static" / "game" / "index.html"
+
+
+def _asset_version(rel_path: str) -> str:
+    """Short content hash for a static asset, used as a ``?v=`` cache-buster.
+
+    Computed once at startup. The game bundle (static/game/game.js) is rebuilt
+    above before this runs, so the hash always matches what we serve. Missing
+    files fall back to a constant so the URL is still well-formed.
+    """
+    try:
+        data = (_REPO_ROOT / rel_path).read_bytes()
+    except OSError:
+        return "0"
+    return hashlib.sha1(data).hexdigest()[:10]
+
+
+# Map of unversioned asset URL -> URL with a content-hash query string. The game
+# bundle and stylesheet ship from fixed URLs, so without this browsers (mobile
+# Safari especially) keep serving a stale cached copy after a deploy. Recomputed
+# on every server start; a content change yields a new hash and forces a refetch.
+_VERSIONED_ASSETS = {
+    "/static/game/game.js": f"/static/game/game.js?v={_asset_version('static/game/game.js')}",
+    "/static/game/style.css": f"/static/game/style.css?v={_asset_version('static/game/style.css')}",
+}
+
+
+def _render_game_index() -> str:
+    text = _GAME_CLIENT_INDEX.read_text()
+    for plain, versioned in _VERSIONED_ASSETS.items():
+        text = text.replace(plain, versioned)
+    return text
 _COUNTER_INDEX = _REPO_ROOT / "static" / "counter" / "index.html"
 _WIKI_INDEX = _REPO_ROOT / "static" / "wiki" / "index.html"
 _RULEBOOKS_DIR = _REPO_ROOT / "static" / "rulebooks"
@@ -2635,7 +2667,7 @@ async def ws_game(websocket: WebSocket, game_id: str, player_id: Optional[str] =
 
 @app.get("/")
 async def game_client():
-    return FileResponse(_GAME_CLIENT_INDEX, media_type="text/html")
+    return HTMLResponse(_render_game_index())
 
 
 @app.get("/debug")
