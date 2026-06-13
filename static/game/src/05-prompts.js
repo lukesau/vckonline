@@ -2042,6 +2042,79 @@ function renderHarvestWildGainExchangePrompt(state) {
   });
 }
 
+// Treant Chest (both-wild exchange): stage 1 lets the player pick which resource
+// to pay N of (one button per resource they hold >= N of); stage 2 lets them pick
+// which resource to gain M of (always all three). Both stages submit through
+// act_on_required_action (relic_pay <r> / relic_gain <r>).
+function renderRelicWildExchangePrompt(state) {
+  const req = state?.action_required || {};
+  const reqId = (req?.id || '').toString();
+  const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
+  const prc = state?.pending_required_choice || null;
+  const stage = (prc?.stage || 'pay').toString();
+  const relicName = (prc?.relic_name || 'Relic').toString();
+  const gainAmt = Number(prc?.gain_amount || 0);
+  const labels = { g: 'Gold', s: 'Strength', m: 'Magic' };
+
+  const body = mk('prompt-modal-body');
+
+  if (!isYou) {
+    const note = mk('prompt-modal-note');
+    const what = stage === 'gain' ? 'what to gain' : 'what to pay';
+    note.textContent = `Waiting on ${playerDisplayName(state, reqId)} — choosing ${what} (${relicName}).`;
+    body.appendChild(note);
+    appendPromptResourcesPanel(body, state);
+    openPromptOverlayShell({
+      title: relicName,
+      dismissible: true,
+      bodyEl: body,
+      footerEl: null,
+    });
+    return;
+  }
+
+  if (stage === 'gain') {
+    const sub = mk('prompt-modal-note');
+    sub.textContent = `Choose which resource to gain ${gainAmt} of.`;
+    body.appendChild(sub);
+    appendPromptResourcesPanel(body, state);
+    const buttons = ['g', 's', 'm'].map(r =>
+      promptButton(`Gain ${gainAmt} ${labels[r]}`, () => postGameAction({
+        player_id: PLAYER_ID,
+        action_type: 'act_on_required_action',
+        action: `relic_gain ${r}`,
+      })));
+    openPromptOverlayShell({
+      title: `${relicName}: gain ${gainAmt}`,
+      dismissible: false,
+      bodyEl: body,
+      footerEl: promptActionsRow(buttons),
+    });
+    return;
+  }
+
+  const costOpts = Array.isArray(prc?.cost_options) ? prc.cost_options : [];
+  const sub = mk('prompt-modal-note');
+  sub.textContent = `Choose which resource to pay. You will then choose a resource to gain ${gainAmt} of.`;
+  body.appendChild(sub);
+  appendPromptResourcesPanel(body, state);
+  const buttons = costOpts.map(opt => {
+    const r = (opt?.resource || '').toLowerCase();
+    const n = Number(opt?.amount || 0);
+    return promptButton(`Pay ${n} ${labels[r] || r.toUpperCase()}`, () => postGameAction({
+      player_id: PLAYER_ID,
+      action_type: 'act_on_required_action',
+      action: `relic_pay ${r}`,
+    }));
+  });
+  openPromptOverlayShell({
+    title: relicName,
+    dismissible: false,
+    bodyEl: body,
+    footerEl: promptActionsRow(buttons),
+  });
+}
+
 function renderHarvestStealPrompt(state) {
   const req = state?.action_required || {};
   const reqId = (req?.id || '').toString();
@@ -2416,11 +2489,39 @@ function renderEventSlayCostPrompt(state) {
 // and Ararmartin-Ridge build payment prompts.
 const promptPaymentSavedTomes = {};
 
+// Per-prompt Thunder Axe waiver selection ('none' | 'magic' | 'strength'),
+// keyed like the tome state so it survives prompt re-renders.
+const promptThunderAxeModes = {};
+
 function immediateSlayPromptKey(prc) {
   if (!prc) return 'unknown';
   if (prc.event_id != null) return `event:${prc.event_id}`;
   if (prc.monster_id != null) return `monster:${prc.monster_id}`;
   return (prc.monster_name || 'monster').toString();
+}
+
+// Resolve the Thunder Axe waiver for the immediate-slay prompt from the viewer's
+// owned relics and the monster's face-value costs carried on the prompt. Returns
+// null when the player can't apply it to this monster.
+function immediateSlayThunderAxe(me, prc, promptKey) {
+  const axe = (typeof viewerThunderAxe === 'function') ? viewerThunderAxe(me) : null;
+  if (!axe || !prc) return null;
+  const faceMagic = Number(prc.face_magic_cost || 0);
+  const faceStrength = Number(prc.face_strength_cost || 0);
+  const canMagic = axe.magic > 0 && faceMagic > 0;
+  const canStrength = axe.strength > 0 && faceStrength > 0;
+  if (!canMagic && !canStrength) return null;
+  let mode = promptThunderAxeModes[promptKey] || 'none';
+  if (mode === 'magic' && !canMagic) mode = 'none';
+  if (mode === 'strength' && !canStrength) mode = 'none';
+  return {
+    name: axe.name,
+    canMagic,
+    canStrength,
+    magicWaive: canMagic ? Math.min(axe.magic, faceMagic) : 0,
+    strengthWaive: canStrength ? Math.min(axe.strength, faceStrength) : 0,
+    mode,
+  };
 }
 
 function promptSavedTomeSets(key) {
@@ -2499,6 +2600,12 @@ function renderImmediateSlayPayment(state) {
 
   const me = playerById(state, PLAYER_ID) || {};
   const promptKey = `slay:${immediateSlayPromptKey(prc)}`;
+  const thunderAxe = immediateSlayThunderAxe(me, prc, promptKey);
+  // Effective costs the payment must cover, after any Thunder Axe waiver.
+  let effStrengthCost = strengthCost;
+  let effMagicCost = magicCost;
+  if (thunderAxe && thunderAxe.mode === 'strength') effStrengthCost = Math.max(0, strengthCost - thunderAxe.strengthWaive);
+  if (thunderAxe && thunderAxe.mode === 'magic') effMagicCost = Math.max(0, magicCost - thunderAxe.magicWaive);
   const savedTomes = promptSavedTomeSets(promptKey);
   const tomeAvail = crimsonSeasEnabled(state) ? faceUpTomeCountsForPlayer(me) : { gold: 0, strength: 0, magic: 0 };
   const tomeUse = {
@@ -2520,22 +2627,22 @@ function renderImmediateSlayPayment(state) {
   // last of the primary resource" rule — if respecting it would force spending the player's last
   // strength, dip into the reserved magic instead.
   const reservation = magicOffTurnExchangeReservation(me);
-  const wildBudget = Math.max(0, mMax - magicCost - reservation.total);
-  const remainingMagicTotal = Math.max(0, mMax - magicCost);
+  const wildBudget = Math.max(0, mMax - effMagicCost - reservation.total);
+  const remainingMagicTotal = Math.max(0, mMax - effMagicCost);
   let suggestedStrength = 0;
-  let suggestedMagic = magicCost;
-  if (strengthCost > 0) {
-    suggestedStrength = Math.max(1, strengthCost - wildBudget);
-    suggestedStrength = Math.min(suggestedStrength, sMax, strengthCost);
-    if (suggestedStrength > 1 && suggestedStrength >= sMax && remainingMagicTotal >= strengthCost - 1) {
+  let suggestedMagic = effMagicCost;
+  if (effStrengthCost > 0) {
+    suggestedStrength = Math.max(1, effStrengthCost - wildBudget);
+    suggestedStrength = Math.min(suggestedStrength, sMax, effStrengthCost);
+    if (suggestedStrength > 1 && suggestedStrength >= sMax && remainingMagicTotal >= effStrengthCost - 1) {
       suggestedStrength = 1;
     }
-    suggestedMagic = magicCost + Math.max(0, strengthCost - suggestedStrength);
+    suggestedMagic = effMagicCost + Math.max(0, effStrengthCost - suggestedStrength);
   }
 
   const sub = mk('prompt-modal-note');
   const goldText = goldCost > 0 ? `gold cost ${goldCost}, ` : '';
-  sub.textContent = `Slay "${monsterName}" — ${goldText}strength cost ${strengthCost}, magic minimum ${magicCost}. Magic above the minimum can cover any strength shortfall (gold costs are exact; 1g equivalent rule does not apply to monsters).`;
+  sub.textContent = `Slay "${monsterName}" — ${goldText}strength cost ${effStrengthCost}, magic minimum ${effMagicCost}. Magic above the minimum can cover any strength shortfall (gold costs are exact; 1g equivalent rule does not apply to monsters).`;
   body.appendChild(sub);
 
   if (reservation.total > 0) {
@@ -2553,11 +2660,40 @@ function renderImmediateSlayPayment(state) {
   const goldDisabled = goldCost === 0;
   payWrap.appendChild(mkPayField('', 'pay-g', goldCost, goldCost, goldCost, goldDisabled, goldCost ? `Gold cost: ${goldCost} (exact)` : 'No gold cost', 'gold', gMax));
   payWrap.appendChild(mkPayField('', 'pay-s', 0, sMax, suggestedStrength, false, 'Strength payment', 'strength'));
-  payWrap.appendChild(mkPayField('', 'pay-m', magicCost, mMax, suggestedMagic, false, 'Magic payment (minimum required)', 'magic'));
+  payWrap.appendChild(mkPayField('', 'pay-m', effMagicCost, mMax, suggestedMagic, false, 'Magic payment (minimum required)', 'magic'));
 
   const fields = mk('market-pay-fields');
   fields.appendChild(payWrap);
   body.appendChild(fields);
+
+  if (thunderAxe) {
+    const row = mk('market-thunder-axe-row');
+    const lbl = mk('market-thunder-axe-label');
+    lbl.textContent = thunderAxe.name;
+    row.appendChild(lbl);
+    const group = mk('market-thunder-axe-options');
+    const opts = [{ mode: 'none', text: 'Pay full' }];
+    if (thunderAxe.canMagic) opts.push({ mode: 'magic', text: `Ignore ${thunderAxe.magicWaive} Magic` });
+    if (thunderAxe.canStrength) opts.push({ mode: 'strength', text: `Ignore ${thunderAxe.strengthWaive} Strength` });
+    opts.forEach(o => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `market-thunder-axe-chip ${thunderAxe.mode === o.mode ? 'is-active' : ''}`;
+      btn.textContent = o.text;
+      btn.title = 'Thunder Axe: ignore part of this monster\u2019s face-value cost when slaying.';
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        promptThunderAxeModes[promptKey] = o.mode;
+        renderPromptModal(latestGameState || state);
+      });
+      group.appendChild(btn);
+    });
+    row.appendChild(group);
+    const hint = mk('market-thunder-axe-hint');
+    hint.textContent = 'Reduces only the printed cost — magic paid as wild Strength is never waived.';
+    row.appendChild(hint);
+    body.appendChild(row);
+  }
 
   appendPromptTomeChips(body, savedTomes, tomeAvail, ['gold', 'strength', 'magic'],
     () => renderPromptModal(latestGameState || state));
@@ -2570,11 +2706,13 @@ function renderImmediateSlayPayment(state) {
       strength: Math.min(tomeUse.strength, p.strength),
       magic: Math.min(tomeUse.magic, p.magic),
     };
+    const axeSuffix = (thunderAxe && (thunderAxe.mode === 'magic' || thunderAxe.mode === 'strength'))
+      ? ` axe:${thunderAxe.mode}` : '';
     confirmAndPostGameAction(
       {
         player_id: PLAYER_ID,
         action_type: 'act_on_required_action',
-        action: `slay_pay ${p.gold} ${p.strength} ${p.magic} ${tomePay.gold} ${tomePay.strength} ${tomePay.magic}`,
+        action: `slay_pay ${p.gold} ${p.strength} ${p.magic} ${tomePay.gold} ${tomePay.strength} ${tomePay.magic}${axeSuffix}`,
       },
       {
         title: 'Slay monster?',
@@ -3730,6 +3868,11 @@ function renderPromptModal(state) {
 
   if (reqAction === 'harvest_wild_gain_exchange') {
     renderHarvestWildGainExchangePrompt(state);
+    return;
+  }
+
+  if (reqAction === 'relic_wild_exchange') {
+    renderRelicWildExchangePrompt(state);
     return;
   }
 

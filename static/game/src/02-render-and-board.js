@@ -536,6 +536,15 @@ function relicUsableByViewer(card, ownerPlayerId) {
   return idsMatch(state.active_player_id, PLAYER_ID);
 }
 
+// A "both-wild" exchange relic (Treant Chest): pay N of any one resource, gain M
+// of any one resource. These skip the generic confirm modal and open the
+// pay/gain choice overlay directly on click.
+function relicIsWildExchange(card) {
+  const eff = (card && card.passive_effect ? String(card.passive_effect) : '')
+    .trim().toLowerCase();
+  return /^exchange\s+wild\s+\d+\s+wild\s+\d+$/.test(eff);
+}
+
 function wireSeatTableauOpen(seatEl, player) {
   if (!player || !player.player_id) return;
   seatEl.classList.add('seat-detail-hit');

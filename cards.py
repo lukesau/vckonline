@@ -324,12 +324,15 @@ class Relic(Card):
     visible.
     """
 
-    def __init__(self, relic_id, name, passive_effect, passive_effect_text):
+    def __init__(self, relic_id, name, passive_effect, passive_effect_text, consumes_action=False):
         super().__init__()
         self.relic_id = relic_id
         self.name = name
         self.passive_effect = passive_effect
         self.passive_effect_text = passive_effect_text
+        # True for relics whose text reads "As an action ..." — using them spends
+        # a standard action (the rest are free / triggered effects).
+        self.consumes_action = bool(consumes_action)
         self.toggle_visibility(True)
 
     def to_dict(self):
@@ -339,6 +342,7 @@ class Relic(Card):
             "name": self.name,
             "passive_effect": self.passive_effect,
             "passive_effect_text": self.passive_effect_text,
+            "consumes_action": bool(self.consumes_action),
         }
 
     @classmethod
@@ -348,6 +352,7 @@ class Relic(Card):
             name=data["name"],
             passive_effect=data.get("passive_effect"),
             passive_effect_text=data.get("passive_effect_text") or "",
+            consumes_action=bool(data.get("consumes_action", False)),
         )
         return _apply_persisted_card_flags(card, data)
 

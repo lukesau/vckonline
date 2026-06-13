@@ -3933,6 +3933,52 @@ body.is-virtual-keyboard-open .card-modal {
   color: rgba(255,255,255,0.6);
 }
 
+/* Thunder Axe relic slay-cost waiver picker (shown in the slay panel). */
+.market-thunder-axe-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+.market-thunder-axe-label {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.market-thunder-axe-options {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.market-thunder-axe-chip {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.25);
+  background: rgba(255,255,255,0.05);
+  color: var(--text, #fff);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+.market-thunder-axe-chip.is-active {
+  border-color: rgba(120,200,255,0.9);
+  box-shadow: 0 0 6px rgba(120,200,255,0.5);
+  background: rgba(120,200,255,0.16);
+}
+.market-thunder-axe-chip:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.market-thunder-axe-hint {
+  flex-basis: 100%;
+  font-size: 13px;
+  color: rgba(255,255,255,0.6);
+}
+
 .market-pay-row {
   display: flex;
   flex-wrap: wrap;

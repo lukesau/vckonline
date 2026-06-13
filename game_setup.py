@@ -218,6 +218,7 @@ def _relic_from_row(row):
         row["name"],
         row.get("passive_effect"),
         row.get("passive_effect_text") or "",
+        consumes_action=bool(row.get("consumes_action", 0)),
     )
 
 

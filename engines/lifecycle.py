@@ -86,6 +86,7 @@ class LifecycleEngine:
                 or aa == "event_active_choose"
                 or aa == "event_sequence"
                 or aa == "choose_domain_to_build"
+                or aa == "relic_wild_exchange"
             ):
                 return False
 
@@ -375,6 +376,7 @@ class LifecycleEngine:
                 "event_gain_action",
                 "event_active_choose",
                 "event_sequence",
+                "relic_wild_exchange",
             ) or aa.startswith("choose ") or aa.startswith("choose_player") or aa.startswith(
                 "choose_monster"
             ) or aa.startswith("choose_owned")

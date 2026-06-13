@@ -395,6 +395,10 @@ class PlayerActionsEngine:
                 self.game.harvest._maybe_resume_harvest_prompt()
                 return
 
+            if current_required == "relic_wild_exchange":
+                self.game.relics.resolve_wild_exchange_action(player_id, action)
+                return
+
             if current_required == "choose_domain_reward":
                 prc_dr = getattr(self.game, "pending_required_choice", None) or {}
                 if prc_dr.get("kind") != "grant_domain_reward" or prc_dr.get("player_id") != player_id:
@@ -670,6 +674,15 @@ class PlayerActionsEngine:
                         })
                     except (TypeError, ValueError):
                         slay_tome_payment = None
+                # Optional Thunder Axe waiver token: `axe:magic` / `axe:strength`,
+                # appended after the (optional) tome portion.
+                thunder_axe_mode = None
+                for tok in parts[4:]:
+                    if tok.startswith("axe:"):
+                        cand = tok.split(":", 1)[1]
+                        if cand in ("magic", "strength"):
+                            thunder_axe_mode = cand
+                        break
                 if slay_tome_payment and (
                     slay_tome_payment["gold"] > gp
                     or slay_tome_payment["strength"] > sp
@@ -695,7 +708,8 @@ class PlayerActionsEngine:
                 try:
                     if slay_tome_payment and any(slay_tome_payment.values()):
                         redeemed = self.redeem_tomes_to_score(player_id, slay_tome_payment)
-                    self.slay_monster(player_id, monster_id, sp, mp, gp, event_id=event_id_opt)
+                    self.slay_monster(player_id, monster_id, sp, mp, gp,
+                                      event_id=event_id_opt, thunder_axe=thunder_axe_mode)
                 except ValueError as e:
                     # Payment didn't validate; surface in the log so the player
                     # sees why nothing happened, but keep the prompt open so they
@@ -1432,6 +1446,8 @@ class PlayerActionsEngine:
                     return
                 if card_kind == "citizen":
                     banished = self.game.payouts._banish_owned_citizen(player, src_idx)
+                elif card_kind == "monster":
+                    banished = self.game.payouts._banish_owned_monster(player, src_idx)
                 else:
                     banished = None
                 if not banished:
@@ -1850,7 +1866,7 @@ class PlayerActionsEngine:
 
         raise ValueError("Citizen not available to hire.")
 
-    def slay_monster(self, player_id, monster_id, sp=0, mp=0, gp=0, event_id=None):
+    def slay_monster(self, player_id, monster_id, sp=0, mp=0, gp=0, event_id=None, thunder_axe=None):
         gp, sp, mp = _n(gp), _n(sp), _n(mp)
         payout = [0, 0, 0, 0]
 
@@ -1912,6 +1928,32 @@ class PlayerActionsEngine:
                 effective_strength_cost = max(0, effective_strength_cost - 1)
             if self.game._player_has_action_effect_flag(player, "action.darklordrising"):
                 effective_magic_cost += self.game.events.dark_lord_surcharge()
+
+            # Thunder Axe relic: optionally ignore up to N face-value Magic OR M
+            # face-value Strength of the cost. The reduction caps at the monster's
+            # PRINTED cost (never event surcharges, never magic paid as wild
+            # Strength), so a monster with 0 face-value Magic cannot be discounted
+            # with the magic option.
+            thunder_axe_applied = None
+            if thunder_axe:
+                discount = self.game.relics.relic_slay_discount(player)
+                if not discount:
+                    raise ValueError("You do not own a relic that reduces slay costs.")
+                mode = str(thunder_axe).strip().lower()
+                if mode == "magic":
+                    face_magic = int(getattr(top, "magic_cost", 0) or 0)
+                    reduction = min(int(discount.get("magic", 0) or 0), face_magic)
+                    if reduction > 0:
+                        effective_magic_cost = max(0, effective_magic_cost - reduction)
+                        thunder_axe_applied = f"{reduction} Magic"
+                elif mode == "strength":
+                    face_strength = int(getattr(top, "strength_cost", 0) or 0)
+                    reduction = min(int(discount.get("strength", 0) or 0), face_strength)
+                    if reduction > 0:
+                        effective_strength_cost = max(0, effective_strength_cost - reduction)
+                        thunder_axe_applied = f"{reduction} Strength"
+                else:
+                    raise ValueError("Invalid Thunder Axe option (expected 'magic' or 'strength').")
 
             _validate_monster_slay_payment(
                 player, effective_strength_cost, effective_magic_cost, effective_gold_cost, gp, sp, mp
@@ -1977,8 +2019,9 @@ class PlayerActionsEngine:
                 self.game.events.reveal_exhausted_onto_stack(monster_stack)
             after = self.game._player_scores_line(player)
             pay = self.game._format_resource_payment(gp, sp, mp)
+            axe_note = f" (Thunder Axe: ignored {thunder_axe_applied})" if thunder_axe_applied else ""
             self.game._log_game_event(
-                f"{self.game._player_label(player_id)} slew \"{monster_to_add.name}\" ({pay}); scores {before} -> {after}"
+                f"{self.game._player_label(player_id)} slew \"{monster_to_add.name}\" ({pay}){axe_note}; scores {before} -> {after}"
             )
             # Slaying the Undead Samurai Lord event banishes any of its minions
             # still scattered on the board (the slayer's owned minions were already
@@ -2033,9 +2076,23 @@ class PlayerActionsEngine:
             if have["worker"] < req_worker:
                 missing.append(f"worker {have['worker']}/{req_worker}")
             if missing:
-                raise ValueError(
-                    "Domain role requirements not met (citizens and/or nobles): " + ", ".join(missing)
+                # Evermap relic: ignore the shortfall when it is exactly one
+                # role icon. Anything larger still fails.
+                total_missing = (
+                    max(0, req_shadow - have["shadow"])
+                    + max(0, req_holy - have["holy"])
+                    + max(0, req_soldier - have["soldier"])
+                    + max(0, req_worker - have["worker"])
                 )
+                if total_missing == 1 and self.game.relics.player_can_ignore_one_build_requirement(player):
+                    self.game._log_game_event(
+                        f"{self.game._player_label(player_id)} ignored 1 Domain requirement "
+                        f"(\"Evermap\"): {', '.join(missing)}."
+                    )
+                else:
+                    raise ValueError(
+                        "Domain role requirements not met (citizens and/or nobles): " + ", ".join(missing)
+                    )
 
             gold_cost = int(getattr(top, "gold_cost", 0) or 0)
             has_pratchett = self.game._player_has_action_effect_flag(player, "action.pratchettsplateau")
@@ -2056,6 +2113,15 @@ class PlayerActionsEngine:
             if vp_gain:
                 player.victory_score = int(getattr(player, "victory_score", 0) or 0) + vp_gain
                 self.game.harvest._bump_harvest_delta(player, 0, 0, 0, vp_gain)
+
+            # Violet Ring relic: gain VP whenever you buy a Domain.
+            relic_vp = self.game.relics.relic_build_domain_vp_bonus(player)
+            if relic_vp:
+                player.victory_score = int(getattr(player, "victory_score", 0) or 0) + relic_vp
+                self.game.harvest._bump_harvest_delta(player, 0, 0, 0, relic_vp)
+                self.game._log_game_event(
+                    f"{self.game._player_label(player_id)} gained {relic_vp} VP from \"Violet Ring\"."
+                )
 
             # Resolve the purchased domain's own activation/passive first so that,
             # if buying empties this stack, a revealed Event's activation does not

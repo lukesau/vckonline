@@ -46,6 +46,7 @@ from engines.player_actions import PlayerActionsEngine
 from engines.endgame import EndgameEngine
 from engines.events import EventsEngine
 from engines.agents import AgentsEngine
+from engines.relics import RelicsEngine
 
 
 class Game:
@@ -61,6 +62,7 @@ class Game:
         "endgame",
         "events",
         "agents",
+        "relics",
     )
 
     def __init__(self, game_state):
@@ -286,6 +288,7 @@ class Game:
         self.endgame = EndgameEngine(self)
         self.events = EventsEngine(self)
         self.agents = AgentsEngine(self)
+        self.relics = RelicsEngine(self)
         self._assert_no_engine_method_conflicts()
 
     def _assert_no_engine_method_conflicts(self):
@@ -357,7 +360,7 @@ class Game:
     def hire_citizen(self, player_id, citizen_id, gp=0, mp=0, sp=0):
         return self.player_actions.hire_citizen(player_id, citizen_id, gp=gp, mp=mp, sp=sp)
 
-    def slay_monster(self, player_id, monster_id, sp=0, mp=0, gp=0, event_id=None):
+    def slay_monster(self, player_id, monster_id, sp=0, mp=0, gp=0, event_id=None, thunder_axe=None):
         return self.player_actions.slay_monster(
             player_id,
             monster_id,
@@ -365,6 +368,7 @@ class Game:
             mp=mp,
             gp=gp,
             event_id=event_id,
+            thunder_axe=thunder_axe,
         )
 
     def build_domain(self, player_id, domain_id, gp=0, mp=0, sp=0):
@@ -532,6 +536,16 @@ class Game:
         """True when the Relics module was dealt at setup."""
         return bool(self.include_relics)
 
+    def relic_consumes_action(self, player_id):
+        """True when the player's kept relic spends a standard action when used
+        (its text reads "As an action ..."). Used by the server to gate/consume
+        an action around `use_relic`."""
+        player = self._player_by_id(player_id)
+        relics = list(getattr(player, "owned_relics", []) or []) if player else []
+        if not relics:
+            return False
+        return bool(getattr(relics[0], "consumes_action", False))
+
     def relic_available_for(self, player_id):
         """True when `player_id` may use their relic right now: relics in play,
         it's their action phase, they hold a relic, and they have not already
@@ -543,13 +557,30 @@ class Game:
         if player_id != self.current_player_id():
             return False
         player = self._player_by_id(player_id)
-        if not player or not list(getattr(player, "owned_relics", []) or []):
+        relics = list(getattr(player, "owned_relics", []) or []) if player else []
+        if not relics:
             return False
-        return self.relic_used_turn.get(str(player_id)) != int(self.turn_number)
+        if self.relic_used_turn.get(str(player_id)) == int(self.turn_number):
+            return False
+        relic = relics[0]
+        # Passive/triggered relics (Evermap, Violet Ring) fire automatically on a
+        # game event; they are never clickable and never glow.
+        if self.relics._relic_is_passive(relic):
+            return False
+        # An implemented relic the player cannot pay for must not glow / be
+        # clickable; an unimplemented relic still uses the no-op stub path.
+        if self.relics._relic_is_implemented(relic) and not self.relics._player_can_afford_relic(player, relic):
+            return False
+        # An "As an action" relic needs a standard action to spend.
+        if getattr(relic, "consumes_action", False) and int(getattr(self, "actions_remaining", 0) or 0) <= 0:
+            return False
+        return True
 
     def use_relic(self, player_id):
-        """Stub relic activation: validate the once-per-turn gate and mark the
-        relic used. No card effect is applied yet (the glow simply clears)."""
+        """Use the active player's relic for the turn. Validates the
+        once-per-turn gate, then resolves the relic's effect (implemented
+        relics execute their `passive_effect`; unimplemented relics fall back to
+        a no-op stub that only clears the glow)."""
         if not self.relics_enabled():
             raise ValueError("Relics are not in play this game.")
         if player_id != self.current_player_id():
@@ -562,11 +593,19 @@ class Game:
             raise ValueError("You have no relic to use.")
         if self.relic_used_turn.get(str(player_id)) == int(self.turn_number):
             raise ValueError("You have already used your relic this turn.")
-        self.relic_used_turn[str(player_id)] = int(self.turn_number)
         relic = relics[0]
-        self._log_game_event(
-            f"{self._player_label(player_id)} used relic \"{getattr(relic, 'name', '?')}\"."
-        )
+        if self.relics._relic_is_passive(relic):
+            raise ValueError("That relic's power is passive and triggers automatically.")
+        implemented = self.relics._relic_is_implemented(relic)
+        if implemented and not self.relics._player_can_afford_relic(player, relic):
+            raise ValueError("You cannot afford to use that relic.")
+        self.relic_used_turn[str(player_id)] = int(self.turn_number)
+        if implemented:
+            self.relics._apply_relic_effect(player, relic)
+        else:
+            self._log_game_event(
+                f"{self._player_label(player_id)} used relic \"{getattr(relic, 'name', '?')}\"."
+            )
         return True
 
     def _begin_relic_selection_if_pending(self):

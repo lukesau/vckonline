@@ -1264,6 +1264,8 @@ class GameActionRequest(BaseModel):
     domain_id: Optional[int] = None
     monster_id: Optional[int] = None
     event_id: Optional[int] = None  # For slaying Event cards on the board
+    # slay_monster: optional Thunder Axe relic cost waiver ("magic" or "strength").
+    thunder_axe: Optional[str] = None
     # take_resource: "gold" | "strength" | "magic" | "map"
     resource: Optional[str] = None
     # buy_goods: which Araby goods slots (0-based) to buy in one Sail action.
@@ -2126,10 +2128,23 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             should_snapshot = True
 
         elif request.action_type == "use_relic":
+            # "As an action" relics spend a standard action; the rest are free.
+            consumes_action = game.relic_consumes_action(request.player_id)
+            if consumes_action:
+                if not game.consume_player_action(request.player_id, action_type="use_relic"):
+                    raise HTTPException(status_code=400, detail="Not your turn (or no actions remaining)")
             try:
                 game.use_relic(request.player_id)
             except ValueError as e:
+                if consumes_action:
+                    _rollback_consumed_action(game)
                 raise HTTPException(status_code=400, detail=str(e))
+            except Exception:
+                if consumes_action:
+                    _rollback_consumed_action(game)
+                raise
+            if consumes_action:
+                game.finish_turn_if_no_actions_remaining()
             should_snapshot = True
 
         elif request.action_type == "slay_monster":
@@ -2148,6 +2163,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                     request.monster_id,
                     s, m, g,
                     event_id=request.event_id,
+                    thunder_axe=request.thunder_axe,
                 )
             except ValueError as e:
                 if redeemed:

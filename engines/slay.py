@@ -77,6 +77,9 @@ class SlayEngine:
                         + int(cost_deltas.get("m", 0) or 0)
                         + surcharge
                     ),
+                    # Printed (face-value) costs, used to cap Thunder Axe's waiver.
+                    "face_strength_cost": int(getattr(top, "strength_cost", 0) or 0),
+                    "face_magic_cost": int(getattr(top, "magic_cost", 0) or 0),
                 })
                 continue
             mid = int(getattr(top, "monster_id", -1))
@@ -101,6 +104,9 @@ class SlayEngine:
                     + int(cost_deltas.get("m", 0) or 0)
                     + surcharge
                 ),
+                # Printed (face-value) costs, used to cap Thunder Axe's waiver.
+                "face_strength_cost": int(getattr(top, "strength_cost", 0) or 0),
+                "face_magic_cost": int(getattr(top, "magic_cost", 0) or 0),
             })
         return options
 
@@ -149,6 +155,8 @@ class SlayEngine:
             "gold_cost": int(chosen.get("gold_cost", 0) or 0),
             "strength_cost": int(chosen.get("strength_cost", 0) or 0),
             "magic_cost": int(chosen.get("magic_cost", 0) or 0),
+            "face_strength_cost": int(chosen.get("face_strength_cost", 0) or 0),
+            "face_magic_cost": int(chosen.get("face_magic_cost", 0) or 0),
             "options": list(prc.get("options") or []),
         }
         # Carry the right id depending on whether this is a regular monster or an Event.

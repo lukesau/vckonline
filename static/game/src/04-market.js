@@ -642,6 +642,7 @@ function evaluateMarketCardContext(card, state) {
   let defiantHint = '';
   let fortskylerHint = '';
   let scalingHint = '';
+  let thunderAxe = null;
 
   if (actingPlayer && loc && top && !blockReason) {
     if (card.citizen_id != null) {
@@ -673,18 +674,28 @@ function evaluateMarketCardContext(card, state) {
     } else if (card.monster_id != null) {
       const ownedSame = top?.has_special_cost ? ownedMonsterNameCount(actingPlayer, top.name) : 0;
       const rawStr = Number(top.strength_cost || 0) + Number(top.extra_strength_cost || 0);
+      thunderAxe = resolveThunderAxeForCard(card, top, actingPlayer);
+      let slayStrength = Math.max(0, rawStr - (fortskylerActive ? 1 : 0));
+      let slayMagicMin = Number(top.magic_cost || 0) + Number(top.extra_magic_cost || 0);
+      if (thunderAxe && thunderAxe.mode === 'strength') slayStrength = Math.max(0, slayStrength - thunderAxe.strengthWaive);
+      if (thunderAxe && thunderAxe.mode === 'magic') slayMagicMin = Math.max(0, slayMagicMin - thunderAxe.magicWaive);
       evalRes = canAffordMonsterCost(effectivePlayer, {
         gold:     Number(top.extra_gold_cost || 0),
-        strength: Math.max(0, rawStr - (fortskylerActive ? 1 : 0)),
-        magicMin: Number(top.magic_cost || 0) + Number(top.extra_magic_cost || 0),
+        strength: slayStrength,
+        magicMin: slayMagicMin,
       });
       fortskylerHint = fortskylerActive && rawStr > 0 ? 'Fort Skyler: −1 monster strength cost.' : '';
       scalingHint = ownedSame ? `+${ownedSame} duplicate(s) slain` : '';
     } else if (card.event_id != null) {
+      thunderAxe = resolveThunderAxeForCard(card, top, actingPlayer);
+      let slayStrength = Number(top.strength_cost || 0) + Number(top.extra_strength_cost || 0);
+      let slayMagicMin = Number(top.magic_cost || 0) + Number(top.extra_magic_cost || 0);
+      if (thunderAxe && thunderAxe.mode === 'strength') slayStrength = Math.max(0, slayStrength - thunderAxe.strengthWaive);
+      if (thunderAxe && thunderAxe.mode === 'magic') slayMagicMin = Math.max(0, slayMagicMin - thunderAxe.magicWaive);
       evalRes = canAffordMonsterCost(effectivePlayer, {
         gold:     Number(top.extra_gold_cost     || 0),
-        strength: Number(top.strength_cost       || 0) + Number(top.extra_strength_cost || 0),
-        magicMin: Number(top.magic_cost          || 0) + Number(top.extra_magic_cost    || 0),
+        strength: slayStrength,
+        magicMin: slayMagicMin,
       });
     }
   }
@@ -726,6 +737,7 @@ function evaluateMarketCardContext(card, state) {
     defiantHint,
     fortskylerHint,
     scalingHint,
+    thunderAxe,
     canActThisCard,
   };
 }
@@ -908,6 +920,68 @@ function tomeSavedSetsForCard(card) {
   return overlay._tomeUsage[key];
 }
 
+// Thunder Axe relic: parse the owner's slay-cost waiver caps from owned_relics,
+// or null if they don't hold it. Marker: `action.slay_discount magic=3 strength=1`.
+function viewerThunderAxe(player) {
+  const relics = Array.isArray(player?.owned_relics) ? player.owned_relics : [];
+  for (const r of relics) {
+    const eff = (r && r.passive_effect ? String(r.passive_effect) : '').trim().toLowerCase();
+    if (!eff.startsWith('action.slay_discount')) continue;
+    const mm = eff.match(/magic=(\d+)/);
+    const sm = eff.match(/strength=(\d+)/);
+    return {
+      magic: mm ? Number(mm[1]) : 0,
+      strength: sm ? Number(sm[1]) : 0,
+      name: (r && r.name) || 'Thunder Axe',
+    };
+  }
+  return null;
+}
+
+// Selected Thunder Axe waiver mode ('none' | 'magic' | 'strength') for the card,
+// persisted on the overlay so it survives the live-state re-render.
+function thunderAxeModeForCard(card) {
+  const overlay = document.getElementById('card-modal-overlay');
+  const key = tomeUsageKeyForCard(card);
+  if (!overlay || !key) return 'none';
+  if (!overlay._thunderAxeModes) overlay._thunderAxeModes = {};
+  return overlay._thunderAxeModes[key] || 'none';
+}
+
+function setThunderAxeModeForCard(card, mode) {
+  const overlay = document.getElementById('card-modal-overlay');
+  const key = tomeUsageKeyForCard(card);
+  if (!overlay || !key) return;
+  if (!overlay._thunderAxeModes) overlay._thunderAxeModes = {};
+  overlay._thunderAxeModes[key] = mode;
+}
+
+// Resolve the *effective* Thunder Axe choice for a monster/event card: the owner's
+// caps, the monster's printed (face-value) costs, and the sanitized selected mode
+// (downgraded to 'none' when the chosen resource has no face-value cost to ignore).
+function resolveThunderAxeForCard(card, top, actingPlayer) {
+  if (!actingPlayer || !top) return null;
+  if (card.monster_id == null && card.event_id == null) return null;
+  const axe = viewerThunderAxe(actingPlayer);
+  if (!axe) return null;
+  const faceMagic = Number(top.magic_cost || 0);
+  const faceStrength = Number(top.strength_cost || 0);
+  const canMagic = axe.magic > 0 && faceMagic > 0;
+  const canStrength = axe.strength > 0 && faceStrength > 0;
+  if (!canMagic && !canStrength) return null;
+  let mode = thunderAxeModeForCard(card);
+  if (mode === 'magic' && !canMagic) mode = 'none';
+  if (mode === 'strength' && !canStrength) mode = 'none';
+  return {
+    name: axe.name,
+    canMagic,
+    canStrength,
+    magicWaive: canMagic ? Math.min(axe.magic, faceMagic) : 0,
+    strengthWaive: canStrength ? Math.min(axe.strength, faceStrength) : 0,
+    mode,
+  };
+}
+
 function tomeUsageForCard(card, avail) {
   const saved = tomeSavedSetsForCard(card);
   return {
@@ -969,6 +1043,49 @@ function appendTomePaymentUI(panel, card, ctx) {
 
   const hint = mk('market-tome-hint');
   hint.textContent = 'Used tomes pay before treasury and flip back face-up at end of your turn.';
+  row.appendChild(hint);
+
+  panel.appendChild(row);
+}
+
+// Thunder Axe waiver picker, shown in the slay panel when the acting player owns
+// the relic and the monster has a face-value cost it can reduce. The choice is a
+// single mutually-exclusive option (ignore Magic OR Strength); it lowers the
+// suggested payment and is passed through to the slay action.
+function appendThunderAxeUI(panel, card, ctx) {
+  const axe = ctx.thunderAxe;
+  if (!axe) return;
+  if (!(ctx.standardActionPhase || ctx.bonusRecruitPhase)) return;
+
+  const row = mk('market-thunder-axe-row');
+  const lbl = mk('market-thunder-axe-label');
+  lbl.textContent = axe.name;
+  row.appendChild(lbl);
+
+  const opts = [{ mode: 'none', text: 'Pay full' }];
+  if (axe.canMagic) opts.push({ mode: 'magic', text: `Ignore ${axe.magicWaive} Magic` });
+  if (axe.canStrength) opts.push({ mode: 'strength', text: `Ignore ${axe.strengthWaive} Strength` });
+
+  const group = mk('market-thunder-axe-options');
+  opts.forEach(o => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    const active = axe.mode === o.mode;
+    btn.className = `market-thunder-axe-chip ${active ? 'is-active' : ''}`;
+    btn.textContent = o.text;
+    btn.title = 'Thunder Axe: ignore part of this monster\u2019s face-value cost when slaying.';
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      setThunderAxeModeForCard(card, o.mode);
+      const overlay = document.getElementById('card-modal-overlay');
+      if (overlay && overlay._refreshFromLiveState) overlay._refreshFromLiveState();
+    });
+    group.appendChild(btn);
+  });
+  row.appendChild(group);
+
+  const hint = mk('market-thunder-axe-hint');
+  hint.textContent = 'Reduces only the printed cost — magic paid as wild Strength is never waived.';
   row.appendChild(hint);
 
   panel.appendChild(row);
@@ -1071,6 +1188,7 @@ function appendMarketActionUI(infoEl, card, ctx) {
   fieldsRow.appendChild(payWrap);
   panel.appendChild(fieldsRow);
   trackMarketPayEdits(payWrap);
+  appendThunderAxeUI(panel, card, ctx);
   appendTomePaymentUI(panel, card, ctx);
 
   const btnRow = mk('market-primary-actions');
@@ -1136,6 +1254,8 @@ function appendMarketActionUI(infoEl, card, ctx) {
       };
       if (card.monster_id != null) action.monster_id = Number(card.monster_id);
       if (card.event_id   != null) action.event_id   = Number(card.event_id);
+      const axeMode = ctx.thunderAxe ? ctx.thunderAxe.mode : 'none';
+      if (axeMode === 'magic' || axeMode === 'strength') action.thunder_axe = axeMode;
       const tp = tomePaymentForSubmit(ctx, p);
       if (tp) action.tome_payment = tp;
       confirmAndPostGameAction(
@@ -1242,6 +1362,14 @@ function effectiveMarketCardCosts(card, ctx) {
     if (ctx.scalingHint) {
       out.strengthTip = ctx.scalingHint;
       out.magicTip = ctx.scalingHint;
+    }
+    const axe = ctx.thunderAxe;
+    if (axe && axe.mode === 'strength' && axe.strengthWaive > 0) {
+      out.strength = Math.max(0, out.strength - axe.strengthWaive);
+      out.strengthTip = `${axe.name}: ignoring ${axe.strengthWaive} Strength`;
+    } else if (axe && axe.mode === 'magic' && axe.magicWaive > 0) {
+      out.magic = Math.max(0, out.magic - axe.magicWaive);
+      out.magicTip = `${axe.name}: ignoring ${axe.magicWaive} Magic`;
     }
   }
   return out;

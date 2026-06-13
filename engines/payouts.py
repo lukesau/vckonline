@@ -140,7 +140,16 @@ class PayoutsEngine:
             req_worker = int(getattr(top, "worker_count", 0) or 0)
             if have["shadow"] < req_shadow or have["holy"] < req_holy or \
                have["soldier"] < req_soldier or have["worker"] < req_worker:
-                continue
+                # Evermap relic: still offer the domain when the shortfall is
+                # exactly one role icon (build_domain applies the same waiver).
+                total_missing = (
+                    max(0, req_shadow - have["shadow"])
+                    + max(0, req_holy - have["holy"])
+                    + max(0, req_soldier - have["soldier"])
+                    + max(0, req_worker - have["worker"])
+                )
+                if not (total_missing == 1 and self.game.relics.player_can_ignore_one_build_requirement(player)):
+                    continue
             gold_cost = int(getattr(top, "gold_cost", 0) or 0)
             if has_pratchett:
                 gold_cost = max(0, gold_cost - 1)
@@ -313,6 +322,11 @@ class PayoutsEngine:
                     "noble_id": int(getattr(noble, "noble_id", -1) or -1),
                 })
         else:  # monster
+            type_filter = None
+            for token in parts[2:]:
+                low = token.lower()
+                if low.startswith("type="):
+                    type_filter = low.split("=", 1)[1].strip()
             for i, stack in enumerate(list(getattr(self.game, "monster_grid", []) or [])):
                 if not stack:
                     continue
@@ -321,6 +335,10 @@ class PayoutsEngine:
                     continue
                 if getattr(top, "monster_id", None) is None:
                     continue  # Event/Exhausted placeholder — not a valid monster target
+                if type_filter:
+                    monster_type = (getattr(top, "monster_type", "") or "").strip().lower()
+                    if monster_type != type_filter:
+                        continue
                 options.append({
                     "token": "monster.center",
                     "idx": i,
@@ -328,6 +346,7 @@ class PayoutsEngine:
                     "monster_id": int(getattr(top, "monster_id", -1)),
                     "strength_cost": int(getattr(top, "strength_cost", 0) or 0),
                     "magic_cost": int(getattr(top, "magic_cost", 0) or 0),
+                    "monster_type": getattr(top, "monster_type", ""),
                 })
         if not options:
             self.game._log_game_event(
@@ -482,7 +501,7 @@ class PayoutsEngine:
         """Parse `banish_owned <kind> [optional]` and open a self-target prompt.
 
         Grammar (positional, mirrors `return_owned` and `take_owned`):
-          kind:     citizen   (future: monster, ...)
+          kind:     citizen | monster
           optional: literal "optional" flag when the actor may decline
 
         "Banish" is a permanent removal: the chosen card leaves the player's
@@ -500,21 +519,26 @@ class PayoutsEngine:
             return [-9999, 0, 0, 0]
         kind = parts[1].lower()
         optional = any(p.lower() == "optional" for p in parts[2:])
-        if kind not in ("citizen",):
+        if kind not in ("citizen", "monster"):
             return [-9999, 0, 0, 0]
         player = self.game._player_by_id(player_id)
         if not player:
             return [-9999, 0, 0, 0]
-        attr = "owned_citizens"
+        attr = "owned_citizens" if kind == "citizen" else "owned_monsters"
         options = []
         for i, c in enumerate(list(getattr(player, attr, []) or [])):
-            options.append({
-                "token": "citizen.owned",
+            opt = {
+                "token": f"{kind}.owned",
                 "idx": i,
                 "name": getattr(c, "name", "?"),
-                "citizen_id": int(getattr(c, "citizen_id", -1)),
-                "is_flipped": bool(getattr(c, "is_flipped", False)),
-            })
+            }
+            if kind == "citizen":
+                opt["citizen_id"] = int(getattr(c, "citizen_id", -1))
+                opt["is_flipped"] = bool(getattr(c, "is_flipped", False))
+            else:
+                opt["monster_id"] = int(getattr(c, "monster_id", -1))
+                opt["monster_type"] = getattr(c, "monster_type", "")
+            options.append(opt)
         if not options:
             self.game._log_game_event(
                 f"{self.game._player_label(player_id)} had no {kind} to banish; effect skipped."
@@ -549,6 +573,17 @@ class PayoutsEngine:
         del player.owned_citizens[src_idx]
         self.game.banish_pile.append(citizen)
         return citizen
+
+    def _banish_owned_monster(self, player, src_idx):
+        """Remove a monster from `player.owned_monsters[src_idx]` and push to the global banish pile."""
+        owned = list(getattr(player, "owned_monsters", []) or [])
+        if src_idx < 0 or src_idx >= len(owned):
+            return None
+        monster = owned[src_idx]
+        del player.owned_monsters[src_idx]
+        self.game.banish_pile.append(monster)
+        player.owned_monster_attributes = self.game.owned_monster_attributes(player.player_id)
+        return monster
 
     def _execute_flip_citizen_payout(self, command, player_id):
         """Parse `flip_citizen <variant> [optional]` and open the appropriate prompt.
