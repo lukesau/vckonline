@@ -1,0 +1,19 @@
+{
+  "id": "shadowvale",
+  "label": "Shadowvale",
+  "short_label": "Shadowvale",
+  "lobby_selectable": true,
+  "monster_expansion_filters": ["shadowvale"],
+  "citizen_expansion_filters": ["shadowvale"],
+  "exclude_domain_expansions": ["crimsonseas"],
+  "choose_one_citizen_per_roll": true,
+  "optional_starter_expansion": "base",
+  "include_agents": "never",
+  "include_relics": "never",
+  "expansion_only": {
+    "domain_expansion_filters": ["shadowvale"],
+    "exclude_domain_expansions": [],
+    "duke_expansion_filters": ["base", "shadowvale"],
+    "event_expansion_filters": ["shadowvale"]
+  }
+}

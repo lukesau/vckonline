@@ -1,0 +1,20 @@
+{
+  "id": "base",
+  "label": "Base Set",
+  "short_label": "Base Set",
+  "lobby_selectable": true,
+  "monster_query": "select_base_monsters",
+  "citizen_query": "select_base_citizens",
+  "choose_one_citizen_per_roll": true,
+  "exclude_domain_expansions": ["crimsonseas"],
+  "optional_starter_expansion": "base",
+  "include_agents": "never",
+  "include_relics": "never",
+  "expansion_only": {
+    "domain_query": "select_base_domains",
+    "domain_expansion_filters": null,
+    "exclude_domain_expansions": [],
+    "duke_expansion_filters": ["base"],
+    "event_expansion_filters": ["base"]
+  }
+}

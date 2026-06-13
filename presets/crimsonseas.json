@@ -1,0 +1,19 @@
+{
+  "id": "crimsonseas",
+  "label": "Crimson Seas",
+  "short_label": "Crimson Seas",
+  "lobby_selectable": true,
+  "monster_expansion_filters": ["crimsonseas"],
+  "citizen_expansion_filters": ["crimsonseas"],
+  "exclude_domain_expansions": [],
+  "guaranteed_domain_expansion": "crimsonseas",
+  "choose_one_citizen_per_roll": true,
+  "optional_starter_expansion": "crimsonseas",
+  "include_agents": "never",
+  "include_relics": "never",
+  "expansion_only": {
+    "domain_expansion_filters": ["crimsonseas", "base"],
+    "exclude_domain_expansions": [],
+    "event_expansion_filters": ["crimsonseas"]
+  }
+}

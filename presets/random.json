@@ -1,0 +1,12 @@
+{
+  "id": "random",
+  "label": "Random (all implemented cards)",
+  "short_label": "Random",
+  "lobby_selectable": true,
+  "choose_one_citizen_per_roll": true,
+  "event_query": "select_all_events",
+  "apply_implemented_image_filter": true,
+  "exclude_domain_expansions": ["crimsonseas"],
+  "include_agents": "random",
+  "include_relics": "random"
+}

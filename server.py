@@ -27,6 +27,7 @@ from game_serialization import (
     deserialize_save_dict_to_game,
     serialize_game_to_save_dict,
 )
+from preset_registry import lobby_selectable_presets
 
 import build_game_js
 
@@ -137,7 +138,7 @@ manager = ConnectionManager()
 # as their own dropdown option — players reach the live one via `current`.
 # `random` deals from every implemented card across all expansions (see
 # `card_filters.keep_for_random`).
-_VALID_LOBBY_PRESETS = ("current", "june2026", "base", "flamesandfrost", "shadowvale", "crimsonseas", "random", "draft")
+_VALID_LOBBY_PRESETS = lobby_selectable_presets()
 
 # Lobby min-players bounds. The lower bound matches the historical default
 # (the game has always required 2 players); the upper bound matches the

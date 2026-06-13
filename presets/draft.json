@@ -1,0 +1,13 @@
+{
+  "id": "draft",
+  "label": "Draft (vote on monsters & citizens)",
+  "short_label": "Draft",
+  "lobby_selectable": true,
+  "choose_one_citizen_per_roll": false,
+  "event_query": "select_all_events",
+  "apply_implemented_image_filter": true,
+  "exclude_domain_expansions": ["crimsonseas"],
+  "draft": true,
+  "include_agents": "draft",
+  "include_relics": "draft"
+}

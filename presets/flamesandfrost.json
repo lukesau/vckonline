@@ -1,0 +1,19 @@
+{
+  "id": "flamesandfrost",
+  "label": "Flames and Frost",
+  "short_label": "Flames+Frost",
+  "lobby_selectable": true,
+  "monster_expansion_filters": ["flamesandfrost"],
+  "citizen_expansion_filters": ["flamesandfrost"],
+  "exclude_domain_expansions": ["crimsonseas"],
+  "choose_one_citizen_per_roll": true,
+  "optional_starter_expansion": "base",
+  "include_agents": "never",
+  "include_relics": "never",
+  "expansion_only": {
+    "domain_expansion_filters": ["flamesandfrost"],
+    "exclude_domain_expansions": [],
+    "duke_expansion_filters": ["base", "flamesandfrost"],
+    "event_expansion_filters": ["flamesandfrost"]
+  }
+}

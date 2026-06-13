@@ -1,0 +1,10 @@
+{
+  "id": "base2",
+  "label": "Base Set 2",
+  "short_label": "Base2",
+  "lobby_selectable": false,
+  "monster_query": "select_base2_monsters",
+  "citizen_query": "select_base2_citizens",
+  "exclude_domain_expansions": ["crimsonseas"],
+  "optional_starter_expansion": "base"
+}

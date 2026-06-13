@@ -9,11 +9,9 @@ presets — the monster areas and citizens too). This module enumerates both so
 the client can show a full preview of everything that could land on the board
 without actually starting a game.
 
-It deliberately mirrors the pool/filter selection in
-`game_setup.load_game_data`. If you change which cards a preset can deal there,
-update the `_preset_config` table below to match. The two share the
-`card_filters` / `banned_cards` helpers so the implemented/banned rules can't
-drift, only the per-preset query+filter wiring is duplicated.
+It reads the same pool/filter selection as `game_setup.load_game_data` via
+`preset_registry.get_preset_config`. The two share the `card_filters` /
+`banned_cards` helpers so the implemented/banned rules can't drift.
 
 The preview only ever surfaces cards that have art on disk (`has_card_image`),
 since the client renders each as an image thumbnail — a pool card with no image
@@ -25,23 +23,10 @@ import mariadb
 from banned_cards import banned_domain_ids, banned_duke_ids
 from card_filters import has_card_image, is_unimplemented_event, keep_for_random
 from game_setup import (
-    JUNE_2026_CITIZEN_IDS,
-    JUNE_2026_MONSTER_AREAS,
     _filter_monster_areas_for_random,
     _is_optional_starter_row,
 )
-
-# Human-facing names, kept in sync with the lobby dropdown <option> labels.
-_PRESET_LABELS = {
-    "current": "Rotating Set",
-    "june2026": "Rotating Set",
-    "base": "Base Set",
-    "flamesandfrost": "Flames and Frost",
-    "shadowvale": "Shadowvale",
-    "crimsonseas": "Crimson Seas",
-    "random": "Random (all implemented cards)",
-    "draft": "Draft (vote on monsters & citizens)",
-}
+from preset_registry import get_preset_config, preset_label
 
 
 def _connect():
@@ -55,120 +40,8 @@ def _connect():
 
 
 def _preset_config(preset, expansion_only):
-    """Return the pool/filter wiring for `preset` (mirror of game_setup).
-
-    See the module docstring: this duplicates only the per-preset query +
-    expansion-filter selection from `game_setup.load_game_data`'s `match`
-    block, not the deal itself.
-    """
-    cfg = {
-        "monster_query": "select_all_monsters",
-        "monster_expansion_filters": None,
-        "citizen_query": "select_all_citizens",
-        "citizen_expansion_filters": None,
-        "choose_one_citizen_per_roll": False,
-        "domain_query": "select_random_domains",
-        "domain_expansion_filters": None,
-        "exclude_domain_expansions": (),
-        "guaranteed_domain_expansion": None,
-        "duke_query": "select_random_dukes",
-        "duke_expansion_filters": None,
-        "event_query": "select_all_events",
-        "event_expansion_filters": None,
-        "fixed_citizen_ids": None,
-        "fixed_monster_areas": None,
-        "optional_starter_expansion": None,
-        "apply_implemented_image_filter": False,
-        # Whether monsters/citizens/optional-starter are picked by the lobby
-        # draft vote rather than fixed or randomly dealt.
-        "draft": False,
-    }
-
-    if preset == "base":
-        cfg.update(
-            monster_query="select_base_monsters",
-            citizen_query="select_base_citizens",
-            choose_one_citizen_per_roll=True,
-            domain_query="select_random_domains",
-            exclude_domain_expansions=("crimsonseas",),
-            optional_starter_expansion="base",
-        )
-    elif preset in ("june2026", "current"):
-        cfg.update(
-            exclude_domain_expansions=("crimsonseas",),
-            fixed_monster_areas=JUNE_2026_MONSTER_AREAS,
-            fixed_citizen_ids=JUNE_2026_CITIZEN_IDS,
-            optional_starter_expansion="margraves",
-        )
-    elif preset == "flamesandfrost":
-        cfg.update(
-            monster_expansion_filters=("flamesandfrost",),
-            citizen_expansion_filters=("flamesandfrost",),
-            exclude_domain_expansions=("crimsonseas",),
-            choose_one_citizen_per_roll=True,
-            optional_starter_expansion="base",
-        )
-    elif preset == "shadowvale":
-        cfg.update(
-            monster_expansion_filters=("shadowvale",),
-            citizen_expansion_filters=("shadowvale",),
-            exclude_domain_expansions=("crimsonseas",),
-            choose_one_citizen_per_roll=True,
-            optional_starter_expansion="base",
-        )
-    elif preset == "crimsonseas":
-        cfg.update(
-            monster_expansion_filters=("crimsonseas",),
-            citizen_expansion_filters=("crimsonseas",),
-            domain_query="select_random_domains",
-            domain_expansion_filters=None,
-            exclude_domain_expansions=(),
-            guaranteed_domain_expansion="crimsonseas",
-            choose_one_citizen_per_roll=True,
-            optional_starter_expansion="crimsonseas",
-        )
-    elif preset == "random":
-        cfg.update(
-            choose_one_citizen_per_roll=True,
-            apply_implemented_image_filter=True,
-            exclude_domain_expansions=("crimsonseas",),
-        )
-    elif preset == "draft":
-        cfg.update(
-            apply_implemented_image_filter=True,
-            exclude_domain_expansions=("crimsonseas",),
-            draft=True,
-        )
-    else:
-        raise ValueError(f"Unknown preset: {preset}")
-
-    # Lobby "expansion-only" option narrows domains/dukes/events to the
-    # preset's own set (matching game_setup).
-    if expansion_only:
-        if preset == "base":
-            cfg["domain_query"] = "select_base_domains"
-            cfg["domain_expansion_filters"] = None
-            cfg["exclude_domain_expansions"] = ()
-            cfg["duke_expansion_filters"] = ("base",)
-            cfg["event_expansion_filters"] = ("base",)
-        elif preset == "flamesandfrost":
-            cfg["domain_expansion_filters"] = ("flamesandfrost",)
-            cfg["exclude_domain_expansions"] = ()
-            cfg["duke_expansion_filters"] = ("base", "flamesandfrost")
-            cfg["event_expansion_filters"] = ("flamesandfrost",)
-        elif preset == "shadowvale":
-            cfg["domain_expansion_filters"] = ("shadowvale",)
-            cfg["exclude_domain_expansions"] = ()
-            cfg["duke_expansion_filters"] = ("base", "shadowvale")
-            cfg["event_expansion_filters"] = ("shadowvale",)
-        elif preset == "crimsonseas":
-            # Crimson Seas domains stay guaranteed; only the fill pool narrows
-            # to base. Dukes keep the full pool (Crimson Seas ships none).
-            cfg["domain_expansion_filters"] = ("crimsonseas", "base")
-            cfg["exclude_domain_expansions"] = ()
-            cfg["event_expansion_filters"] = ("crimsonseas",)
-
-    return cfg
+    """Return the pool/filter wiring for `preset` (from preset_registry)."""
+    return get_preset_config(preset, expansion_only=expansion_only)
 
 
 def _fetch_pool_rows(cur, proc_name, table_name, expansion_filters):
@@ -339,7 +212,7 @@ def _preview_domains(cur, cfg, players):
     cards = [_card("domain", r["id_domains"], r["name"], r.get("expansion")) for r in rows]
     guaranteed = cfg.get("guaranteed_domain_expansion")
     if guaranteed:
-        guaranteed_label = _PRESET_LABELS.get(guaranteed, guaranteed)
+        guaranteed_label = preset_label(guaranteed)
         note = (
             f"All {guaranteed_label} domains are always dealt; the remaining slots "
             "(5 at 2-4 players, 10 at 5 players) are filled at random from the rest of this pool."
@@ -500,7 +373,7 @@ def load_preset_preview(preset, expansion_only=False, players=4, duke_select_cou
 
     return {
         "preset": preset,
-        "label": _PRESET_LABELS.get(preset, preset),
+        "label": preset_label(preset),
         "expansion_only": bool(expansion_only),
         "players": players,
         "duke_select_count": duke_select_count,

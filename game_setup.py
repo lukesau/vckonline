@@ -6,6 +6,7 @@ from card_filters import is_unimplemented_event, keep_for_random
 from card_filters import is_unimplemented_agent
 from cards import Agent, Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Relic, Starter
 from game_models import Player
+from preset_registry import get_preset_config, include_agents_mode, include_relics_mode
 
 # Domain IDs granted (one extra copy per player) when the lobby's
 # "Debug mode" toggle is on. These are all base-set
@@ -94,15 +95,11 @@ AGENT_SLOT_COUNT = 4
 #     starter exists in the pool, none is dealt and the game simply plays
 #     without a doubles/no-payout trigger.
 
-# "June 2026" rotating preset: a hand-picked board. The monster areas and
-# citizen ids are fixed (drawn from the full cross-expansion pool); domains,
-# dukes, and events are randomized like the other presets (Crimson Seas
-# domains still excluded). The `current` preset ("Rotating" in the
-# lobby) is an alias of whichever dated rotating preset is live — currently
-# this one. `june2026` itself is intentionally not offered as a separate
-# lobby dropdown option; players reach it through the rotating alias.
-JUNE_2026_MONSTER_AREAS = ("Barrens", "Gloom Gyre", "Forest", "Skerry", "Fire Temple")
-JUNE_2026_CITIZEN_IDS = (19, 2, 41, 14, 33, 34, 35, 36, 9, 48)
+# "June 2026" rotating preset constants (sourced from presets/june2026.json).
+# Kept as module-level names for tests and preset_preview back-compat.
+_june2026_cfg = get_preset_config("june2026")
+JUNE_2026_MONSTER_AREAS = tuple(_june2026_cfg.get("fixed_monster_areas") or ())
+JUNE_2026_CITIZEN_IDS = tuple(_june2026_cfg.get("fixed_citizen_ids") or ())
 
 
 def _is_optional_starter_row(row):
@@ -153,15 +150,24 @@ def _choose_one_citizen_per_roll(rows):
     return [random.choice(rows_by_roll[roll]) for roll in sorted(rows_by_roll)]
 
 
+def _resolve_optional_module(mode, draft_selections, draft_key):
+    mode = (mode or "never").strip().lower()
+    if mode == "always":
+        return True
+    if mode == "random":
+        return random.random() < 0.5
+    if mode == "draft":
+        return bool((draft_selections or {}).get(draft_key))
+    return False
+
+
 def _should_include_agents(preset, debug_mode=False, draft_selections=None):
     """True when this game should deal the Agents module onto the board."""
     if debug_mode and (preset or "").strip().lower() != "crimsonseas":
         return True
-    if (preset or "").strip().lower() == "random":
-        return random.random() < 0.5
-    if (preset or "").strip().lower() == "draft":
-        return bool((draft_selections or {}).get("include_agents"))
-    return False
+    return _resolve_optional_module(
+        include_agents_mode(preset), draft_selections, "include_agents"
+    )
 
 
 def _agent_from_row(row):
@@ -181,11 +187,9 @@ def _should_include_relics(preset, debug_mode=False, draft_selections=None):
     always includes relics (except Crimson Seas)."""
     if debug_mode and (preset or "").strip().lower() != "crimsonseas":
         return True
-    if (preset or "").strip().lower() == "random":
-        return random.random() < 0.5
-    if (preset or "").strip().lower() == "draft":
-        return bool((draft_selections or {}).get("include_relics"))
-    return False
+    return _resolve_optional_module(
+        include_relics_mode(preset), draft_selections, "include_relics"
+    )
 
 
 def _relic_count_per_player(duke_select_count, n_players, available_relics=None):
@@ -453,149 +457,24 @@ def load_game_data(
     actions_remaining = 0
     harvest_processed = False
     pending_harvest_choices = []
-    match preset:
-        case "base":
-            monster_query = "select_base_monsters"
-            citizen_query = "select_base_citizens"
-            choose_one_citizen_per_roll = True
-            domain_query = "select_random_domains"
-            exclude_domain_expansions = ("crimsonseas",)
-            duke_query = "select_random_dukes"
-            optional_starter_expansion = "base"
-        case "june2026" | "current":
-            # Rotating preset (current = "Rotating", aliased to the
-            # live dated preset). Fixed monster areas + citizens; domains,
-            # dukes, and events randomized across all expansions (no Crimson
-            # Seas domains). Pulled from the full pool so the curated areas
-            # and citizen ids can span expansions.
-            monster_query = "select_all_monsters"
-            citizen_query = "select_all_citizens"
-            choose_one_citizen_per_roll = False
-            domain_query = "select_random_domains"
-            duke_query = "select_random_dukes"
-            exclude_domain_expansions = ("crimsonseas",)
-            fixed_monster_areas = JUNE_2026_MONSTER_AREAS
-            fixed_citizen_ids = JUNE_2026_CITIZEN_IDS
-            # June 2026 hands out the Margraves -1/-1 starter (Margrave).
-            optional_starter_expansion = "margraves"
-        case "base1":
-            monster_query = "select_base1_monsters"
-            citizen_query = "select_base1_citizens"
-            domain_query = "select_random_domains"
-            exclude_domain_expansions = ("crimsonseas",)
-            optional_starter_expansion = "base"
-        case "base2":
-            monster_query = "select_base2_monsters"
-            citizen_query = "select_base2_citizens"
-            domain_query = "select_random_domains"
-            exclude_domain_expansions = ("crimsonseas",)
-            optional_starter_expansion = "base"
-        case "flamesandfrost":
-            # Preset rules:
-            # - starters: core Peasant/Knight plus the base -1/-1 starter (Herald);
-            #   Flames & Frost has no dedicated -1/-1 starter of its own.
-            # - dukes: every duke (random across all expansions; default query)
-            # - monsters/citizens: expansion = "flamesandfrost"
-            # - domains: every expansion except Crimson Seas (random pool)
-            # - events: every expansion (default all-events pool)
-            monster_expansion_filters = ("flamesandfrost",)
-            citizen_expansion_filters = ("flamesandfrost",)
-            exclude_domain_expansions = ("crimsonseas",)
-            choose_one_citizen_per_roll = True
-            optional_starter_expansion = "base"
-        case "shadowvale":
-            # Preset rules:
-            # - starters: core Peasant/Knight plus the base -1/-1 starter (Herald);
-            #   Shadowvale has no dedicated -1/-1 starter of its own.
-            # - dukes: every duke (random across all expansions; default query)
-            # - monsters/citizens: expansion = "shadowvale"
-            # - domains: every expansion except Crimson Seas (random pool)
-            # - events: every expansion (default all-events pool)
-            monster_expansion_filters = ("shadowvale",)
-            citizen_expansion_filters = ("shadowvale",)
-            exclude_domain_expansions = ("crimsonseas",)
-            choose_one_citizen_per_roll = True
-            optional_starter_expansion = "base"
-        case "crimsonseas":
-            # Crimson Seas expansion preset:
-            # - monsters/citizens: expansion = "crimsonseas"
-            # - domains: always all of the Crimson Seas domains, then the
-            #   remaining slots filled at random. In "All" mode (default) the
-            #   fill pool is the full implemented domain pool; "Expansion" mode
-            #   (expansion_only) narrows the fill to base domains only (below).
-            # - dukes: Crimson Seas ships no dukes, so always use the full
-            #   cross-expansion pool for both All and Expansion modes.
-            # - events: every expansion (default all-events pool); the
-            #   expansion_only option scopes them to Crimson Seas like the other
-            #   expansion presets.
-            # - starters: core Peasant/Knight plus the Crimson Seas -1/-1 starter
-            #   (Coxswain; see `_choose_optional_starter`). The default starter
-            #   query already loads all starters. If Crimson Seas has no -1/-1
-            #   starter in the pool yet, the game plays without one.
-            # Banned cards are still filtered by the shared domain/duke deal.
-            monster_expansion_filters = ("crimsonseas",)
-            citizen_expansion_filters = ("crimsonseas",)
-            domain_query = "select_random_domains"
-            domain_expansion_filters = None
-            exclude_domain_expansions = ()
-            guaranteed_domain_expansion = "crimsonseas"
-            duke_query = "select_random_dukes"
-            choose_one_citizen_per_roll = True
-            optional_starter_expansion = "crimsonseas"
-        case "random":
-            # Pull every card (every expansion) and let
-            # card_filters.keep_for_random + the existing
-            # _choose_one_citizen_per_roll / area-of-5 / sample-15 /
-            # banned-cards filters narrow the pool down to a deal.
-            monster_query = "select_all_monsters"
-            citizen_query = "select_all_citizens"
-            choose_one_citizen_per_roll = True
-            domain_query = "select_random_domains"
-            duke_query = "select_random_dukes"
-            event_query = "select_all_events"
-            apply_implemented_image_filter = True
-            exclude_domain_expansions = ("crimsonseas",)
-        case "draft":
-            # Same pool as random, but monsters/citizens are pre-selected by
-            # the lobby draft phase and passed in via draft_selections.
-            # Domains, dukes, and events are still randomised like random.
-            monster_query = "select_all_monsters"
-            citizen_query = "select_all_citizens"
-            choose_one_citizen_per_roll = False  # selections are pre-determined
-            domain_query = "select_random_domains"
-            duke_query = "select_random_dukes"
-            event_query = "select_all_events"
-            apply_implemented_image_filter = True
-            exclude_domain_expansions = ("crimsonseas",)
-        case _:
-            raise ValueError(f"Unknown game data preset: {preset}")
-    # Lobby option: restrict domains/dukes/events to the preset's expansion set
-    # (plus base dukes for expansion presets that don't have enough dukes
-    # alone). Default (off) draws domains/dukes/events from the full pool.
-    if expansion_only:
-        if preset == "base":
-            domain_query = "select_base_domains"
-            domain_expansion_filters = None
-            exclude_domain_expansions = ()
-            duke_expansion_filters = ("base",)
-            event_expansion_filters = ("base",)
-        elif preset == "flamesandfrost":
-            domain_expansion_filters = ("flamesandfrost",)
-            exclude_domain_expansions = ()
-            duke_expansion_filters = ("base", "flamesandfrost")
-            event_expansion_filters = ("flamesandfrost",)
-        elif preset == "shadowvale":
-            domain_expansion_filters = ("shadowvale",)
-            exclude_domain_expansions = ()
-            duke_expansion_filters = ("base", "shadowvale")
-            event_expansion_filters = ("shadowvale",)
-        elif preset == "crimsonseas":
-            # Still guarantee every Crimson Seas domain (guaranteed_domain_expansion
-            # stays set); only the fill pool changes, narrowing to base domains.
-            # Dukes stay on the full pool — Crimson Seas has none of its own.
-            domain_expansion_filters = ("crimsonseas", "base")
-            exclude_domain_expansions = ()
-            event_expansion_filters = ("crimsonseas",)
+    cfg = get_preset_config(preset, expansion_only=expansion_only)
+    monster_query = cfg["monster_query"]
+    citizen_query = cfg["citizen_query"]
+    choose_one_citizen_per_roll = cfg["choose_one_citizen_per_roll"]
+    domain_query = cfg["domain_query"]
+    duke_query = cfg["duke_query"]
+    event_query = cfg["event_query"]
+    monster_expansion_filters = cfg["monster_expansion_filters"]
+    citizen_expansion_filters = cfg["citizen_expansion_filters"]
+    domain_expansion_filters = cfg["domain_expansion_filters"]
+    duke_expansion_filters = cfg["duke_expansion_filters"]
+    event_expansion_filters = cfg["event_expansion_filters"]
+    exclude_domain_expansions = cfg["exclude_domain_expansions"]
+    guaranteed_domain_expansion = cfg["guaranteed_domain_expansion"]
+    fixed_citizen_ids = cfg["fixed_citizen_ids"]
+    fixed_monster_areas = cfg["fixed_monster_areas"]
+    optional_starter_expansion = cfg["optional_starter_expansion"]
+    apply_implemented_image_filter = cfg["apply_implemented_image_filter"]
     try:
         my_connect = mariadb.connect(
             user="vckonline", password="vckonline", host="127.0.0.1", database="vckonline", port=3306
