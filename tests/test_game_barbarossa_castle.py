@@ -139,6 +139,52 @@ class BarbarossaCastleTests(unittest.TestCase):
         self.assertEqual(len(prc.get("options")), 1)
         self.assertEqual(prc["options"][0]["idx"], 1)
 
+    def test_granted_via_reward_keeps_noble_prompt(self):
+        """Slaying a `<domains>` monster (e.g. Water Elemental) and taking
+        Barbarossa Castle as the free domain must still open — and keep open —
+        the noble-banish prompt. Regression for the bug where the
+        choose_domain_reward handler force-resumed the activation's stashed
+        `choose g 3 s 3 m 3` leg, clobbering the noble prompt so no noble was
+        ever banished."""
+        game, players = make_game()
+        p = players[0]
+
+        # Place Barbarossa face-up + accessible in a center domain stack, and
+        # open the grant-domain reward prompt as the `<domains>` slay reward would.
+        barbarossa = make_barbarossa()
+        barbarossa.toggle_visibility(True)
+        barbarossa.toggle_accessibility(True)
+        game.domain_grid[0] = [barbarossa]
+        game.pending_required_choice = {
+            "kind": "grant_domain_reward",
+            "player_id": p.player_id,
+            "source_name": "Water Elemental",
+            "options": [{"stack_idx": 0, "domain_id": 68, "name": "Barbarossa Castle"}],
+        }
+        game.action_required["id"] = p.player_id
+        game.action_required["action"] = "choose_domain_reward"
+
+        nobles_before = list(game.noble_slots)
+
+        # Take Barbarossa as the free domain.
+        game.act_on_required_action(p.player_id, "grant_domain 1")
+
+        # The noble-banish prompt must still be the standing prompt — not the
+        # Wild choice leg.
+        self.assertEqual(game.action_required.get("action"), "choose_owned_card")
+        prc = game.pending_required_choice
+        self.assertEqual(prc.get("kind"), "banish_center_card")
+        self.assertEqual(prc.get("card_kind"), "noble")
+        self.assertEqual(len(prc.get("options")), 3)
+        # Nobles untouched until the player actually banishes one.
+        self.assertEqual(game.noble_slots, nobles_before)
+
+        # Resolving the noble banish then drains the stashed Wild-choice leg.
+        banished = game.noble_slots[0]
+        game.act_on_required_action(p.player_id, "choose_owned_card 1")
+        self.assertIn(banished, game.banish_pile)
+        self.assertEqual(game.action_required.get("action"), "choose g 3 s 3 m 3")
+
 
 if __name__ == "__main__":
     unittest.main()

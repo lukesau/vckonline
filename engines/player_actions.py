@@ -418,11 +418,19 @@ class PlayerActionsEngine:
                 self.game.action_required["action"] = ""
                 self.game.action_required["id"] = self.game.game_id
                 self.game.payouts._apply_grant_domain_choice(player_id, stack_idx_dr)
-                # If `<domains>` was a leg of a compound payout (e.g. a
-                # monster `special_reward = "<domains> + <citizens>"`), drain
-                # the next leg now. If that leg opens its own follow-up
-                # prompt, leave it standing instead of letting the domain
-                # activation resume clobber it.
+                # The granted domain's own activation effect may open a
+                # follow-up prompt and stash its own continuation — e.g.
+                # Barbarossa Castle's `banish_center noble + choose g 3 s 3 m 3`
+                # opens the noble-banish prompt first and stashes the `choose`
+                # leg. Leave that prompt standing: its handler resumes the
+                # stashed continuation. Draining the continuation here would
+                # clobber the just-opened prompt with the domain's own later
+                # leg (the bug that made Barbarossa skip its noble banish).
+                if (self.game.action_required or {}).get("action", ""):
+                    return
+                # No prompt opened by the activation: drain any leg stashed by
+                # a compound monster reward (e.g. `<citizens> + <domains>`),
+                # then run the standard activation follow-up.
                 self.game.payouts._resume_payout_continuation()
                 if (self.game.action_required or {}).get("action", ""):
                     return
@@ -1507,9 +1515,10 @@ class PlayerActionsEngine:
                     self.game.pending_required_choice = None
                     self.game.payouts._resume_payout_continuation()
                     return
+                banish_where = "Amarynth" if card_kind == "noble" else "the center stacks"
                 self.game._log_game_event(
-                    f"{self.game._player_label(player_id)} banished center-stack {card_kind} "
-                    f"\"{card_label}\" to the banish pile."
+                    f"{self.game._player_label(player_id)} banished {card_kind} "
+                    f"\"{card_label}\" from {banish_where} to the banish pile."
                 )
                 self.game.action_required["action"] = ""
                 self.game.action_required["id"] = self.game.game_id

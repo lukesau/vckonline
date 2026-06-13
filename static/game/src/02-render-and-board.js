@@ -1628,6 +1628,14 @@ function openNaeAerieTomesModal() {
   });
 }
 
+async function postSailModalAction(action) {
+  dismissCardInspectModal();
+  const ok = await postGameAction(action);
+  if (ok && typeof renderPromptModal === 'function' && latestGameState) {
+    renderPromptModal(latestGameState);
+  }
+}
+
 // Sail-to-Amarynth: rescue 1 Noble from a face-up slot. Costs 1 map plus
 // (9 + nobles already in your tableau) of one chosen resource type.
 function openAmarynthNobleModal(slotIndex) {
@@ -1716,8 +1724,7 @@ function openAmarynthNobleModal(slotIndex) {
           item.addEventListener('click', () => {
             const action = { player_id: PLAYER_ID, action_type: 'rescue_noble', slot_index: slotIndex, resource: res };
             if (tomeApplied > 0) action.tome_payment = { gold: 0, strength: 0, magic: 0, [res]: tomeApplied };
-            postGameAction(action);
-            dismissCardInspectModal();
+            postSailModalAction(action);
           });
         } else {
           item.classList.add('is-disabled');
@@ -1835,8 +1842,7 @@ function openExekratysSailModal() {
       if (enabled) {
         item.classList.add('sail-clickable');
         item.addEventListener('click', () => {
-          postGameAction({ player_id: PLAYER_ID, action_type: 'sail_exekratys', resource: res });
-          dismissCardInspectModal();
+        postSailModalAction({ player_id: PLAYER_ID, action_type: 'sail_exekratys', resource: res });
         });
       } else {
         item.classList.add('is-disabled');
@@ -2031,8 +2037,7 @@ function openSailShopModal(cfg) {
       if (tGold > 0 || tMagic > 0) {
         action.tome_payment = { gold: tGold, strength: 0, magic: tMagic };
       }
-      postGameAction(action);
-      dismissCardInspectModal();
+      postSailModalAction(action);
     });
     const cancelBtn = promptButton('Cancel', () => dismissCardInspectModal(), true);
     const actions = mk('sail-shop-actions');

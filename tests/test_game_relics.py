@@ -689,6 +689,37 @@ class RelicBonusActionEffectTests(unittest.TestCase):
         self.assertNotEqual(game.action_required.get("action"), "may_recruit")
         self.assertIsNone(game.pending_bonus_recruit)
 
+    def test_st_aquilas_last_action_recruit_advances_turn(self):
+        # Regression: an "as an action" relic used as the player's LAST action
+        # opens a may_recruit bonus prompt; completing the bonus recruit must end
+        # the turn. The server skips finish_turn when the bonus is consumed, so
+        # resolve_bonus_recruit_if_consumed has to advance the seat itself.
+        grid = [[_make_citizen(40, "Peasant", gold_cost=1)]] + [[] for _ in range(9)]
+        game = _make_effect_game("g 1 + recruit", "St. Aquila's Statue",
+                                 player_resources={"gold_score": 5},
+                                 citizen_grid=grid, consumes_action=True,
+                                 actions_remaining=1)
+        # Mirror the server: spend the action, resolve the relic, then complete
+        # the free recruit through the pending_bonus_recruit path.
+        self.assertTrue(game.consume_player_action("p1", action_type="use_relic"))
+        game.use_relic("p1")
+        game.finish_turn_if_no_actions_remaining()
+        self.assertEqual(game.action_required.get("action"), "may_recruit")
+
+        self.assertTrue(game.consume_player_action("p1", action_type="hire_citizen"))
+        game.hire_citizen("p1", 40, 1, 0, 0)
+        consumed = game.resolve_bonus_recruit_if_consumed()
+        self.assertTrue(consumed)
+        if not consumed:
+            game.finish_turn_if_no_actions_remaining()
+
+        # The turn must have advanced off p1 rather than hanging on a cleared,
+        # action-less prompt.
+        self.assertEqual([c.name for c in game.player_list[0].owned_citizens], ["Peasant"])
+        self.assertEqual(game.turn_index, 1)
+        self.assertNotEqual(game.action_required.get("action"), "may_recruit")
+        self.assertIsNone(game.pending_bonus_recruit)
+
     def test_cornelius_ring_gains_gold_and_opens_domain_build_prompt(self):
         grid = [[_make_domain(60, "Test Keep", gold_cost=3)]] + [[] for _ in range(4)]
         game = _make_effect_game("g 1 + build_domain", "Cornelius Ring",

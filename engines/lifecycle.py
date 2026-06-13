@@ -431,6 +431,12 @@ class LifecycleEngine:
             ar["id"] = self.game.game_id
         self.game.pending_required_choice = None
         self.game.domain_effects._resume_after_domain_activation_follow_up()
+        # The action that granted the bonus may have been the player's last one.
+        # _resume_* clears the prompt (and fires end-of-action domains) but does
+        # not advance the seat when actions are exhausted; advance_tick finishes
+        # the turn. It self-guards (no-op while actions remain or a prompt is
+        # still open) and does not re-fire the end-of-action queue.
+        self.advance_tick()
         return True
 
     def resolve_bonus_recruit_if_consumed(self):
@@ -451,6 +457,12 @@ class LifecycleEngine:
             ar["id"] = self.game.game_id
         self.game.pending_required_choice = None
         self.game.domain_effects._resume_after_domain_activation_follow_up()
+        # The action that granted the bonus may have been the player's last one.
+        # _resume_* clears the prompt (and fires end-of-action domains) but does
+        # not advance the seat when actions are exhausted; advance_tick finishes
+        # the turn. It self-guards (no-op while actions remain or a prompt is
+        # still open) and does not re-fire the end-of-action queue.
+        self.advance_tick()
         return True
 
     def finish_turn_if_no_actions_remaining(self):

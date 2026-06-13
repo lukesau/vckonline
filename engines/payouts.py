@@ -348,9 +348,12 @@ class PayoutsEngine:
                     "magic_cost": int(getattr(top, "magic_cost", 0) or 0),
                     "monster_type": getattr(top, "monster_type", ""),
                 })
+        # Nobles live in the Amarynth slots, not a center grid; label the log
+        # accordingly so Barbarossa Castle doesn't read as "center-stack noble".
+        where = "Amarynth" if kind == "noble" else "the center stacks"
         if not options:
             self.game._log_game_event(
-                f"{self.game._player_label(player_id)} had no center-stack {kind} to banish; effect skipped."
+                f"{self.game._player_label(player_id)} had no {kind} in {where} to banish; effect skipped."
             )
             return [0, 0, 0, 0]
         self.game.action_required["id"] = player_id
@@ -363,7 +366,7 @@ class PayoutsEngine:
             "allow_skip": optional,
         }
         self.game._log_game_event(
-            f"{self.game._player_label(player_id)} is choosing a center-stack {kind} to banish."
+            f"{self.game._player_label(player_id)} is choosing a {kind} from {where} to banish."
         )
         return [0, 0, 0, 0]
 
