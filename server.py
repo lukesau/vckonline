@@ -2125,6 +2125,13 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             game.finish_turn_if_no_actions_remaining()
             should_snapshot = True
 
+        elif request.action_type == "use_relic":
+            try:
+                game.use_relic(request.player_id)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            should_snapshot = True
+
         elif request.action_type == "slay_monster":
             if request.monster_id is None and request.event_id is None:
                 raise HTTPException(status_code=400, detail="monster_id or event_id required")

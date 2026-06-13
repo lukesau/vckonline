@@ -194,7 +194,7 @@ function tableauGroupsForPlayer(player) {
     ['Domains', ['owned_domains']],
     ['Citizens', ['owned_citizens']],
     ['Monsters', ['owned_monsters']],
-    ['Starters', ['owned_starters', 'owned_dukes', 'owned_relics']],
+    ['Starters', ['owned_starters', 'owned_dukes']],
   ];
   const groups = defs
     .map(([label, keys]) => ({
@@ -214,6 +214,18 @@ function tableauGroupsForPlayer(player) {
 // Crimson Seas tableau section: a single column split into 3 equal cells
 // (Nobles top, Tomes middle, Goods bottom), each 1/3 of the 2-card strip height.
 // Always rendered in Crimson Seas games so the layout is visible even when empty.
+// The kept relic, rendered in its own unlabeled tableau section. Returns null
+// when the player has no relic (module disabled, or pre-selection cleared).
+function makeRelicTableauSection(player, cardMode) {
+  const relics = (player && Array.isArray(player.owned_relics)) ? player.owned_relics : [];
+  if (!relics.length) return null;
+  const grp = mk('card-group relic-group');
+  const stacksWrap = mk('card-group-stacks');
+  relics.forEach(r => stacksWrap.appendChild(makeTableauStack(r, 1, cardMode)));
+  grp.appendChild(stacksWrap);
+  return grp;
+}
+
 function makeCrimsonSeasTableauSection(player) {
   const grp = mk('card-group cs-group');
   const col = mk('cs-column');
@@ -490,10 +502,38 @@ function renderSeatEl(player, state, variant) {
   if (crimsonSeasEnabled(state)) {
     tableau.insertBefore(makeCrimsonSeasTableauSection(player), tableau.firstChild);
   }
+  // The kept relic sits in its own unlabeled section, leftmost of all — ahead
+  // of Domains and the Crimson Seas pieces.
+  const relicSection = makeRelicTableauSection(player, cardMode);
+  if (relicSection) {
+    tableau.insertBefore(relicSection, tableau.firstChild);
+  }
   inner.appendChild(tableau);
   el.appendChild(inner);
+  applyRelicGlow(tableau, player, state);
   wireSeatTableauOpen(el, player);
   return el;
+}
+
+// Highlight the active player's relic when it is still usable this turn. The
+// glow is informational for everyone, but only the owner can actually use it
+// (the click handler in 03-modals.js gates on PLAYER_ID).
+function applyRelicGlow(tableauEl, player, state) {
+  if (!tableauEl || !player) return;
+  if (!isActiveTurnForPlayer(player, state)) return;
+  if (!state || !state.relic_active_available) return;
+  tableauEl.querySelectorAll('.card.card-relic').forEach(cardEl => {
+    cardEl.classList.add('relic-usable');
+  });
+}
+
+// True when the given relic card belongs to the viewer and is usable right now.
+function relicUsableByViewer(card, ownerPlayerId) {
+  const state = latestGameState;
+  if (!state || !card || card.relic_id == null) return false;
+  if (!state.relic_active_available) return false;
+  if (ownerPlayerId == null || !idsMatch(ownerPlayerId, PLAYER_ID)) return false;
+  return idsMatch(state.active_player_id, PLAYER_ID);
 }
 
 function wireSeatTableauOpen(seatEl, player) {
@@ -1387,6 +1427,46 @@ function openEngageAgentModal(slotIndex, agent) {
   });
   const cancelBtn = promptButton('Cancel', () => overlay.remove(), true);
   actions.appendChild(engageBtn);
+  actions.appendChild(cancelBtn);
+  panel.appendChild(actions);
+
+  overlay.appendChild(panel);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+function openUseRelicModal(relic) {
+  const overlay = mk('agent-engage-overlay');
+  const panel = mk('agent-engage-panel');
+
+  const img = document.createElement('img');
+  img.className = 'agent-engage-img';
+  img.src = `/card-image/relic/${relic.relic_id}`;
+  img.alt = relic.name || 'Relic';
+  panel.appendChild(img);
+
+  const title = document.createElement('h3');
+  title.textContent = `Use ${relic.name || 'Relic'}?`;
+  panel.appendChild(title);
+
+  const body = mk('agent-engage-body');
+  body.textContent = relic.passive_effect_text || '';
+  panel.appendChild(body);
+
+  const hint = mk('agent-engage-hint');
+  hint.textContent = 'Once per turn.';
+  panel.appendChild(hint);
+
+  const actions = mk('agent-engage-actions');
+  const useBtn = promptButton('Use effect', () => {
+    postGameAction({
+      player_id: PLAYER_ID,
+      action_type: 'use_relic',
+    });
+    overlay.remove();
+  });
+  const cancelBtn = promptButton('Cancel', () => overlay.remove(), true);
+  actions.appendChild(useBtn);
   actions.appendChild(cancelBtn);
   panel.appendChild(actions);
 

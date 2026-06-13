@@ -109,6 +109,13 @@ class Game:
         # Relics optional module: each player keeps one of their dealt relics
         # (held in `player.owned_relics`); no board-level deck is kept.
         self.include_relics = bool(game_state.get('include_relics', False))
+        # Per-player relic usage gate: player_id -> turn_number on which that
+        # player last used their relic. A relic is usable again once the global
+        # turn_number advances, so a player may use it once per turn.
+        self.relic_used_turn = {
+            str(k): int(v)
+            for k, v in (game_state.get('relic_used_turn') or {}).items()
+        }
         # Crimson Seas roll obligation: each 6 rolled (each die plus the dice
         # sum, counted separately) forces the active player to place 1 of their
         # resources into the Exekratys pool. `pending_exekratys_offerings` is the
@@ -524,6 +531,43 @@ class Game:
     def relics_enabled(self):
         """True when the Relics module was dealt at setup."""
         return bool(self.include_relics)
+
+    def relic_available_for(self, player_id):
+        """True when `player_id` may use their relic right now: relics in play,
+        it's their action phase, they hold a relic, and they have not already
+        used it this turn."""
+        if not self.relics_enabled():
+            return False
+        if getattr(self, "phase", None) != "action":
+            return False
+        if player_id != self.current_player_id():
+            return False
+        player = self._player_by_id(player_id)
+        if not player or not list(getattr(player, "owned_relics", []) or []):
+            return False
+        return self.relic_used_turn.get(str(player_id)) != int(self.turn_number)
+
+    def use_relic(self, player_id):
+        """Stub relic activation: validate the once-per-turn gate and mark the
+        relic used. No card effect is applied yet (the glow simply clears)."""
+        if not self.relics_enabled():
+            raise ValueError("Relics are not in play this game.")
+        if player_id != self.current_player_id():
+            raise ValueError("You can only use your relic on your turn.")
+        if getattr(self, "phase", None) != "action":
+            raise ValueError("You can only use your relic during your action phase.")
+        player = self._player_by_id(player_id)
+        relics = list(getattr(player, "owned_relics", []) or []) if player else []
+        if not relics:
+            raise ValueError("You have no relic to use.")
+        if self.relic_used_turn.get(str(player_id)) == int(self.turn_number):
+            raise ValueError("You have already used your relic this turn.")
+        self.relic_used_turn[str(player_id)] = int(self.turn_number)
+        relic = relics[0]
+        self._log_game_event(
+            f"{self._player_label(player_id)} used relic \"{getattr(relic, 'name', '?')}\"."
+        )
+        return True
 
     def _begin_relic_selection_if_pending(self):
         """Open the `choose_relic` concurrent gate if any player still holds

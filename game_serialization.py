@@ -192,6 +192,11 @@ class GameObjectEncoder(JSONEncoder):
                 ],
                 "agents_enabled": bool(getattr(obj, "agents_enabled", lambda: False)()),
                 "relics_enabled": bool(getattr(obj, "relics_enabled", lambda: False)()),
+                "relic_active_available": bool(
+                    getattr(obj, "relic_available_for", lambda _pid: False)(
+                        obj.current_player_id() if hasattr(obj, "current_player_id") else None
+                    )
+                ),
                 "pending_reroll_twilight_used": bool(getattr(obj, "_pending_reroll_twilight_used", False)),
                 "pending_reroll_blood_moon_used": bool(getattr(obj, "_pending_reroll_blood_moon_used", False)),
             }
@@ -294,6 +299,9 @@ def serialize_game_to_save_dict(game):
     base["agents_deck"] = [a.to_dict() for a in (getattr(game, "agents_deck", []) or [])]
     base["include_agents"] = bool(getattr(game, "include_agents", False))
     base["include_relics"] = bool(getattr(game, "include_relics", False))
+    base["relic_used_turn"] = {
+        str(k): int(v) for k, v in (getattr(game, "relic_used_turn", None) or {}).items()
+    }
 
     return base
 

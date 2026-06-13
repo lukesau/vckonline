@@ -1268,6 +1268,25 @@ html, body {
   opacity: 0.65;
 }
 
+/* Relic ready to use this turn: glowing, pulsing border. The owner can click
+   it to open the "use effect" modal; the glow clears once the relic is used. */
+.card.card-relic.relic-usable {
+  cursor: pointer;
+  border-color: rgba(255, 215, 130, 0.95);
+  animation: relic-usable-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes relic-usable-glow {
+  0%, 100% {
+    box-shadow: 0 0 4px 1px rgba(255, 205, 110, 0.55),
+                0 0 10px 2px rgba(255, 180, 70, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 9px 3px rgba(255, 220, 140, 0.95),
+                0 0 20px 6px rgba(255, 190, 90, 0.6);
+  }
+}
+
 .board-agents .agent-card.agent-clickable {
   cursor: pointer;
 }

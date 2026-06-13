@@ -78,6 +78,81 @@ def _make_setup_game(*, relics_per_player=2, dukes_per_player=2, include_relics=
     })
 
 
+def _make_action_game(*, active="p1", turn_number=3, phase="action", relic_used_turn=None,
+                      p1_has_relic=True):
+    """A 2-player game in the action phase with each player holding one kept
+    relic, for exercising the once-per-turn relic-use gate."""
+    p1 = Player("p1", "Player 1")
+    if p1_has_relic:
+        p1.owned_relics = [_make_relic(5, "Gold Bastion")]
+    p2 = Player("p2", "Player 2")
+    p2.owned_relics = [_make_relic(6, "Lich Sword")]
+    return Game({
+        "game_id": "relics-action",
+        "preset": "base",
+        "include_relics": True,
+        "player_list": [p1, p2],
+        "monster_grid": [[] for _ in range(5)],
+        "monster_stack_areas": [],
+        "citizen_grid": [[] for _ in range(10)],
+        "domain_grid": [[] for _ in range(5)],
+        "die_one": 1,
+        "die_two": 2,
+        "die_sum": 3,
+        "exhausted_count": 0,
+        "exhausted_stack": [],
+        "effects": {"roll_phase": [], "harvest_phase": [], "action_phase": []},
+        "action_required": {"id": active, "action": "standard_action"},
+        "game_log": [],
+        "turn_index": 0 if active == "p1" else 1,
+        "turn_number": turn_number,
+        "phase": phase,
+        "actions_remaining": 2,
+        "relic_used_turn": relic_used_turn or {},
+    })
+
+
+class RelicUseGateTests(unittest.TestCase):
+    def test_available_on_owner_action_turn(self):
+        game = _make_action_game()
+        self.assertTrue(game.relic_available_for("p1"))
+        self.assertFalse(game.relic_available_for("p2"))
+
+    def test_use_marks_relic_used_and_clears_availability(self):
+        game = _make_action_game(turn_number=3)
+        game.use_relic("p1")
+        self.assertFalse(game.relic_available_for("p1"))
+        self.assertEqual(game.relic_used_turn.get("p1"), 3)
+
+    def test_cannot_use_twice_in_one_turn(self):
+        game = _make_action_game()
+        game.use_relic("p1")
+        with self.assertRaises(ValueError):
+            game.use_relic("p1")
+
+    def test_cannot_use_off_turn(self):
+        game = _make_action_game(active="p1")
+        with self.assertRaises(ValueError):
+            game.use_relic("p2")
+
+    def test_cannot_use_outside_action_phase(self):
+        game = _make_action_game(phase="roll")
+        self.assertFalse(game.relic_available_for("p1"))
+        with self.assertRaises(ValueError):
+            game.use_relic("p1")
+
+    def test_available_again_next_turn(self):
+        game = _make_action_game(turn_number=4, relic_used_turn={"p1": 3})
+        self.assertTrue(game.relic_available_for("p1"))
+
+    def test_used_turn_round_trips_through_save(self):
+        game = _make_action_game(turn_number=3)
+        game.use_relic("p1")
+        reloaded = deserialize_save_dict_to_game(serialize_game_to_save_dict(game))
+        self.assertEqual(reloaded.relic_used_turn.get("p1"), 3)
+        self.assertFalse(reloaded.relic_available_for("p1"))
+
+
 class ShouldIncludeRelicsTests(unittest.TestCase):
     def test_debug_non_crimsonseas_includes(self):
         self.assertTrue(_should_include_relics("base", debug_mode=True))

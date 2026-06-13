@@ -1168,6 +1168,13 @@ document.addEventListener('click', e => {
   // each catalog duke's projected VP against that player's tableau.
   const seatEl = cardEl.closest('.seat[data-player-id]');
   const ownerPlayerId = seatEl ? seatEl.dataset.playerId : null;
+  // The viewer's own relic, when usable this turn, opens the stub "use effect"
+  // modal instead of the plain inspect modal.
+  if (card.relic_id != null && typeof relicUsableByViewer === 'function'
+      && relicUsableByViewer(card, ownerPlayerId)) {
+    openUseRelicModal(card);
+    return;
+  }
   openCardModal(card, ownerPlayerId);
 });
 
