@@ -257,6 +257,14 @@ class LifecycleEngine:
             aact = str(self.game.action_required.get("action", "") or "") if self.game.action_required else ""
             if aid and aid != self.game.game_id and aact and aact != "standard_action":
                 return False
+            # End-of-action domain prompts (e.g. King Tower) must run before the
+            # turn ends. The standard action handlers reach them via
+            # finish_turn_if_no_actions_remaining(), but an action that opened a
+            # follow-up prompt (e.g. slaying Wendigo and then resolving its "gain
+            # a citizen" reward) resumes through advance_tick instead. Start the
+            # sequence here too; if it opens a prompt, block until it resolves.
+            if self.game.domain_effects._start_action_end_domain_sequence(self.current_player_id()):
+                return False
             finisher = self.game._player_label(self.current_player_id())
             if not self.game.end_game_triggered:
                 reason = self.game.endgame._check_end_game_condition()

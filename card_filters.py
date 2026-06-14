@@ -47,6 +47,8 @@ _CARD_IMAGE_DIRS = {
     "starter": _REPO_ROOT / "images" / "starters",
     "event":   _REPO_ROOT / "images" / "exhausted",
     "noble":   _REPO_ROOT / "images" / "nobles",
+    "agent":   _REPO_ROOT / "images" / "agents",
+    "relic":   _REPO_ROOT / "images" / "relics",
 }
 
 

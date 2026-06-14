@@ -20,11 +20,13 @@ can't be shown and would otherwise render as a broken tile.
 
 import mariadb
 
-from banned_cards import banned_domain_ids, banned_duke_ids
+from banned_cards import banned_domain_ids, banned_duke_ids, banned_relic_ids
 from card_filters import has_card_image, is_unimplemented_event, keep_for_random
 from game_setup import (
+    AGENT_SLOT_COUNT,
     _filter_monster_areas_for_random,
     _is_optional_starter_row,
+    _relic_count_per_player,
 )
 from preset_registry import get_preset_config, preset_label
 
@@ -265,6 +267,86 @@ def _preview_events(cur, cfg, players):
     }
 
 
+def _module_intro(mode):
+    """Lead-in sentence describing whether an optional module is in play.
+
+    `mode` is the preset's include_agents/include_relics setting (one of
+    "always"/"random"/"draft"). Returns the selection badge key plus a
+    sentence that prefixes the module-specific dealing note.
+    """
+    if mode == "draft":
+        return "draft", "Players vote on whether to include this module."
+    if mode == "random":
+        return "random", "There is a 50% chance this module is included."
+    return "fixed", "This module is always included."
+
+
+def _preview_agents(cur, cfg):
+    mode = cfg.get("include_agents") or "never"
+    if mode == "never":
+        return None
+    cur.execute("SELECT * FROM agents ORDER BY id_agents")
+    rows = cur.fetchall() or []
+    rows = [r for r in rows if has_card_image("agent", r.get("id_agents"))]
+    cards = [_card("agent", r["id_agents"], r["name"], r.get("expansion")) for r in rows]
+    if not cards:
+        return None
+    selection, intro = _module_intro(mode)
+    note = (
+        f"{intro} Every agent shown is in play: {AGENT_SLOT_COUNT} are revealed "
+        "face-up at random and the rest form a face-down deck."
+    )
+    return {
+        "key": "agents",
+        "title": "Agents",
+        "selection": selection,
+        "note": note,
+        "cards": cards,
+    }
+
+
+def _preview_relics(cur, cfg, players, duke_select_count):
+    mode = cfg.get("include_relics") or "never"
+    if mode == "never":
+        return None
+    cur.execute("SELECT * FROM relics ORDER BY id_relics")
+    banned = set(banned_relic_ids())
+    rows = [
+        r for r in (cur.fetchall() or [])
+        if int(r["id_relics"]) not in banned
+        and has_card_image("relic", r.get("id_relics"))
+    ]
+    cards = [_card("relic", r["id_relics"], r["name"], r.get("expansion")) for r in rows]
+    if not cards:
+        return None
+    selection, intro = _module_intro(mode)
+    # Relics are always a random subset of the pool: each player is dealt a
+    # handful and keeps exactly one, so a 50/50-or-drafted module still shows
+    # the full candidate pool with a "random" badge.
+    if mode == "always":
+        selection = "random"
+    per_player = _relic_count_per_player(
+        duke_select_count, players, available_relics=len(cards)
+    )
+    if per_player > 0:
+        note = (
+            f"{intro} Each player is dealt {per_player} relics at random from this "
+            "pool and keeps one."
+        )
+    else:
+        note = (
+            f"{intro} Each player is dealt a few relics at random from this pool "
+            "and keeps one."
+        )
+    return {
+        "key": "relics",
+        "title": "Relics",
+        "selection": selection,
+        "note": note,
+        "cards": cards,
+    }
+
+
 def _preview_starters(cur, cfg):
     cur.execute("SELECT * FROM starters ORDER BY id_starters")
     rows = cur.fetchall()
@@ -365,7 +447,10 @@ def load_preset_preview(preset, expansion_only=False, players=4, duke_select_cou
                 _preview_domains(cur, cfg, players),
                 _preview_dukes(cur, cfg, players, duke_select_count),
                 _preview_events(cur, cfg, players),
+                _preview_agents(cur, cfg),
+                _preview_relics(cur, cfg, players, duke_select_count),
             ]
+            sections = [s for s in sections if s is not None]
         finally:
             cur.close()
     finally:
