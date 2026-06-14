@@ -843,6 +843,7 @@ class PayoutsEngine:
         auto_apply_single_choice=True,
         balance_hint=None,
         suppress_exchange_optional_prompt=False,
+        effect_text=None,
     ):
         """
         Execute multiple commands separated by +.
@@ -877,6 +878,7 @@ class PayoutsEngine:
                 auto_apply_single_choice=auto_apply_single_choice,
                 balance_hint=bal,
                 suppress_exchange_optional_prompt=suppress_exchange_optional_prompt,
+                effect_text=effect_text,
             )
             new_action = (self.game.action_required or {}).get("action", "")
             new_concurrent = getattr(self.game, "concurrent_action", None)
@@ -1082,6 +1084,7 @@ class PayoutsEngine:
         auto_apply_single_choice=True,
         balance_hint=None,
         suppress_exchange_optional_prompt=False,
+        effect_text=None,
     ):
         print("executing special payout")
         raw = (command or "").strip()
@@ -1097,6 +1100,7 @@ class PayoutsEngine:
                 auto_apply_single_choice=auto_apply_single_choice,
                 balance_hint=balance_hint,
                 suppress_exchange_optional_prompt=suppress_exchange_optional_prompt,
+                effect_text=effect_text,
             )
         if low.startswith("manipulate_resources"):
             return self.game.domain_effects._execute_manipulate_resources_payout(raw, player_id)
@@ -1131,6 +1135,7 @@ class PayoutsEngine:
                 auto_apply_single_choice=auto_apply_single_choice,
                 balance_hint=balance_hint,
                 suppress_exchange_optional_prompt=suppress_exchange_optional_prompt,
+                effect_text=effect_text,
             )
         if low == "build_domain":
             return self._execute_build_domain_activation_payout(player_id, balance_hint=balance_hint)
@@ -1450,12 +1455,16 @@ class PayoutsEngine:
                     return payout
                 self.game.action_required["id"] = player_id
                 self.game.action_required["action"] = normalized
+                if effect_text:
+                    self.game.action_required["action_text"] = effect_text
                 self.game.pending_required_choice = {
                     "kind": "special_payout_choose",
                     "player_id": player_id,
                     "command": normalized,
                     "options": prompt_options,
                 }
+                if effect_text:
+                    self.game.pending_required_choice["command_text"] = effect_text
             case _:
                 payout[0] = -9999
         print(payout)

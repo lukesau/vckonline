@@ -234,11 +234,16 @@ function makeCrimsonSeasTableauSection(player) {
     ['Tomes',  'tomes',  csTomeEntries(player.owned_tomes)],
     ['Goods',  'goods',  csGoodsEntries(player.owned_goods)],
   ];
+  // Labels stay hidden until the section has something in it: as soon as any of
+  // nobles/tomes/goods has at least one entry, show all three labels.
+  const showLabels = cells.some(([, , entries]) => entries.length > 0);
   cells.forEach(([label, kind, entries]) => {
     const cell = mk(`cs-cell cs-cell-${kind}`);
-    const lbl = mk('cs-cell-label');
-    lbl.textContent = label;
-    cell.appendChild(lbl);
+    if (showLabels) {
+      const lbl = mk('cs-cell-label');
+      lbl.textContent = label;
+      cell.appendChild(lbl);
+    }
     const row = mk('cs-cell-items');
     entries.forEach(({ item, count }) => row.appendChild(makeCrimsonSeasItem(kind, item, count)));
     cell.appendChild(row);
@@ -396,6 +401,10 @@ function render(state) {
   lastRenderedStateJson = incomingJson;
 
   latestGameState = state;
+  if (state && state.phase === 'game_over' && state.final_scores && !gameHasEnded) {
+    gameHasEnded = true;
+    quiesceEndedGame();
+  }
   ensureCardArtVariantsLoaded();
   syncHurryUpDeadlineFromState(state);
   if (typeof refreshOpenCardInspectModal === 'function') {

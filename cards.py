@@ -53,7 +53,8 @@ class Starter(Card):
     def __init__(self, starter_id, name, roll_match1, roll_match2, gold_payout_on_turn, gold_payout_off_turn,
                  strength_payout_on_turn, strength_payout_off_turn, magic_payout_on_turn, magic_payout_off_turn,
                  has_special_payout_on_turn, has_special_payout_off_turn, special_payout_on_turn,
-                 special_payout_off_turn, expansion, activation_trigger=""):
+                 special_payout_off_turn, expansion, activation_trigger="",
+                 special_payout_on_turn_text="", special_payout_off_turn_text=""):
         super().__init__()
         self.starter_id = starter_id
         self.name = name
@@ -69,6 +70,8 @@ class Starter(Card):
         self.has_special_payout_off_turn = has_special_payout_off_turn
         self.special_payout_on_turn = special_payout_on_turn
         self.special_payout_off_turn = special_payout_off_turn
+        self.special_payout_on_turn_text = special_payout_on_turn_text or ""
+        self.special_payout_off_turn_text = special_payout_off_turn_text or ""
         self.expansion = expansion
         # Non-dice activation gate. Empty string -> use roll_match. Substrings
         # "doubles" and "no_payout" are recognized by the harvest engine. A
@@ -95,6 +98,8 @@ class Starter(Card):
             "has_special_payout_off_turn": self.has_special_payout_off_turn,
             "special_payout_on_turn": self.special_payout_on_turn,
             "special_payout_off_turn": self.special_payout_off_turn,
+            "special_payout_on_turn_text": self.special_payout_on_turn_text,
+            "special_payout_off_turn_text": self.special_payout_off_turn_text,
             "expansion": self.expansion,
             "activation_trigger": self.activation_trigger,
         }
@@ -107,7 +112,9 @@ class Starter(Card):
                    data["has_special_payout_on_turn"], data["has_special_payout_off_turn"],
                    data["special_payout_on_turn"],
                    data["special_payout_off_turn"], data["expansion"],
-                   data.get("activation_trigger", ""))
+                   data.get("activation_trigger", ""),
+                   data.get("special_payout_on_turn_text") or "",
+                   data.get("special_payout_off_turn_text") or "")
         return _apply_persisted_card_flags(card, data)
 
 
@@ -118,7 +125,8 @@ class Citizen(Card):
                  vp_payout_on_turn, vp_payout_off_turn,
                  has_special_payout_on_turn,
                  has_special_payout_off_turn, special_payout_on_turn, special_payout_off_turn, special_citizen,
-                 expansion, is_flipped=False):
+                 expansion, is_flipped=False,
+                 special_payout_on_turn_text="", special_payout_off_turn_text=""):
         super().__init__()
         self.citizen_id = citizen_id
         self.name = name
@@ -141,6 +149,8 @@ class Citizen(Card):
         self.has_special_payout_off_turn = has_special_payout_off_turn
         self.special_payout_on_turn = special_payout_on_turn
         self.special_payout_off_turn = special_payout_off_turn
+        self.special_payout_on_turn_text = special_payout_on_turn_text or ""
+        self.special_payout_off_turn_text = special_payout_off_turn_text or ""
         self.special_citizen = special_citizen
         self.expansion = expansion
         self.is_flipped = bool(is_flipped)
@@ -178,6 +188,8 @@ class Citizen(Card):
                 "has_special_payout_off_turn": self.has_special_payout_off_turn,
                 "special_payout_on_turn": self.special_payout_on_turn,
                 "special_payout_off_turn": self.special_payout_off_turn,
+                "special_payout_on_turn_text": self.special_payout_on_turn_text,
+                "special_payout_off_turn_text": self.special_payout_off_turn_text,
                 "special_citizen": self.special_citizen,
                 "expansion": self.expansion}
 
@@ -206,7 +218,9 @@ class Citizen(Card):
                    special_payout_off_turn=dict_["special_payout_off_turn"],
                    special_citizen=dict_["special_citizen"],
                    expansion=dict_["expansion"],
-                   is_flipped=bool(dict_.get("is_flipped", False)))
+                   is_flipped=bool(dict_.get("is_flipped", False)),
+                   special_payout_on_turn_text=dict_.get("special_payout_on_turn_text") or "",
+                   special_payout_off_turn_text=dict_.get("special_payout_off_turn_text") or "")
         return _apply_persisted_card_flags(card, dict_)
 
 
@@ -360,7 +374,7 @@ class Relic(Card):
 class Monster(Card):
     def __init__(self, monster_id, name, area, monster_type, order, strength_cost, magic_cost, vp_reward, gold_reward,
                  strength_reward, magic_reward, has_special_reward, special_reward, has_special_cost, special_cost,
-                 is_extra, expansion):
+                 is_extra, expansion, special_reward_text=""):
         super().__init__()
         self.monster_id = monster_id
         self.name = name
@@ -381,6 +395,7 @@ class Monster(Card):
         self.magic_reward = magic_reward
         self.has_special_reward = has_special_reward
         self.special_reward = special_reward
+        self.special_reward_text = special_reward_text or ""
         self.has_special_cost = has_special_cost
         self.special_cost = special_cost
         self.is_extra = is_extra
@@ -404,6 +419,7 @@ class Monster(Card):
             "magic_reward": self.magic_reward,
             "has_special_reward": self.has_special_reward,
             "special_reward": self.special_reward,
+            "special_reward_text": self.special_reward_text,
             "has_special_cost": self.has_special_cost,
             "special_cost": self.special_cost,
             "is_extra": self.is_extra,
@@ -431,6 +447,7 @@ class Monster(Card):
             d['special_cost'],
             d['is_extra'],
             d['expansion'],
+            d.get("special_reward_text") or "",
         )
         card.extra_strength_cost = _coerce_int(d.get("extra_strength_cost", 0))
         card.extra_magic_cost = _coerce_int(d.get("extra_magic_cost", 0))

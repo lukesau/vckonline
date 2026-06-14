@@ -580,7 +580,7 @@ class PlayerActionsEngine:
                 try:
                     if build_tome_payment and any(build_tome_payment.values()):
                         redeemed = self.redeem_tomes_to_score(player_id, build_tome_payment)
-                    self.build_domain(player_id, domain_id_b, gp=gp, mp=mp)
+                    self.build_domain(player_id, domain_id_b, gp=gp, mp=mp, tome_counts=redeemed)
                 except ValueError as e:
                     if redeemed:
                         self.refund_tomes_from_score(player_id, redeemed)
@@ -717,7 +717,8 @@ class PlayerActionsEngine:
                     if slay_tome_payment and any(slay_tome_payment.values()):
                         redeemed = self.redeem_tomes_to_score(player_id, slay_tome_payment)
                     self.slay_monster(player_id, monster_id, sp, mp, gp,
-                                      event_id=event_id_opt, thunder_axe=thunder_axe_mode)
+                                      event_id=event_id_opt, thunder_axe=thunder_axe_mode,
+                                      tome_counts=redeemed)
                 except ValueError as e:
                     # Payment didn't validate; surface in the log so the player
                     # sees why nothing happened, but keep the prompt open so they
@@ -1790,7 +1791,7 @@ class PlayerActionsEngine:
                     self.game.lifecycle.advance_tick()
                 self.game.lifecycle.finish_turn_if_no_actions_remaining()
 
-    def hire_citizen(self, player_id, citizen_id, gp=0, mp=0, sp=0):
+    def hire_citizen(self, player_id, citizen_id, gp=0, mp=0, sp=0, tome_counts=None):
         """
         Hire the top/accessible citizen from a stack.
 
@@ -1801,6 +1802,9 @@ class PlayerActionsEngine:
         Payment is (gold, magic, strength); only gold and magic may be used (strength must be 0).
         Tomes are redeemed into the player's score before this runs (see
         `redeem_tomes_to_score`), so they appear here as ordinary resources.
+        `tome_counts` is the per-type tome split already redeemed up front; it is
+        used only to render an accurate log (the displayed `before` score is the
+        genuine pre-redeem treasury and the payment shows the tome portion).
         """
         gp, sp, mp = _n(gp), _n(sp), _n(mp)
 
@@ -1856,7 +1860,11 @@ class PlayerActionsEngine:
             has_shilina = self.game._player_has_action_effect_flag(player, "action.newshilinatower")
             _validate_hire_or_domain_gold_payment(player, scaled_cost, gp, sp, mp, allow_strength=has_shilina)
 
-            before = self.game._player_scores_line(player)
+            tc = self._sanitize_tome_payment(tome_counts)
+            before = self.game._player_scores_line(
+                player,
+                gold_delta=-tc["gold"], strength_delta=-tc["strength"], magic_delta=-tc["magic"],
+            )
             player.gold_score = player.gold_score - gp
             player.magic_score = player.magic_score - mp
             player.strength_score = player.strength_score - sp
@@ -1867,15 +1875,16 @@ class PlayerActionsEngine:
             self.game.choose._finalize_citizen_stack_after_claiming_top(citizen_stack)
             after = self.game._player_scores_line(player)
             pay = self.game._format_resource_payment(gp, sp, mp)
+            tome_suffix = self._tome_pay_log_suffix(tc)
             self.game._log_game_event(
-                f"{self.game._player_label(player_id)} hired citizen \"{top.name}\" ({pay}); scores {before} -> {after}"
+                f"{self.game._player_label(player_id)} hired citizen \"{top.name}\" ({pay}){tome_suffix}; scores {before} -> {after}"
             )
             self.game.domain_effects._apply_action_event_gain_passives(player, "hire")
             return
 
         raise ValueError("Citizen not available to hire.")
 
-    def slay_monster(self, player_id, monster_id, sp=0, mp=0, gp=0, event_id=None, thunder_axe=None):
+    def slay_monster(self, player_id, monster_id, sp=0, mp=0, gp=0, event_id=None, thunder_axe=None, tome_counts=None):
         gp, sp, mp = _n(gp), _n(sp), _n(mp)
         payout = [0, 0, 0, 0]
 
@@ -1968,7 +1977,11 @@ class PlayerActionsEngine:
                 player, effective_strength_cost, effective_magic_cost, effective_gold_cost, gp, sp, mp
             )
 
-            before = self.game._player_scores_line(player)
+            tc = self._sanitize_tome_payment(tome_counts)
+            before = self.game._player_scores_line(
+                player,
+                gold_delta=-tc["gold"], strength_delta=-tc["strength"], magic_delta=-tc["magic"],
+            )
             monster_to_add = monster_stack.pop(-1)
             player.gold_score = player.gold_score - gp
             player.strength_score = player.strength_score - sp
@@ -1990,7 +2003,11 @@ class PlayerActionsEngine:
                 # gain_self_gold_pool) can read accumulated tokens off it.
                 self.game._immediate_slay_source_card = top
                 try:
-                    payout = self.game.payouts.execute_special_payout(top.special_reward, player_id)
+                    payout = self.game.payouts.execute_special_payout(
+                        top.special_reward,
+                        player_id,
+                        effect_text=getattr(top, "special_reward_text", "") or "",
+                    )
                 finally:
                     self.game._immediate_slay_source_label = None
                     self.game._immediate_slay_source_card = None
@@ -2029,8 +2046,9 @@ class PlayerActionsEngine:
             after = self.game._player_scores_line(player)
             pay = self.game._format_resource_payment(gp, sp, mp)
             axe_note = f" (Thunder Axe: ignored {thunder_axe_applied})" if thunder_axe_applied else ""
+            tome_suffix = self._tome_pay_log_suffix(tc)
             self.game._log_game_event(
-                f"{self.game._player_label(player_id)} slew \"{monster_to_add.name}\" ({pay}){axe_note}; scores {before} -> {after}"
+                f"{self.game._player_label(player_id)} slew \"{monster_to_add.name}\" ({pay}){axe_note}{tome_suffix}; scores {before} -> {after}"
             )
             # Slaying the Undead Samurai Lord event banishes any of its minions
             # still scattered on the board (the slayer's owned minions were already
@@ -2043,7 +2061,7 @@ class PlayerActionsEngine:
 
         raise ValueError("Monster not available to slay.")
 
-    def build_domain(self, player_id, domain_id, gp=0, mp=0, sp=0):
+    def build_domain(self, player_id, domain_id, gp=0, mp=0, sp=0, tome_counts=None):
         gp, sp, mp = _n(gp), _n(sp), _n(mp)
 
         for domain_stack in self.game.domain_grid:
@@ -2113,7 +2131,11 @@ class PlayerActionsEngine:
                 gold_cost = max(0, gold_cost - self.game.events.blessed_lands_discount())
             _validate_hire_or_domain_gold_payment(player, gold_cost, gp, sp, mp)
 
-            before = self.game._player_scores_line(player)
+            tc = self._sanitize_tome_payment(tome_counts)
+            before = self.game._player_scores_line(
+                player,
+                gold_delta=-tc["gold"], strength_delta=-tc["strength"], magic_delta=-tc["magic"],
+            )
             player.gold_score = player.gold_score - gp
             player.magic_score = player.magic_score - mp
             bought = domain_stack.pop(-1)
@@ -2162,8 +2184,9 @@ class PlayerActionsEngine:
                 self.game.events.reveal_exhausted_onto_stack(domain_stack)
             after = self.game._player_scores_line(player)
             pay = self.game._format_resource_payment(gp, sp, mp)
+            tome_suffix = self._tome_pay_log_suffix(tc)
             self.game._log_game_event(
-                f"{self.game._player_label(player_id)} bought domain \"{top.name}\" ({pay}); scores {before} -> {after}"
+                f"{self.game._player_label(player_id)} bought domain \"{top.name}\" ({pay}){tome_suffix}; scores {before} -> {after}"
             )
             return
 

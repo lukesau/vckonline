@@ -1208,9 +1208,12 @@ html, body {
   margin-bottom: 2px;
 }
 
-/* Agents board tab */
+/* Agents board tab. Cards are sized by WIDTH using the image's intrinsic
+   aspect ratio (width:100% + height:auto), matching the grid sections in
+   .board-use-tabs. The previous height:100% chain collapsed to zero on
+   viewports where the center board has no definite height (e.g. phones in the
+   narrow tabbed layout), which left the section visually blank. */
 .board-agents {
-  height: 100%;
   box-sizing: border-box;
   min-height: 0;
   display: flex;
@@ -1218,42 +1221,44 @@ html, body {
 }
 
 .board-agents .agents-row {
-  flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: row;
-  align-items: stretch;
+  align-items: flex-start;
+  justify-content: center;
   gap: 8px;
   padding: 6px 4px;
   overflow-x: auto;
 }
 
 .board-agents .agent-slot {
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-width: 0;
+  /* Cap each slot at native card width so wide viewports get side padding
+     instead of oversized cards (mirrors .board-use-tabs .grid-row slots). */
+  max-width: var(--card-native-w);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
 }
 
 .board-agents .agent-slot-empty {
-  flex: 0 0 auto;
+  flex: 0 0 0;
+  max-width: 0;
   width: 0;
 }
 
 .board-agents .agent-card {
-  display: flex;
-  height: 100%;
-  max-height: 100%;
+  display: block;
+  width: 100%;
   border-radius: 8px;
   overflow: hidden;
   box-sizing: border-box;
 }
 
 .board-agents .agent-card-img {
-  height: 100%;
-  max-height: 100%;
-  width: auto;
+  width: 100%;
+  height: auto;
   object-fit: contain;
   border-radius: 8px;
   display: block;
@@ -2296,6 +2301,7 @@ html, body {
 }
 
 .game-over-panel {
+  position: relative;
   background: #1a2a1a;
   border: 2px solid var(--gold);
   border-radius: 12px;
@@ -2306,6 +2312,72 @@ html, body {
   max-height: min(88vh, 640px);
   display: flex;
   flex-direction: column;
+}
+
+.game-over-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0 10px;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+.game-over-close:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+/* Floating affordance shown after the player dismisses the results to peek the
+ * board; brings the game-over panel back. */
+.game-over-reopen-btn {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 401;
+  appearance: none;
+  border: 1px solid var(--gold);
+  background: rgba(26, 42, 26, 0.95);
+  color: var(--gold);
+  font-size: 14px;
+  font-weight: 800;
+  padding: 10px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.game-over-reopen-btn:hover {
+  color: #fff;
+  border-color: #fff;
+}
+
+.game-over-footer {
+  flex-shrink: 0;
+}
+.game-over-footer-note {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 14px;
+  line-height: 1.4;
+}
+.game-over-footer .game-shutdown-actions {
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.conn-status-ended {
+  color: var(--muted);
 }
 
 .game-over-title {

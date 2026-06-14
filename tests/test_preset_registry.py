@@ -58,9 +58,9 @@ class PresetRegistryTests(unittest.TestCase):
 
     def test_june2026_includes_agents_and_relics(self):
         self.assertEqual(include_agents_mode("june2026"), "always")
-        self.assertEqual(include_relics_mode("june2026"), "always")
+        self.assertEqual(include_relics_mode("june2026"), "never")
         self.assertEqual(include_agents_mode("current"), "always")
-        self.assertEqual(include_relics_mode("current"), "always")
+        self.assertEqual(include_relics_mode("current"), "never")
 
     def test_random_and_draft_modes(self):
         self.assertEqual(include_agents_mode("random"), "random")

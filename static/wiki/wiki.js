@@ -172,14 +172,21 @@
 
     const chooser = document.createElement("div");
     chooser.className = "wiki-alt-chooser";
-    chooser.addEventListener("click", (e) => e.stopPropagation());
+    chooser.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
 
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "wiki-alt-chooser-close";
     closeBtn.setAttribute("aria-label", "Close chooser");
     closeBtn.textContent = "\u00d7";
-    closeBtn.addEventListener("click", (e) => { e.stopPropagation(); chooser.remove(); });
+    closeBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      chooser.remove();
+    });
 
     const grid = document.createElement("div");
     grid.className = "wiki-alt-chooser-grid";
@@ -198,6 +205,7 @@
       lbl.textContent = label;
       opt.append(thumb, lbl);
       opt.addEventListener("click", (e) => {
+        e.preventDefault();
         e.stopPropagation();
         setVariant(token);
         chooser.remove();

@@ -514,6 +514,7 @@ def load_game_data(
                 row["special_cost"],
                 row["is_extra"],
                 row["expansion"],
+                row.get("special_reward_text") or "",
             )
             monster_stack.append(my_monster)
 
@@ -558,6 +559,8 @@ def load_game_data(
                     row["special_payout_off_turn"],
                     row["special_citizen"],
                     row["expansion"],
+                    special_payout_on_turn_text=row.get("special_payout_on_turn_text") or "",
+                    special_payout_off_turn_text=row.get("special_payout_off_turn_text") or "",
                 )
                 citizen_stack.append(my_citizen)
 
@@ -709,6 +712,8 @@ def load_game_data(
                 row["special_payout_off_turn"],
                 row["expansion"],
                 row.get("activation_trigger", "") or "",
+                row.get("special_payout_on_turn_text") or "",
+                row.get("special_payout_off_turn_text") or "",
             )
             starter_stack.append(my_starter)
         # Load events and build the exhausted_stack. Every preset now draws
@@ -767,7 +772,7 @@ def load_game_data(
                     row["vp_reward"], row["gold_reward"], row["strength_reward"],
                     row["magic_reward"], row["has_special_reward"], row["special_reward"],
                     row["has_special_cost"], row["special_cost"], row["is_extra"],
-                    row["expansion"],
+                    row["expansion"], row.get("special_reward_text") or "",
                 ))
         except Exception:
             undead_samurai_reserve = []

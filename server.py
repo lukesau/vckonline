@@ -1999,10 +1999,17 @@ async def _initiate_game_shutdown(game_id: str, reason: str, initiated_by_player
             "name": _player_name_from_game_state(game, initiated_by_player_id),
         }
 
+    is_game_over = str(reason or "") == "game_over"
+
     game.shutdown = {
         "reason": str(reason or "ended"),
         "started_at": now,
-        "redirect_at": now + float(_GAME_SHUTDOWN_DELAY_S),
+        # A natural game-over never forces players back to the lobby: clients
+        # cache the final state and let players browse the results/board
+        # indefinitely (even after the server reclaims the game). `redirect_at`
+        # stays None so no client countdown or auto-redirect runs. An abandoned
+        # mid-game still uses the short redirect countdown.
+        "redirect_at": None if is_game_over else now + float(_GAME_SHUTDOWN_DELAY_S),
         "initiated_by": initiator,
     }
 
@@ -2016,6 +2023,12 @@ async def _initiate_game_shutdown(game_id: str, reason: str, initiated_by_player
     if hasattr(game, "hurry_up_deadline"):
         game.hurry_up_deadline = 0.0
     await manager.broadcast(game_id, game)
+
+    # A finished game is not torn down on a fixed timer; the existing idle-game
+    # sweep (180s) reclaims it once everyone has stopped viewing. Only the
+    # abandon path destroys promptly so the lobby frees up right away.
+    if is_game_over:
+        return
 
     async def _destroy_later():
         await asyncio.sleep(_GAME_SHUTDOWN_DELAY_S)
@@ -2104,7 +2117,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             redeemed = None
             try:
                 redeemed = _redeem_payment_tomes(game, request, g, s, m)
-                game.hire_citizen(request.player_id, request.citizen_id, g, m, s)
+                game.hire_citizen(request.player_id, request.citizen_id, g, m, s, tome_counts=redeemed)
             except ValueError as e:
                 if redeemed:
                     game.refund_tomes_from_score(request.player_id, redeemed)
@@ -2130,7 +2143,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
             redeemed = None
             try:
                 redeemed = _redeem_payment_tomes(game, request, g, s, m)
-                game.build_domain(request.player_id, request.domain_id, g, m, s)
+                game.build_domain(request.player_id, request.domain_id, g, m, s, tome_counts=redeemed)
             except ValueError as e:
                 if redeemed:
                     game.refund_tomes_from_score(request.player_id, redeemed)
@@ -2197,6 +2210,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
                     s, m, g,
                     event_id=request.event_id,
                     thunder_axe=request.thunder_axe,
+                    tome_counts=redeemed,
                 )
             except ValueError as e:
                 if redeemed:

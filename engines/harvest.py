@@ -99,7 +99,11 @@ class HarvestEngine:
                     self._bump_harvest_delta(player, dg, ds, dm, 0)
                     cmd = _special_cmd(s, "special_payout_on_turn")
                     if getattr(s, "has_special_payout_on_turn", False):
-                        payout = self.game.payouts.execute_special_payout(cmd or s.special_payout_on_turn, player.player_id)
+                        payout = self.game.payouts.execute_special_payout(
+                            cmd or s.special_payout_on_turn,
+                            player.player_id,
+                            effect_text=getattr(s, "special_payout_on_turn_text", "") or "",
+                        )
                         player.gold_score = int(player.gold_score) + payout[0]
                         player.strength_score = int(player.strength_score) + payout[1]
                         player.magic_score = int(player.magic_score) + payout[2]
@@ -115,7 +119,11 @@ class HarvestEngine:
                     self._bump_harvest_delta(player, dg, ds, dm, 0)
                     cmd = _special_cmd(s, "special_payout_off_turn")
                     if getattr(s, "has_special_payout_off_turn", False):
-                        payout = self.game.payouts.execute_special_payout(cmd or s.special_payout_off_turn, player.player_id)
+                        payout = self.game.payouts.execute_special_payout(
+                            cmd or s.special_payout_off_turn,
+                            player.player_id,
+                            effect_text=getattr(s, "special_payout_off_turn_text", "") or "",
+                        )
                         player.gold_score = int(player.gold_score) + payout[0]
                         player.strength_score = int(player.strength_score) + payout[1]
                         player.magic_score = int(player.magic_score) + payout[2]
@@ -136,7 +144,11 @@ class HarvestEngine:
                 self._bump_harvest_delta(player, dg, ds, dm, dv)
                 cmd = _special_cmd(c, "special_payout_on_turn")
                 if getattr(c, "has_special_payout_on_turn", False):
-                    payout = self.game.payouts.execute_special_payout(cmd or c.special_payout_on_turn, player.player_id)
+                    payout = self.game.payouts.execute_special_payout(
+                        cmd or c.special_payout_on_turn,
+                        player.player_id,
+                        effect_text=getattr(c, "special_payout_on_turn_text", "") or "",
+                    )
                     player.gold_score = int(player.gold_score) + payout[0]
                     player.strength_score = int(player.strength_score) + payout[1]
                     player.magic_score = int(player.magic_score) + payout[2]
@@ -154,7 +166,11 @@ class HarvestEngine:
                 self._bump_harvest_delta(player, dg, ds, dm, dv)
                 cmd = _special_cmd(c, "special_payout_off_turn")
                 if getattr(c, "has_special_payout_off_turn", False):
-                    payout = self.game.payouts.execute_special_payout(cmd or c.special_payout_off_turn, player.player_id)
+                    payout = self.game.payouts.execute_special_payout(
+                        cmd or c.special_payout_off_turn,
+                        player.player_id,
+                        effect_text=getattr(c, "special_payout_off_turn_text", "") or "",
+                    )
                     player.gold_score = int(player.gold_score) + payout[0]
                     player.strength_score = int(player.strength_score) + payout[1]
                     player.magic_score = int(player.magic_score) + payout[2]

@@ -291,28 +291,38 @@ function dukeCardFromScore(s) {
 }
 
 function appendGameOverFooter(panel, state) {
-  const shutdown = state.shutdown || null;
-  let countdown = panel.querySelector('#game-shutdown-countdown');
-  if (!countdown) {
-    countdown = mk('game-shutdown-countdown');
-    countdown.id = 'game-shutdown-countdown';
-    panel.appendChild(countdown);
+  // The game is finished: players browse the results/board for as long as they
+  // like (the client keeps the final state cached even after the server
+  // reclaims the game), so there is no countdown and no auto-redirect. Leaving
+  // for the lobby is an explicit choice.
+  let footer = panel.querySelector('.game-over-footer');
+  if (!footer) {
+    footer = mk('game-over-footer');
+    panel.appendChild(footer);
   }
-  countdown.textContent = shutdown?.redirect_at
-    ? `Returning to lobby in ${fmtSecondsRemaining(shutdown.redirect_at)}s…`
-    : 'Returning to lobby soon…';
+  footer.replaceChildren();
 
-  let actions = panel.querySelector('.game-shutdown-actions');
-  if (!actions) {
-    actions = mk('game-shutdown-actions');
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'game-shutdown-btn';
-    btn.textContent = 'Go to lobby now';
-    btn.addEventListener('click', () => goToLobbyNow());
-    actions.appendChild(btn);
-    panel.appendChild(actions);
-  }
+  const note = mk('game-over-footer-note');
+  note.textContent = 'Peek the board or review the scores as long as you like.';
+  footer.appendChild(note);
+
+  const actions = mk('game-shutdown-actions');
+
+  const peekBtn = document.createElement('button');
+  peekBtn.type = 'button';
+  peekBtn.className = 'game-shutdown-btn';
+  peekBtn.textContent = 'Peek board';
+  peekBtn.addEventListener('click', () => dismissGameOver());
+  actions.appendChild(peekBtn);
+
+  const lobbyBtn = document.createElement('button');
+  lobbyBtn.type = 'button';
+  lobbyBtn.className = 'game-shutdown-btn';
+  lobbyBtn.textContent = 'Return to lobby';
+  lobbyBtn.addEventListener('click', () => goToLobbyNow());
+  actions.appendChild(lobbyBtn);
+
+  footer.appendChild(actions);
 }
 
 function fillGameOverSummaryBody(body, state) {
@@ -523,12 +533,59 @@ function showGameOverDetailsView(state, pageIndex) {
   fillGameOverDetailsBody(body, state, page);
 }
 
+// Whether the player has dismissed the game-over overlay to peek at the board.
+// Sticky across re-renders so the board stays visible until they reopen it.
+let _gameOverDismissed = false;
+
+function removeGameOverReopenButton() {
+  const btn = document.getElementById('game-over-reopen-btn');
+  if (btn) btn.remove();
+}
+
+function ensureGameOverReopenButton() {
+  if (document.getElementById('game-over-reopen-btn')) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.id = 'game-over-reopen-btn';
+  btn.className = 'game-over-reopen-btn';
+  btn.textContent = 'Final results';
+  btn.addEventListener('click', () => reopenGameOver());
+  document.body.appendChild(btn);
+}
+
+function dismissGameOver() {
+  _gameOverDismissed = true;
+  const overlay = document.getElementById('game-over-overlay');
+  if (overlay) overlay.remove();
+  ensureGameOverReopenButton();
+}
+
+function reopenGameOver() {
+  _gameOverDismissed = false;
+  removeGameOverReopenButton();
+  if (latestGameState) renderGameOver(latestGameState);
+}
+
 function renderGameOver(state) {
   const existing = document.getElementById('game-over-overlay');
   if (state.phase !== 'game_over' || !state.final_scores) {
     if (existing) existing.remove();
+    removeGameOverReopenButton();
+    _gameOverDismissed = false;
     return;
   }
+
+  // Dismissed to peek the board: keep the overlay hidden and offer a floating
+  // button to bring the results back.
+  if (_gameOverDismissed) {
+    if (existing) existing.remove();
+    ensureGameOverReopenButton();
+    return;
+  }
+
+  removeGameOverReopenButton();
+  // Don't rebuild while open — that would reset the summary/details view the
+  // player is browsing.
   if (existing) return;
 
   const overlay = mk('game-over-overlay');
@@ -536,6 +593,16 @@ function renderGameOver(state) {
   overlay.dataset.view = 'summary';
 
   const panel = mk('game-over-panel');
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'game-over-close';
+  closeBtn.title = 'Peek board';
+  closeBtn.setAttribute('aria-label', 'Peek board');
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', () => dismissGameOver());
+  panel.appendChild(closeBtn);
+
   const title = mk('game-over-title');
   title.textContent = 'Game Over';
   panel.appendChild(title);

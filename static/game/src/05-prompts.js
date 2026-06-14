@@ -63,6 +63,12 @@ async function fetchGameStateFromApi() {
       if (res.status === 404) {
         const payload = await res.json().catch(() => ({}));
         if (clientShouldDropStoredGame(payload)) {
+          // A finished game can be reclaimed server-side; keep the cached
+          // results on screen and just stop polling instead of redirecting.
+          if (gameHasEnded) {
+            stopPassiveStatePolling();
+            return;
+          }
           redirectToLobby();
           return;
         }
@@ -86,6 +92,7 @@ async function postGameAction(body) {
   if (!res.ok) {
     const detail = payload?.detail || res.statusText || 'Request failed';
     if (res.status === 404 && clientShouldDropStoredGame(payload)) {
+      if (gameHasEnded) return false;
       redirectToLobby();
       return false;
     }
@@ -1059,7 +1066,7 @@ function harvestPromptSummary(prompt) {
     return 'Pick +1 resource (no harvest payouts this round).';
   }
   if (sub === 'harvest_choose') {
-    const cmd = (prompt.action || prc.command || '').toString();
+    const cmd = (prc.command_text || prompt.action_text || prompt.action || prc.command || '').toString();
     return `Choose one: ${cmd}`;
   }
   return harvestPromptSubKindBadge(sub);
@@ -3086,6 +3093,7 @@ function renderChoosePrompt(state, chooseCmd) {
   const reqId = (req?.id || '').toString();
   const isYou = !!(PLAYER_ID && idsMatch(reqId, PLAYER_ID));
   const pendingChoice = state?.pending_required_choice || null;
+  const displayCmd = (pendingChoice?.command_text || req.action_text || chooseCmd || '').toString();
 
   let options = parseChooseCommand(chooseCmd);
   if (
@@ -3101,8 +3109,8 @@ function renderChoosePrompt(state, chooseCmd) {
   if (!options.length || !isYou) {
     const note = mk('prompt-modal-note');
     note.textContent = !options.length
-      ? `Waiting on required choice: ${chooseCmd}`
-      : `Waiting on ${playerDisplayName(state, reqId)} — ${chooseCmd}`;
+      ? `Waiting on required choice: ${displayCmd}`
+      : `Waiting on ${playerDisplayName(state, reqId)} — ${displayCmd}`;
     body.appendChild(note);
     appendPromptResourcesPanel(body, state);
     openPromptOverlayShell({

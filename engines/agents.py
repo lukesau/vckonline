@@ -218,7 +218,8 @@ class AgentsEngine:
         self.game._immediate_slay_source_label = agent_name
         try:
             payout = self.game.payouts.execute_special_payout(
-                effect, player.player_id, auto_apply_single_choice=False
+                effect, player.player_id, auto_apply_single_choice=False,
+                effect_text=getattr(agent, "activation_effect_text", "") or "",
             )
         finally:
             self.game._immediate_slay_source_label = None

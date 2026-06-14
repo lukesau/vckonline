@@ -357,10 +357,10 @@ class Game:
     def submit_concurrent_action(self, player_id, response, kind=None):
         return self.player_actions.submit_concurrent_action(player_id, response, kind=kind)
 
-    def hire_citizen(self, player_id, citizen_id, gp=0, mp=0, sp=0):
-        return self.player_actions.hire_citizen(player_id, citizen_id, gp=gp, mp=mp, sp=sp)
+    def hire_citizen(self, player_id, citizen_id, gp=0, mp=0, sp=0, tome_counts=None):
+        return self.player_actions.hire_citizen(player_id, citizen_id, gp=gp, mp=mp, sp=sp, tome_counts=tome_counts)
 
-    def slay_monster(self, player_id, monster_id, sp=0, mp=0, gp=0, event_id=None, thunder_axe=None):
+    def slay_monster(self, player_id, monster_id, sp=0, mp=0, gp=0, event_id=None, thunder_axe=None, tome_counts=None):
         return self.player_actions.slay_monster(
             player_id,
             monster_id,
@@ -369,10 +369,11 @@ class Game:
             gp=gp,
             event_id=event_id,
             thunder_axe=thunder_axe,
+            tome_counts=tome_counts,
         )
 
-    def build_domain(self, player_id, domain_id, gp=0, mp=0, sp=0):
-        return self.player_actions.build_domain(player_id, domain_id, gp=gp, mp=mp, sp=sp)
+    def build_domain(self, player_id, domain_id, gp=0, mp=0, sp=0, tome_counts=None):
+        return self.player_actions.build_domain(player_id, domain_id, gp=gp, mp=mp, sp=sp, tome_counts=tome_counts)
 
     def take_resource(self, player_id, resource):
         return self.player_actions.take_resource(player_id, resource)
@@ -692,12 +693,12 @@ class Game:
                 return True
         return False
 
-    def _player_scores_line(self, player):
+    def _player_scores_line(self, player, gold_delta=0, strength_delta=0, magic_delta=0):
         if not player:
             return "G?/S?/M?/VP?/P?"
-        g = int(getattr(player, "gold_score", 0) or 0)
-        s = int(getattr(player, "strength_score", 0) or 0)
-        m = int(getattr(player, "magic_score", 0) or 0)
+        g = int(getattr(player, "gold_score", 0) or 0) + int(gold_delta or 0)
+        s = int(getattr(player, "strength_score", 0) or 0) + int(strength_delta or 0)
+        m = int(getattr(player, "magic_score", 0) or 0) + int(magic_delta or 0)
         v = int(getattr(player, "victory_score", 0) or 0)
         p = int(getattr(player, "map_score", 0) or 0)
         return f"G{g}/S{s}/M{m}/VP{v}/P{p}"

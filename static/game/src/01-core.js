@@ -62,6 +62,13 @@ let concurrentPollTimer = null;
 let finalizeRollInFlight = false;
 /** Set each render — board card modal reads latest grids / phase */
 let latestGameState = null;
+/**
+ * Flips true the first time we render a finished game (phase === 'game_over').
+ * Once set, the client treats the cached final state as authoritative: it stops
+ * reconnecting/redirecting when the server reclaims the game (WS 4004 / state
+ * 404) so players can browse the results + peek the board indefinitely.
+ */
+let gameHasEnded = false;
 
 // ── State delivery safety net ─────────────────────────────────────────────
 // The server pushes state via WebSocket on every action. In practice WS
@@ -140,6 +147,25 @@ function redirectToLobby() {
   location.replace('/');
 }
 
+// Called once when a finished game is first rendered. The game is terminal, so
+// we drop the live connection and stop polling — that lets the server reclaim
+// the game via its idle sweep while we keep the cached final state on screen.
+function quiesceEndedGame() {
+  try {
+    if (typeof stopPassiveStatePolling === 'function') stopPassiveStatePolling();
+  } catch (_) {
+    /* ignore */
+  }
+  clearTimeout(reconnectTimer);
+  if (ws) {
+    try {
+      ws.close();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+}
+
 function vckStoredDisplayName() {
   try {
     if (typeof VCK_CLIENT_META !== 'undefined' && VCK_CLIENT_META.read) {
@@ -212,6 +238,9 @@ function connect() {
     if (msg.type === 'state') render(msg.state);
     if (msg.type === 'error') {
       if (msg.drop_stored_game || isGameNotFoundText(msg.message)) {
+        // A finished game we've already rendered may be reclaimed server-side;
+        // keep showing the cached results instead of bouncing to the lobby.
+        if (gameHasEnded) return;
         redirectToLobby();
         return;
       }
@@ -221,6 +250,12 @@ function connect() {
   };
 
   ws.onclose = evt => {
+    // The game is finished and may have been reclaimed by the server. Stop
+    // reconnecting and keep the cached final view up rather than redirecting.
+    if (gameHasEnded) {
+      setConnStatus('ended');
+      return;
+    }
     // Code 4004 = game not found; don't retry
     if (evt.code === 4004) {
       redirectToLobby();
@@ -238,6 +273,9 @@ function setConnStatus(s, detail) {
   if (s === 'ok') {
     el.textContent = '● connected';
     el.className = 'conn-status';
+  } else if (s === 'ended') {
+    el.textContent = '● game ended';
+    el.className = 'conn-status conn-status-ended';
   } else if (s === 'error') {
     el.textContent = `● ${detail || 'error'}`;
     el.className = 'conn-status disconnected';

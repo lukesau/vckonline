@@ -629,7 +629,12 @@ class DomainEffectsEngine:
         # into other payout paths (harvest, action.end queues, etc.).
         self.game._immediate_slay_source_label = getattr(domain, "name", "Domain")
         try:
-            payout = self.game.payouts.execute_special_payout(effect, player.player_id, auto_apply_single_choice=False)
+            payout = self.game.payouts.execute_special_payout(
+                effect,
+                player.player_id,
+                auto_apply_single_choice=False,
+                effect_text=getattr(domain, "text", "") or "",
+            )
         finally:
             self.game._immediate_slay_source_label = None
         _new_action = (self.game.action_required or {}).get("action", "")
