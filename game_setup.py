@@ -192,17 +192,13 @@ def _should_include_relics(preset, debug_mode=False, draft_selections=None):
     )
 
 
-def _relic_count_per_player(duke_select_count, n_players, available_relics=None):
+def _relic_count_per_player(n_players, available_relics=None):
     """How many relics to deal each player before the choose-one prompt.
 
-    Mirrors the duke count (2 or 3) so a single lobby control configures both.
-    The relic pool is small (13 cards), so a 5-player game is capped at 2 each
-    (5 * 3 = 15 would exceed the pool). If bans shrink the pool below the
-    requested count for the player count, fall back to 2 each when possible;
-    otherwise return 0 to disable the module gracefully."""
-    n = int(duke_select_count or 2)
-    if int(n_players or 0) >= 5:
-        n = min(n, 2)
+    Always 2 each (independent of the duke count), as long as the post-ban
+    relic pool is large enough to give every player 2. If it isn't, return 0
+    to disable the module gracefully."""
+    n = 2
     if available_relics is None:
         return n
     player_count = int(n_players or 0)
@@ -211,8 +207,6 @@ def _relic_count_per_player(duke_select_count, n_players, available_relics=None)
         return 0
     if available >= n * player_count:
         return n
-    if available >= 2 * player_count:
-        return 2
     return 0
 
 
@@ -892,11 +886,10 @@ def load_game_data(
                 player.owned_starters.append(chosen_optional)
             for _ in range(duke_select_count):
                 player.owned_dukes.append(duke_stack.pop())
-        # Deal relics (optional module). Same per-player count as dukes when
-        # possible, capped/fallbacked by the actual post-ban relic pool. The
-        # unchosen relics are simply not dealt (they "go back to the box").
+        # Deal relics (optional module). Always 2 per player, gated by the
+        # actual post-ban relic pool. The unchosen relics are simply not dealt
+        # (they "go back to the box").
         relics_per_player = _relic_count_per_player(
-            duke_select_count,
             len(player_list),
             available_relics=len(relic_pool),
         )

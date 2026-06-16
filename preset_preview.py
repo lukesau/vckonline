@@ -305,7 +305,7 @@ def _preview_agents(cur, cfg):
     }
 
 
-def _preview_relics(cur, cfg, players, duke_select_count):
+def _preview_relics(cur, cfg, players):
     mode = cfg.get("include_relics") or "never"
     if mode == "never":
         return None
@@ -326,7 +326,7 @@ def _preview_relics(cur, cfg, players, duke_select_count):
     if mode == "always":
         selection = "random"
     per_player = _relic_count_per_player(
-        duke_select_count, players, available_relics=len(cards)
+        players, available_relics=len(cards)
     )
     if per_player > 0:
         note = (
@@ -448,7 +448,7 @@ def load_preset_preview(preset, expansion_only=False, players=4, duke_select_cou
                 _preview_dukes(cur, cfg, players, duke_select_count),
                 _preview_events(cur, cfg, players),
                 _preview_agents(cur, cfg),
-                _preview_relics(cur, cfg, players, duke_select_count),
+                _preview_relics(cur, cfg, players),
             ]
             sections = [s for s in sections if s is not None]
         finally:

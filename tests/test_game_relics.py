@@ -904,22 +904,18 @@ class ShouldIncludeRelicsTests(unittest.TestCase):
 
 
 class RelicCountPerPlayerTests(unittest.TestCase):
-    def test_matches_duke_count_below_five_players(self):
-        self.assertEqual(_relic_count_per_player(2, 2), 2)
-        self.assertEqual(_relic_count_per_player(3, 4), 3)
-        self.assertEqual(_relic_count_per_player(3, 4, available_relics=12), 3)
+    def test_always_two_regardless_of_player_count(self):
+        self.assertEqual(_relic_count_per_player(2), 2)
+        self.assertEqual(_relic_count_per_player(4), 2)
+        self.assertEqual(_relic_count_per_player(5), 2)
+        self.assertEqual(_relic_count_per_player(4, available_relics=12), 2)
 
-    def test_falls_back_to_two_when_bans_make_three_impossible(self):
-        self.assertEqual(_relic_count_per_player(3, 4, available_relics=11), 2)
-        self.assertEqual(_relic_count_per_player(3, 3, available_relics=8), 2)
-
-    def test_capped_at_two_for_five_players(self):
-        self.assertEqual(_relic_count_per_player(3, 5), 2)
-        self.assertEqual(_relic_count_per_player(2, 5), 2)
-        self.assertEqual(_relic_count_per_player(3, 5, available_relics=9), 0)
+    def test_deals_two_when_pool_exactly_covers_everyone(self):
+        self.assertEqual(_relic_count_per_player(5, available_relics=10), 2)
 
     def test_disables_when_less_than_two_each_available(self):
-        self.assertEqual(_relic_count_per_player(3, 4, available_relics=7), 0)
+        self.assertEqual(_relic_count_per_player(4, available_relics=7), 0)
+        self.assertEqual(_relic_count_per_player(5, available_relics=9), 0)
 
 
 class RelicSelectionFlowTests(unittest.TestCase):
@@ -999,10 +995,10 @@ class RelicsSetupIntegrationTests(unittest.TestCase):
         for player in state["player_list"]:
             self.assertEqual(len(player.owned_relics), 2)
 
-    def test_duke_count_three_deals_three_relics(self):
+    def test_duke_count_does_not_affect_relic_count(self):
         state = self._load("base", self._players(2), debug_mode=True, duke_select_count=3)
         for player in state["player_list"]:
-            self.assertEqual(len(player.owned_relics), 3)
+            self.assertEqual(len(player.owned_relics), 2)
 
     def test_five_players_capped_at_two_relics(self):
         state = self._load("base", self._players(5), debug_mode=True, duke_select_count=3)
