@@ -11,5 +11,5 @@
   "fixed_citizen_ids": [19, 2, 41, 14, 33, 34, 35, 36, 9, 48],
   "optional_starter_expansion": "margraves",
   "include_agents": "always",
-  "include_relics": "never"
+  "include_relics": "always"
 }
