@@ -13,7 +13,7 @@ the client can render a small badge, but they are not filtered out.
 """
 
 from cards import Citizen, Domain, Duke, Monster, Noble, Starter
-from banned_cards import banned_domain_ids, banned_duke_ids
+from banned_cards import banned_domain_ids, banned_duke_ids, banned_relic_ids
 from card_filters import (
     is_unimplemented_citizen as _is_unimplemented_citizen,
     is_unimplemented_monster as _is_unimplemented_monster,
@@ -294,7 +294,7 @@ def _load_agents(cur):
     return out
 
 
-def _load_relics(cur):
+def _load_relics(cur, banned):
     rows = _fetch_all(cur, "SELECT * FROM relics ORDER BY id_relics")
     out = []
     for row in rows:
@@ -303,6 +303,7 @@ def _load_relics(cur):
             "name":                row["name"],
             "passive_effect":      row["passive_effect"],
             "passive_effect_text": row["passive_effect_text"],
+            "is_banned":           int(row["id_relics"]) in banned,
             "is_unimplemented":    _is_unimplemented_relic(row),
         })
     return out
@@ -311,8 +312,8 @@ def _load_relics(cur):
 def load_all_cards_for_wiki():
     """Return a dict of `{citizens, monsters, domains, dukes, starters}` lists.
 
-    Each list contains plain dicts (via `cards.*.to_dict()`). Domain and
-    duke entries additionally include an `is_banned` boolean so the
+    Each list contains plain dicts (via `cards.*.to_dict()`). Domain,
+    duke, and relic entries additionally include an `is_banned` boolean so the
     client can flag entries listed in `banned_cards.json`. Every type
     except dukes also includes an `is_unimplemented` boolean — true when
     the engine-resolvable effect string is null or empty (see
@@ -329,6 +330,7 @@ def load_all_cards_for_wiki():
         try:
             banned_domains = banned_domain_ids()
             banned_dukes = banned_duke_ids()
+            banned_relics = banned_relic_ids()
             data = {
                 "citizens": _load_citizens(cur),
                 "monsters": _load_monsters(cur),
@@ -338,7 +340,7 @@ def load_all_cards_for_wiki():
                 "events": _load_events(cur),
                 "nobles": _load_nobles(cur),
                 "agents": _load_agents(cur),
-                "relics": _load_relics(cur),
+                "relics": _load_relics(cur, banned_relics),
             }
         finally:
             cur.close()

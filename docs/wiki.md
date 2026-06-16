@@ -27,7 +27,7 @@ It does **not** apply `banned_cards.json` filtering, expansion gating, or any pr
 
 - `GET /wiki` — serves `static/wiki/index.html`.
 - `GET /api/wiki/cards` — returns `{ counts: {citizens, monsters, domains, dukes, starters, events, nobles}, cards: {...} }`. Response shape per card matches the corresponding `cards.py` class's `to_dict()` output, with three additions:
-  - `domains` and `dukes` entries include `is_banned` (looked up against `banned_cards.json`).
+  - `domains`, `dukes`, and `relics` entries include `is_banned` (looked up against `banned_cards.json`).
   - `citizens`, `monsters`, and `domains` entries include `is_unimplemented` — true when the row has a special/effect flag set but the corresponding text column is `NULL` or whitespace-only. See [Unimplemented detection](#unimplemented-detection) below.
   - Every entry includes `alt_variants` — a sorted list of the alternate-artwork variant tokens that exist on disk for that card (e.g. `["alt"]` or `["alt_01", …, "alt_05"]`), plus `has_alt_image` (`true` when `alt_variants` is non-empty, kept for backwards compatibility). The client renders an "Alt" control for those cards. See [Alternate artwork](#alternate-artwork) below.
 - `GET /api/wiki/cards?refresh=1` — bust the in-memory cache and reload from the DB. Useful when you edit a row and want to see it without restarting the server.

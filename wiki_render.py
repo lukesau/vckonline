@@ -220,6 +220,8 @@ def _card_data_attrs(tab, card):
         attrs["data-soldier"] = str(card.get("soldier_count") or 0)
         attrs["data-worker"] = str(card.get("worker_count") or 0)
         attrs["data-special"] = "yes" if card.get("has_special_duke_payout") else ""
+    elif tab == "relics":
+        attrs["data-banned"] = "yes" if card.get("is_banned") else ""
     return attrs
 
 

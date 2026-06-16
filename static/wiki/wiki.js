@@ -359,8 +359,11 @@
       groups.push(roleGroup);
       groups.push({ key: "special", label: "Payout", options: [{ value: "yes", label: "Has special payout" }] });
       groups.push(implementationGroup);
-    } else if (type === "agents" || type === "relics") {
+    } else if (type === "agents") {
       groups.push(implementationGroup);
+    } else if (type === "relics") {
+      groups.push(implementationGroup);
+      groups.push({ key: "banned", label: "Banned", options: [{ value: "yes", label: "Banned only" }] });
     }
     return groups;
   }
@@ -416,6 +419,9 @@
     if (type === "nobles") {
       if (!passesRoleFilter(card, f.role)) return false;
       if (f.special === "yes" && card.dataset.special !== "yes") return false;
+    }
+    if (type === "relics") {
+      if (f.banned === "yes" && card.dataset.banned !== "yes") return false;
     }
     return true;
   }
