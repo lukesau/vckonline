@@ -153,12 +153,15 @@ def _choose_one_citizen_per_roll(rows):
 
 def _resolve_optional_module(mode, draft_selections, draft_key):
     mode = (mode or "never").strip().lower()
+    ds = draft_selections or {}
+    if draft_key in ds:
+        return bool(ds[draft_key])
     if mode == "always":
         return True
     if mode == "random":
         return random.random() < 0.5
     if mode == "draft":
-        return bool((draft_selections or {}).get(draft_key))
+        return False
     return False
 
 

@@ -379,6 +379,9 @@ def _serialize_lobby(lb: Lobby):
         "min_players": int(getattr(lb, "min_players", _MIN_PLAYERS_FLOOR)),
         "expansion_only": bool(getattr(lb, "expansion_only", False)),
         "duke_select_count": int(getattr(lb, "duke_select_count", 2)),
+        "random_no_optional_modules": bool(
+            getattr(lb, "random_no_optional_modules", False)
+        ),
         "members": [_serialize_member(m) for m in lb.members],
     }
 
@@ -412,11 +415,18 @@ def _maybe_start_lobby_game(lb: Lobby):
         gamers.append(gm)
         game_gamers.append(gm)
 
+    draft_selections = None
+    if lb.preset == "random" and bool(
+        getattr(lb, "random_no_optional_modules", False)
+    ):
+        draft_selections = {"include_agents": False, "include_relics": False}
+
     game_state = load_game_data(
         new_game_id,
         lb.preset,
         game_gamers,
         debug_mode=debug_mode,
+        draft_selections=draft_selections,
         expansion_only=bool(getattr(lb, "expansion_only", False)),
         duke_select_count=int(getattr(lb, "duke_select_count", 2)),
     )
@@ -1218,6 +1228,7 @@ class CreateLobbyRequest(BaseModel):
     min_players: Optional[int] = None
     expansion_only: Optional[bool] = False
     duke_select_count: Optional[int] = 2
+    random_no_optional_modules: Optional[bool] = False
 
 
 class JoinLobbyRequest(BaseModel):
@@ -1258,6 +1269,11 @@ class SetMinPlayersRequest(BaseModel):
 class SetExpansionOnlyRequest(BaseModel):
     player_id: str
     expansion_only: bool
+
+
+class SetRandomNoOptionalModulesRequest(BaseModel):
+    player_id: str
+    random_no_optional_modules: bool
 
 
 class SetDukeSelectCountRequest(BaseModel):
@@ -1386,8 +1402,13 @@ async def create_lobby(request: CreateLobbyRequest):
     min_players = _validate_min_players(request.min_players, default=_MIN_PLAYERS_FLOOR)
     expansion_only = _validate_expansion_only(request.expansion_only, default=False)
     duke_select_count = _validate_duke_select_count(request.duke_select_count, default=2)
+    random_no_optional_modules = _validate_expansion_only(
+        request.random_no_optional_modules, default=False
+    )
     if expansion_only and preset not in _PRESETS_WITH_EXPANSION_ONLY:
         expansion_only = False
+    if random_no_optional_modules and preset != "random":
+        random_no_optional_modules = False
 
     player_id = str(shortuuid.uuid())
     lobby_id = str(shortuuid.uuid())
@@ -1402,6 +1423,7 @@ async def create_lobby(request: CreateLobbyRequest):
         min_players=min_players,
         expansion_only=expansion_only,
         duke_select_count=duke_select_count,
+        random_no_optional_modules=random_no_optional_modules,
     )
     lb.created_at = time.time()
     lb.members.append(member)
@@ -1516,6 +1538,8 @@ async def set_lobby_preset(request: SetPresetRequest):
     lb.preset = preset
     if preset not in _PRESETS_WITH_EXPANSION_ONLY:
         lb.expansion_only = False
+    if preset != "random":
+        lb.random_no_optional_modules = False
     member.last_active_time = time.time()
     # Changing the preset should reset readiness so members re-confirm.
     for m in lb.members:
@@ -1546,6 +1570,43 @@ async def set_lobby_expansion_only(request: SetExpansionOnlyRequest):
         m.is_ready = False
     await lobby_ws_manager.broadcast_lobby()
     return {"message": "expansion_only updated", "expansion_only": expansion_only}
+
+
+@app.post("/api/lobby/random_no_optional_modules")
+async def set_lobby_random_no_optional_modules(
+    request: SetRandomNoOptionalModulesRequest,
+):
+    """Disable Agents and Relics for the random preset. Owner only."""
+    random_no_optional_modules = _validate_expansion_only(
+        request.random_no_optional_modules, default=False
+    )
+    lb, member = _find_member(request.player_id)
+    if not lb or not member:
+        raise HTTPException(status_code=404, detail="Player not found in any lobby")
+    if lb.owner_id != member.player_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the lobby owner may change random_no_optional_modules",
+        )
+    if lb.lobby_id in _draft_states:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot change random_no_optional_modules while a draft is in progress",
+        )
+    if random_no_optional_modules and lb.preset != "random":
+        raise HTTPException(
+            status_code=400,
+            detail="random_no_optional_modules is only available for the random preset",
+        )
+    lb.random_no_optional_modules = random_no_optional_modules
+    member.last_active_time = time.time()
+    for m in lb.members:
+        m.is_ready = False
+    await lobby_ws_manager.broadcast_lobby()
+    return {
+        "message": "random_no_optional_modules updated",
+        "random_no_optional_modules": random_no_optional_modules,
+    }
 
 
 @app.post("/api/lobby/duke_select_count")

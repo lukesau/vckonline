@@ -175,6 +175,7 @@ class Lobby:
         min_players=2,
         expansion_only=False,
         duke_select_count=2,
+        random_no_optional_modules=False,
     ):
         self.lobby_id = lobby_id
         self.owner_id = owner_id
@@ -187,6 +188,9 @@ class Lobby:
         # are drawn from the preset expansion set; expansion presets also mix
         # in base dukes because the expansion alone has too few.
         self.expansion_only = bool(expansion_only)
+        # Random preset only: when True, Agents and Relics are omitted instead
+        # of the default 50/50 roll at game start.
+        self.random_no_optional_modules = bool(random_no_optional_modules)
         # How many dukes each player is dealt before the choose-one prompt.
         self.duke_select_count = int(duke_select_count or 2)
         self.members = []

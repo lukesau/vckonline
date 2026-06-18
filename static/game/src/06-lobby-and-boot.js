@@ -372,8 +372,45 @@ const LOBBY_PRESETS_WITH_EXPANSION_ONLY = new Set([
   'base', 'flamesandfrost', 'shadowvale',
 ]);
 
+const POOL_OPTIONS_EXPANSION = [
+  { value: 'all', label: 'All — dukes, domains & events from every set' },
+  { value: 'expansion', label: 'Expansion — only this set\'s dukes, domains & events' },
+];
+
+const POOL_OPTIONS_RANDOM = [
+  { value: 'all', label: 'All — may include Agents & Relics (50% each)' },
+  { value: 'no_modules', label: 'All — no Agents or Relics' },
+];
+
 function lobbySupportsExpansionOnly(preset) {
   return LOBBY_PRESETS_WITH_EXPANSION_ONLY.has(preset);
+}
+
+function lobbySupportsRandomModules(preset) {
+  return preset === 'random';
+}
+
+function lobbyPoolControlMode(preset) {
+  if (lobbySupportsExpansionOnly(preset)) return 'expansion';
+  if (lobbySupportsRandomModules(preset)) return 'random';
+  return 'none';
+}
+
+function _setPoolSelectOptions(selectEl, options) {
+  if (!selectEl) return;
+  const prev = selectEl.value;
+  selectEl.innerHTML = '';
+  options.forEach(opt => {
+    const el = document.createElement('option');
+    el.value = opt.value;
+    el.textContent = opt.label;
+    selectEl.appendChild(el);
+  });
+  if (options.some(o => o.value === prev)) {
+    selectEl.value = prev;
+  } else if (options.length) {
+    selectEl.value = options[0].value;
+  }
 }
 
 function lobbyOptionsShortLabel(lobby) {
@@ -381,18 +418,57 @@ function lobbyOptionsShortLabel(lobby) {
   const dukeCount = Number(lobby.duke_select_count) || 2;
   if (dukeCount === 3) parts.push('3 dukes');
   if (lobby.expansion_only) parts.push('exp-only');
+  if (lobby.random_no_optional_modules) parts.push('no modules');
   return parts.length ? ` • ${parts.join(', ')}` : '';
 }
 
-// The unlabeled row-1 dropdown ("All …" / "Expansion …") controls whether
-// dukes/domains/events are drawn from every set or just the preset's
-// expansion. It's only meaningful for the expansion-capable presets; for the
-// others we force it back to "all" and disable it.
-function syncPoolControl(preset, selectEl, expansionOnly, ownerEnabled) {
+// The unlabeled row-1 dropdown controls preset-specific pool options:
+// expansion presets → all vs expansion-only dukes/domains/events; random →
+// optional-module roll vs disabled; other presets → forced to "all", disabled.
+function syncPoolControl(preset, selectEl, poolState, ownerEnabled) {
   if (!selectEl) return;
-  const supported = lobbySupportsExpansionOnly(preset);
-  selectEl.value = (supported && expansionOnly) ? 'expansion' : 'all';
-  selectEl.disabled = !ownerEnabled || !supported;
+  const mode = lobbyPoolControlMode(preset);
+  if (mode === 'expansion') {
+    _setPoolSelectOptions(selectEl, POOL_OPTIONS_EXPANSION);
+    selectEl.value = poolState.expansionOnly ? 'expansion' : 'all';
+    selectEl.disabled = !ownerEnabled;
+    return;
+  }
+  if (mode === 'random') {
+    _setPoolSelectOptions(selectEl, POOL_OPTIONS_RANDOM);
+    selectEl.value = poolState.randomNoOptionalModules ? 'no_modules' : 'all';
+    selectEl.disabled = !ownerEnabled;
+    return;
+  }
+  _setPoolSelectOptions(selectEl, POOL_OPTIONS_EXPANSION);
+  selectEl.value = 'all';
+  selectEl.disabled = true;
+}
+
+function poolStateFromLobby(lobby) {
+  return {
+    expansionOnly: !!lobby.expansion_only,
+    randomNoOptionalModules: !!lobby.random_no_optional_modules,
+  };
+}
+
+function poolStateFromSelect(preset, selectEl) {
+  if (!selectEl) {
+    return { expansionOnly: false, randomNoOptionalModules: false };
+  }
+  if (lobbySupportsExpansionOnly(preset)) {
+    return {
+      expansionOnly: selectEl.value === 'expansion',
+      randomNoOptionalModules: false,
+    };
+  }
+  if (lobbySupportsRandomModules(preset)) {
+    return {
+      expansionOnly: false,
+      randomNoOptionalModules: selectEl.value === 'no_modules',
+    };
+  }
+  return { expansionOnly: false, randomNoOptionalModules: false };
 }
 
 function syncPresetWarning(preset, warningEl) {
@@ -1756,7 +1832,7 @@ function initLobbyModal() {
     syncPoolControl(
       lobby.preset || 'current',
       poolSelect,
-      lobby.expansion_only,
+      poolStateFromLobby(lobby),
       isOwner,
     );
     syncPresetWarning(lobby.preset || 'current', presetWarning);
@@ -2027,11 +2103,7 @@ function initLobbyModal() {
       const preset = createPresetSelect.value || 'current';
       const minPlayers = Number(createMinPlayersSelect.value) || 2;
       const dukeSelectCount = Number(createDukeSelect && createDukeSelect.value) || 2;
-      const expansionOnly = !!(
-        createPoolSelect
-        && createPoolSelect.value === 'expansion'
-        && lobbySupportsExpansionOnly(preset)
-      );
+      const poolState = poolStateFromSelect(preset, createPoolSelect);
       const res = await fetch('/api/lobby/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2040,7 +2112,8 @@ function initLobbyModal() {
           preset,
           min_players: minPlayers,
           duke_select_count: dukeSelectCount,
-          expansion_only: expansionOnly,
+          expansion_only: poolState.expansionOnly,
+          random_no_optional_modules: poolState.randomNoOptionalModules,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -2117,7 +2190,13 @@ function initLobbyModal() {
         const stillExpansion = poolSelect
           && poolSelect.value === 'expansion'
           && lobbySupportsExpansionOnly(preset);
-        syncPoolControl(preset, poolSelect, stillExpansion, true);
+        const stillNoModules = poolSelect
+          && poolSelect.value === 'no_modules'
+          && lobbySupportsRandomModules(preset);
+        syncPoolControl(preset, poolSelect, {
+          expansionOnly: stillExpansion,
+          randomNoOptionalModules: stillNoModules,
+        }, true);
         syncPresetWarning(preset, presetWarning);
       } catch (e) {
         showLobbyError(e.message || 'Could not change preset.');
@@ -2130,20 +2209,33 @@ function initLobbyModal() {
       const pid = lobbyPlayerId || vckStoredPlayerId();
       if (!pid) return;
       const preset = presetSelect ? (presetSelect.value || 'current') : 'current';
-      if (!lobbySupportsExpansionOnly(preset)) {
+      const poolState = poolStateFromSelect(preset, poolSelect);
+      if (!lobbySupportsExpansionOnly(preset) && !lobbySupportsRandomModules(preset)) {
         poolSelect.value = 'all';
         return;
       }
       showLobbyError('');
       try {
-        const res = await fetch('/api/lobby/expansion_only', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            player_id: pid,
-            expansion_only: poolSelect.value === 'expansion',
-          }),
-        });
+        let res;
+        if (lobbySupportsRandomModules(preset)) {
+          res = await fetch('/api/lobby/random_no_optional_modules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              player_id: pid,
+              random_no_optional_modules: poolState.randomNoOptionalModules,
+            }),
+          });
+        } else {
+          res = await fetch('/api/lobby/expansion_only', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              player_id: pid,
+              expansion_only: poolState.expansionOnly,
+            }),
+          });
+        }
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           throw new Error(data.detail != null ? String(data.detail) : res.statusText || 'Card pool update failed');
@@ -2185,7 +2277,13 @@ function initLobbyModal() {
       const stillExpansion = createPoolSelect
         && createPoolSelect.value === 'expansion'
         && lobbySupportsExpansionOnly(preset);
-      syncPoolControl(preset, createPoolSelect, stillExpansion, true);
+      const stillNoModules = createPoolSelect
+        && createPoolSelect.value === 'no_modules'
+        && lobbySupportsRandomModules(preset);
+      syncPoolControl(preset, createPoolSelect, {
+        expansionOnly: stillExpansion,
+        randomNoOptionalModules: stillNoModules,
+      }, true);
       syncPresetWarning(preset, createPresetWarning);
     });
   }
@@ -2407,7 +2505,10 @@ function initLobbyModal() {
   }
 
   if (createPresetSelect) {
-    syncPoolControl(createPresetSelect.value || 'current', createPoolSelect, false, true);
+    syncPoolControl(createPresetSelect.value || 'current', createPoolSelect, {
+      expansionOnly: false,
+      randomNoOptionalModules: false,
+    }, true);
     syncPresetWarning(createPresetSelect.value || 'current', createPresetWarning);
   }
 
