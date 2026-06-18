@@ -369,7 +369,7 @@ const LOBBY_PRESET_SHORT_LABELS = {
 };
 
 const LOBBY_PRESETS_WITH_EXPANSION_ONLY = new Set([
-  'base', 'flamesandfrost', 'shadowvale',
+  'base', 'flamesandfrost', 'shadowvale', 'crimsonseas',
 ]);
 
 const POOL_OPTIONS_EXPANSION = [

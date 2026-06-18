@@ -287,7 +287,7 @@ def _validate_duke_select_count(duke_select_count, default=2) -> int:
     return n
 
 
-_PRESETS_WITH_EXPANSION_ONLY = frozenset({"base", "flamesandfrost", "shadowvale"})
+_PRESETS_WITH_EXPANSION_ONLY = frozenset({"base", "flamesandfrost", "shadowvale", "crimsonseas"})
 
 
 def _validate_min_players(min_players, default=_MIN_PLAYERS_FLOOR) -> int:
@@ -1562,7 +1562,7 @@ async def set_lobby_expansion_only(request: SetExpansionOnlyRequest):
     if expansion_only and lb.preset not in _PRESETS_WITH_EXPANSION_ONLY:
         raise HTTPException(
             status_code=400,
-            detail="expansion_only is only available for base, flamesandfrost, and shadowvale presets",
+            detail="expansion_only is only available for base, flamesandfrost, shadowvale, and crimsonseas presets",
         )
     lb.expansion_only = expansion_only
     member.last_active_time = time.time()

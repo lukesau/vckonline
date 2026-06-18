@@ -204,6 +204,29 @@ class LobbyOptionsIntegrationTests(unittest.TestCase):
                 for d in domains:
                     self.assertIn(d.expansion, ("crimsonseas", "base"))
 
+    def test_crimsonseas_expansion_only_scopes_events_to_crimsonseas(self):
+        state = self._load("crimsonseas", expansion_only=True)
+        expansions = self._event_expansions(state)
+        self.assertTrue(
+            expansions <= {"crimsonseas"},
+            f"expected only crimsonseas events, got {expansions}",
+        )
+
+    def test_crimsonseas_all_events_can_span_expansions(self):
+        import random as _random
+
+        seen = set()
+        for seed in range(40):
+            _random.seed(seed)
+            state = self._load("crimsonseas")
+            seen |= self._event_expansions(state)
+        if seen <= {"crimsonseas"}:
+            self.skipTest(f"only crimsonseas events available in DB pool; saw {seen}")
+        self.assertTrue(
+            any(exp not in (None, "crimsonseas") for exp in seen),
+            f"expected a non-crimsonseas event across seeds, saw {seen}",
+        )
+
     def test_crimsonseas_dukes_use_full_pool_both_modes(self):
         # Crimson Seas ships no dukes, so both modes draw from the full pool.
         import random as _random
