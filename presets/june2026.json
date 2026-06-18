@@ -7,7 +7,7 @@
   "citizen_query": "select_all_citizens",
   "choose_one_citizen_per_roll": false,
   "exclude_domain_expansions": ["crimsonseas"],
-  "fixed_monster_areas": ["Barrens", "Gloom Gyre", "Forest", "Skerry", "Fire Temple"],
+  "fixed_monster_areas": ["Barrens", "Forest", "Skerry", "Kaharian", "Fire Temple"],
   "fixed_citizen_ids": [19, 2, 41, 14, 33, 34, 35, 36, 9, 48],
   "optional_starter_expansion": "margraves",
   "include_agents": "always",

@@ -6,6 +6,7 @@ from card_filters import is_unimplemented_event, keep_for_random
 from card_filters import is_unimplemented_agent
 from cards import Agent, Citizen, Domain, Duke, Event, Exhausted, Monster, Noble, Relic, Starter
 from game_models import Player
+from monster_area_balance import pick_random_monster_areas
 from preset_registry import get_preset_config, include_agents_mode, include_relics_mode
 
 # Domain IDs granted (one extra copy per player) when the lobby's
@@ -943,7 +944,7 @@ def load_game_data(
                     f"Preset {preset!r} monster areas not in available pool: {missing}."
                 )
         else:
-            chosen_areas = random.sample(areas, 5)
+            chosen_areas = pick_random_monster_areas(areas)
         chosen_areas = _sort_monster_areas_by_top_card_cost(chosen_areas, grouped_monsters)
         monster_stack_areas = list(chosen_areas)
         for i, area in enumerate(chosen_areas):

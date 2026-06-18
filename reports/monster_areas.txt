@@ -1,0 +1,685 @@
+Curated expansion flex-type benchmarks (2-4 player stacks, excl. is_extra)
+========================================================================
+base1 (5 areas)
+  Board flex totals: Minion 10, Beast 7, Titan 3
+  Flex mix (count): Minion 50%, Beast 35%, Titan 15%
+  Flex mix (slay-weighted): Minion 40%, Beast 41%, Titan 19%
+  Avg slay cost by flex type: Minion 3.30, Beast 4.86, Titan 5.33
+  Avg slay cost ratio: Minion=1: Minion 1.00, Beast 1.47, Titan 1.62
+  Per area avg count: Minion 2.00, Beast 1.40, Titan 0.60
+
+shadowvale (5 areas)
+  Board flex totals: Minion 6, Beast 8, Titan 6
+  Flex mix (count): Minion 30%, Beast 40%, Titan 30%
+  Flex mix (slay-weighted): Minion 22%, Beast 37%, Titan 41%
+  Avg slay cost by flex type: Minion 3.67, Beast 4.50, Titan 6.67
+  Avg slay cost ratio: Minion=1: Minion 1.00, Beast 1.23, Titan 1.82
+  Per area avg count: Minion 1.20, Beast 1.60, Titan 1.20
+
+crimsonseas (5 areas)
+  Board flex totals: Minion 4, Beast 12, Titan 4
+  Flex mix (count): Minion 20%, Beast 60%, Titan 20%
+  Flex mix (slay-weighted): Minion 20%, Beast 60%, Titan 20%
+  Avg slay cost by flex type: Minion 3.00, Beast 3.00, Titan 3.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Beast 1.00, Titan 1.00
+  Per area avg count: Minion 0.80, Beast 2.40, Titan 0.80
+
+flamesandfrost (5 areas)
+  Board flex totals: Minion 5, Beast 10, Titan 5
+  Flex mix (count): Minion 25%, Beast 50%, Titan 25%
+  Flex mix (slay-weighted): Minion 14%, Beast 47%, Titan 40%
+  Avg slay cost by flex type: Minion 4.00, Beast 6.70, Titan 11.40
+  Avg slay cost ratio: Minion=1: Minion 1.00, Beast 1.68, Titan 2.85
+  Per area avg count: Minion 1.00, Beast 2.00, Titan 1.00
+
+Combined across 20 curated areas
+  Board flex totals: Minion 25, Beast 37, Titan 18
+  Per 5-area board avg count: Minion 6.2, Beast 9.2, Titan 4.5
+  Flex mix (count): Minion 31.2%, Beast 46.2%, Titan 22.5%
+  Flex mix (slay-weighted): Minion 22.6%, Beast 44.9%, Titan 32.5%
+  (Balanced rotating-set soft target: slay-weighted mix above)
+  Avg slay cost by flex type: Minion 3.48, Beast 4.68, Titan 6.94
+  Avg slay cost ratio: Minion=1: Minion 1.00, Beast 1.34, Titan 2.00
+
+All playable flex monsters (every area, excl. is_extra)
+  Totals: Minion 40, Beast 46, Titan 22 (108 cards)
+  Flex mix (count): Minion 37.0%, Beast 42.6%, Titan 20.4%
+  Flex mix (slay-weighted): Minion 25.6%, Beast 46.2%, Titan 28.2%
+  Avg slay cost by flex type: Minion 3.62, Beast 5.70, Titan 7.27
+  Avg slay cost ratio: Minion=1: Minion 1.00, Beast 1.57, Titan 2.01
+
+========================================================================
+Barrens (base2)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 3.33
+Avg magic cost:    1.17
+Avg basic rewards:
+  Victory Points   2.00
+  Gold             0.00
+  Strength         0.00
+  Magic            1.33
+Types: Minion: 3, Titan: 1, Warden: 1, Boss: 1
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 3, Titan 1
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 75%, Titan 25%
+  Flex mix (slay-weighted): Minion 30%, Titan 70%
+  Avg slay cost by flex type: Minion 1.00, Titan 7.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Titan 7.00
+Special rewards:
+  - Take a Citizen that costs 2 Gold or less.
+  - Gain 1 Magic for each Barrens Monster you own.
+
+========================================================================
+Cavern (base2)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 6.67
+Avg magic cost:    3.00
+Avg basic rewards:
+  Victory Points   4.00
+  Gold             2.33
+  Strength         0.00
+  Magic            1.00
+Types: Minion: 3, Titan: 1, Warden: 1, Boss: 1
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 3, Titan 1
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 75%, Titan 25%
+  Flex mix (slay-weighted): Minion 64%, Titan 36%
+  Avg slay cost by flex type: Minion 6.00, Titan 10.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Titan 1.67
+Special rewards:
+  - Gain 3 Gold for each Cavern Monster you own.
+
+========================================================================
+Crypt (shadowvale)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 9.00
+Avg magic cost:    1.00
+Avg basic rewards:
+  Victory Points   4.00
+  Gold             1.00
+  Strength         0.00
+  Magic            2.00
+Types: Minion: 2, Titan: 2, Warden: 1, Boss: 1
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 2, Titan 2
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 50%, Titan 50%
+  Flex mix (slay-weighted): Minion 38%, Titan 62%
+  Avg slay cost by flex type: Minion 5.00, Titan 8.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Titan 1.60
+Special rewards:
+  - Gain 1 Victory Point for each Crypt Monster you own.
+
+========================================================================
+Cutthroats (crimsonseas)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 4.17
+Avg magic cost:    2.33
+Avg basic rewards:
+  Victory Points   2.33
+  Gold             0.00
+  Strength         0.00
+  Magic            0.00
+Types: Titan: 4, Warden: 1, Boss: 1
+Type summary:
+  Flex (Minion/Beast/Titan): Titan 4
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Titan 100%
+  Flex mix (slay-weighted): Titan 100%
+  Avg slay cost by flex type: Titan 3.00
+  Avg slay cost ratio: n/a
+Special rewards:
+  - Gain 1 Victory Point for each Araby Brigands you own.
+  - Take a Peasant, or take a Knight.
+  - Gain 3 Citizens or 1 Noble.
+
+========================================================================
+Dark Waters (crimsonseas)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 6.17
+Avg magic cost:    0.33
+Avg basic rewards:
+  Victory Points   2.67
+  Gold             0.00
+  Strength         0.00
+  Magic            0.00
+Types: Minion: 4, Warden: 1, Boss: 1
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 4
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 100%
+  Flex mix (slay-weighted): Minion 100%
+  Avg slay cost by flex type: Minion 3.00
+  Avg slay cost ratio: n/a
+Special rewards:
+  - Gain 3 Gold for each Goblin Pirates you own.
+  - Gain 4 Gold or 2 Maps.
+  - Gain 3 Gold for each owned Minion.
+
+========================================================================
+Den (shadowvale)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 6.00
+Avg magic cost:    2.17
+Avg basic rewards:
+  Victory Points   3.00
+  Gold             0.00
+  Strength         0.83
+  Magic            0.00
+Types: Titan: 2, Warden: 1, Boss: 1, Beast: 2
+Type summary:
+  Flex (Minion/Beast/Titan): Beast 2, Titan 2
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Beast 50%, Titan 50%
+  Flex mix (slay-weighted): Beast 33%, Titan 67%
+  Avg slay cost by flex type: Beast 4.00, Titan 8.00
+  Avg slay cost ratio: Beast=1: Beast 1.00, Titan 2.00
+Special rewards:
+  - Gain 3 Gold or 3 Magic.
+  - Gain 2 Victory Points, or take a Knight.
+  - Gain 2 Gold for each Den Monster you own, or take a Citizen and gain 1 Victory Point.
+
+========================================================================
+Desert (flamesandfrost)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 5.83
+Avg magic cost:    2.17
+Avg basic rewards:
+  Victory Points   3.17
+  Gold             1.33
+  Strength         0.00
+  Magic            0.33
+Types: Minion: 2, Warden: 1, Boss: 1, Beast: 2
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 2, Beast 2
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 50%, Beast 50%
+  Flex mix (slay-weighted): Minion 36%, Beast 64%
+  Avg slay cost by flex type: Minion 4.00, Beast 7.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Beast 1.75
+Special rewards:
+  - Gain 2 Wild.
+  - Gain 2 Gold for each Desert Monster you own, or take a Citizen and gain 2 Victory Points.
+
+========================================================================
+Fire Temple (firetemple)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 6.17
+Avg magic cost:    7.50
+Avg basic rewards:
+  Victory Points   4.17
+  Gold             1.00
+  Strength         0.00
+  Magic            1.00
+Types: Warden: 1, Boss: 1, Beast: 4
+Type summary:
+  Flex (Minion/Beast/Titan): Beast 4
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Beast 100%
+  Flex mix (slay-weighted): Beast 100%
+  Avg slay cost by flex type: Beast 11.50
+  Avg slay cost ratio: n/a
+Special rewards:
+  - Gain 3 Gold or 3 Magic.
+  - Gain 4 Gold or 2 Victory Points.
+  - Gain 2 Victory Points for each Fire Temple Monster you own.
+
+========================================================================
+Forest (base1)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 5.17
+Avg magic cost:    1.33
+Avg basic rewards:
+  Victory Points   2.17
+  Gold             0.33
+  Strength         0.00
+  Magic            0.33
+Types: Minion: 2, Warden: 1, Boss: 1, Beast: 2
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 2, Beast 2
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 50%, Beast 50%
+  Flex mix (slay-weighted): Minion 33%, Beast 67%
+  Avg slay cost by flex type: Minion 3.00, Beast 6.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Beast 2.00
+Special rewards:
+  - Gain 3 Gold, or take a Knight.
+  - Take a Citizen that costs 2 Gold or less.
+  - Gain 2 Gold for each Forest Monster you own, or take a Citizen and gain 1 Victory Point.
+
+========================================================================
+Glacier (flamesandfrost)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 8.67
+Avg magic cost:    4.00
+Avg basic rewards:
+  Victory Points   3.67
+  Gold             0.83
+  Strength         0.00
+  Magic            0.00
+Types: Titan: 2, Warden: 1, Boss: 1, Beast: 2
+Type summary:
+  Flex (Minion/Beast/Titan): Beast 2, Titan 2
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Beast 50%, Titan 50%
+  Flex mix (slay-weighted): Beast 37%, Titan 63%
+  Avg slay cost by flex type: Beast 7.00, Titan 12.00
+  Avg slay cost ratio: Beast=1: Beast 1.00, Titan 1.71
+Special rewards:
+  - Gain 3 Gold or 3 Magic.
+  - Gain 6 Gold or 3 Victory Points.
+  - Gain 2 Victory Points for each Glacier Monster you own.
+
+========================================================================
+Gloom Gyre (crimsonseas)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 3.50
+Avg magic cost:    5.17
+Avg basic rewards:
+  Victory Points   3.17
+  Gold             0.50
+  Strength         0.00
+  Magic            0.00
+Types: Warden: 1, Boss: 1, Beast: 4
+Type summary:
+  Flex (Minion/Beast/Titan): Beast 4
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Beast 100%
+  Flex mix (slay-weighted): Beast 100%
+  Avg slay cost by flex type: Beast 3.00
+  Avg slay cost ratio: n/a
+Special rewards:
+  - Gain 3 Strength for each Sea Drake you own.
+  - Take a Domain.
+  - Gain 2 Victory Points for each Gloom Gyre Monster you own.
+
+========================================================================
+Gnolls (gnolls)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 7.67
+Avg magic cost:    0.50
+Avg basic rewards:
+  Victory Points   3.00
+  Gold             0.50
+  Strength         0.00
+  Magic            0.00
+Types: Warden: 1, Boss: 1, Beast: 4
+Type summary:
+  Flex (Minion/Beast/Titan): Beast 4
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Beast 100%
+  Flex mix (slay-weighted): Beast 100%
+  Avg slay cost by flex type: Beast 8.50
+  Avg slay cost ratio: n/a
+Special rewards:
+  - Take a Citizen.
+  - Banish a face-up Citizen from the center stacks, then take a Citizen.
+  - Gain 1 Gold for each Gnolls Monster you own, or take a Citizen.
+
+========================================================================
+Hills (base1)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 2.83
+Avg magic cost:    0.00
+Avg basic rewards:
+  Victory Points   2.00
+  Gold             0.50
+  Strength         0.00
+  Magic            0.00
+Types: Minion: 3, Titan: 1, Warden: 1, Boss: 1
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 3, Titan 1
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 75%, Titan 25%
+  Flex mix (slay-weighted): Minion 50%, Titan 50%
+  Avg slay cost by flex type: Minion 1.00, Titan 3.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Titan 3.00
+Special rewards:
+  - Gain 1 Gold or 1 Magic.
+  - Gain 2 Wild.
+  - Gain 1 Gold for each Hills Monster you own.
+
+========================================================================
+Kaharian (kaharian)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 7.17
+Avg magic cost:    1.33
+Avg basic rewards:
+  Victory Points   2.17
+  Gold             0.67
+  Strength         0.00
+  Magic            0.00
+Types: Minion: 2, Titan: 2, Warden: 1, Boss: 1
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 2, Titan 2
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 50%, Titan 50%
+  Flex mix (slay-weighted): Minion 36%, Titan 64%
+  Avg slay cost by flex type: Minion 5.00, Titan 9.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Titan 1.80
+Special rewards:
+  - Gain 3 Gold, or take a Peasant.
+  - Take a Citizen.
+  - Take a Citizen, then take a Domain.
+  - Gain 1 Magic for each Kaharian Monster you own, or take a Citizen.
+
+========================================================================
+Mountains (base1)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 9.00
+Avg magic cost:    0.00
+Avg basic rewards:
+  Victory Points   3.83
+  Gold             0.00
+  Strength         0.00
+  Magic            0.00
+Types: Minion: 2, Warden: 1, Boss: 1, Beast: 2
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 2, Beast 2
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 50%, Beast 50%
+  Flex mix (slay-weighted): Minion 64%, Beast 36%
+  Avg slay cost by flex type: Minion 9.00, Beast 5.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Beast 0.56
+Special rewards:
+  - Gain 2 Gold or 2 Magic.
+  - Take a Citizen that costs 3 Gold or less.
+  - Take a Citizen.
+  - Gain 2 Gold for each Mountains Monster you own.
+
+========================================================================
+Necropolis (shadowvale)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 5.17
+Avg magic cost:    0.00
+Avg basic rewards:
+  Victory Points   3.17
+  Gold             0.33
+  Strength         0.00
+  Magic            1.17
+Types: Minion: 2, Warden: 1, Boss: 1, Beast: 2
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 2, Beast 2
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 50%, Beast 50%
+  Flex mix (slay-weighted): Minion 29%, Beast 71%
+  Avg slay cost by flex type: Minion 2.00, Beast 5.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Beast 2.50
+Special rewards:
+  - Gain 1 Gold for each Necropolis Monster you own.
+
+========================================================================
+Oasis (flamesandfrost)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 5.33
+Avg magic cost:    3.83
+Avg basic rewards:
+  Victory Points   3.83
+  Gold             0.00
+  Strength         0.00
+  Magic            0.00
+Types: Minion: 3, Titan: 1, Warden: 1, Boss: 1
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 3, Titan 1
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 75%, Titan 25%
+  Flex mix (slay-weighted): Minion 50%, Titan 50%
+  Avg slay cost by flex type: Minion 4.00, Titan 12.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Titan 3.00
+Special rewards:
+  - Gain 1 Wild.
+  - Gain 4 Wild or 2 Victory Points.
+  - Gain 6 Wild.
+  - Gain 2 Wild for each Oasis Monster you own.
+
+========================================================================
+Ruins (base1)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 4.33
+Avg magic cost:    0.00
+Avg basic rewards:
+  Victory Points   2.33
+  Gold             0.67
+  Strength         0.00
+  Magic            1.00
+Types: Minion: 3, Titan: 1, Warden: 1, Boss: 1
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 3, Titan 1
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 75%, Titan 25%
+  Flex mix (slay-weighted): Minion 55%, Titan 45%
+  Avg slay cost by flex type: Minion 2.00, Titan 5.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Titan 2.50
+Special rewards:
+  - Gain 2 Gold for each Ruins Monster you own.
+
+========================================================================
+Sewer (shadowvale)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 3.67
+Avg magic cost:    0.67
+Avg basic rewards:
+  Victory Points   2.17
+  Gold             1.17
+  Strength         0.00
+  Magic            0.00
+Types: Titan: 2, Warden: 1, Boss: 1, Beast: 2
+Type summary:
+  Flex (Minion/Beast/Titan): Beast 2, Titan 2
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Beast 50%, Titan 50%
+  Flex mix (slay-weighted): Beast 33%, Titan 67%
+  Avg slay cost by flex type: Beast 2.00, Titan 4.00
+  Avg slay cost ratio: Beast=1: Beast 1.00, Titan 2.00
+Special rewards:
+  - Gain 2 Wild.
+  - Gain 1 Gold for each Sewer Monster you own.
+
+========================================================================
+Skerry (crimsonseas)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 5.00
+Avg magic cost:    1.83
+Avg basic rewards:
+  Victory Points   3.00
+  Gold             0.00
+  Strength         0.00
+  Magic            0.00
+Types: Warden: 1, Boss: 1, Beast: 4
+Type summary:
+  Flex (Minion/Beast/Titan): Beast 4
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Beast 100%
+  Flex mix (slay-weighted): Beast 100%
+  Avg slay cost by flex type: Beast 4.00
+  Avg slay cost ratio: n/a
+Special rewards:
+  - Gain 2 Wild for each Harpies you own.
+  - Gain 4 Wild or 1 Tome.
+  - Gain 2 Wild for each owned Beast.
+
+========================================================================
+Swamp (base2)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 4.83
+Avg magic cost:    3.00
+Avg basic rewards:
+  Victory Points   3.67
+  Gold             1.00
+  Strength         0.83
+  Magic            0.00
+Types: Minion: 3, Warden: 1, Boss: 1, Beast: 1
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 3, Beast 1
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 75%, Beast 25%
+  Flex mix (slay-weighted): Minion 62%, Beast 38%
+  Avg slay cost by flex type: Minion 5.00, Beast 9.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Beast 1.80
+Special rewards:
+  - Gain 3 Gold or 3 Magic.
+  - Gain 2 Magic for each Swamp Monster you own.
+
+========================================================================
+The Deep (crimsonseas)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 3.67
+Avg magic cost:    2.83
+Avg basic rewards:
+  Victory Points   2.50
+  Gold             0.00
+  Strength         0.00
+  Magic            0.00
+Types: Warden: 1, Boss: 1, Beast: 4
+Type summary:
+  Flex (Minion/Beast/Titan): Beast 4
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Beast 100%
+  Flex mix (slay-weighted): Beast 100%
+  Avg slay cost by flex type: Beast 2.00
+  Avg slay cost ratio: n/a
+Special rewards:
+  - Gain 2 Gold or 1 Map.
+  - Gain 6 Wild.
+  - Gain 2 Victory Points for each Monster you own in The Deep.
+
+========================================================================
+Tundra (flamesandfrost)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 6.00
+Avg magic cost:    2.50
+Avg basic rewards:
+  Victory Points   2.33
+  Gold             0.00
+  Strength         0.00
+  Magic            0.00
+Types: Titan: 1, Warden: 1, Boss: 1, Beast: 3
+Type summary:
+  Flex (Minion/Beast/Titan): Beast 3, Titan 1
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Beast 75%, Titan 25%
+  Flex mix (slay-weighted): Beast 62%, Titan 38%
+  Avg slay cost by flex type: Beast 5.00, Titan 9.00
+  Avg slay cost ratio: Beast=1: Beast 1.00, Titan 1.80
+Special rewards:
+  - Gain 3 Magic, or take a Peasant.
+  - Take a Citizen.
+  - Take a random Monster owned by an opponent.
+  - Take a Domain.
+
+========================================================================
+Undead Samurai (undeadsamurai)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 3.33
+Avg magic cost:    1.33
+Avg basic rewards:
+  Victory Points   1.83
+  Gold             0.00
+  Strength         0.00
+  Magic            2.00
+Types: Minion: 4, Warden: 1, Boss: 1
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 4
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 100%
+  Flex mix (slay-weighted): Minion 100%
+  Avg slay cost by flex type: Minion 3.00
+  Avg slay cost ratio: n/a
+Special rewards:
+  - Flip a Citizen on an opponent's tableau face-down.
+  - Gain 1 Magic for each Undead Samurai Monster you own.
+
+========================================================================
+Valley (base1)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 6.17
+Avg magic cost:    0.83
+Avg basic rewards:
+  Victory Points   3.00
+  Gold             0.17
+  Strength         0.00
+  Magic            1.33
+Types: Titan: 1, Warden: 1, Boss: 1, Beast: 3
+Type summary:
+  Flex (Minion/Beast/Titan): Beast 3, Titan 1
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Beast 75%, Titan 25%
+  Flex mix (slay-weighted): Beast 60%, Titan 40%
+  Avg slay cost by flex type: Beast 4.00, Titan 8.00
+  Avg slay cost ratio: Beast=1: Beast 1.00, Titan 2.00
+Special rewards:
+  - Gain 5 Wild.
+  - Gain 2 Magic for each Valley Monster you own.
+
+========================================================================
+Volcano (flamesandfrost)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 8.00
+Avg magic cost:    3.17
+Avg basic rewards:
+  Victory Points   3.50
+  Gold             0.33
+  Strength         0.83
+  Magic            0.33
+Types: Titan: 1, Warden: 1, Boss: 1, Beast: 3
+Type summary:
+  Flex (Minion/Beast/Titan): Beast 3, Titan 1
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Beast 75%, Titan 25%
+  Flex mix (slay-weighted): Beast 67%, Titan 33%
+  Avg slay cost by flex type: Beast 8.00, Titan 12.00
+  Avg slay cost ratio: Beast=1: Beast 1.00, Titan 1.50
+Special rewards:
+  - Gain 3 Gold or 1 Victory Point.
+  - Gain 2 Victory Points for each Volcano Monster you own.
+
+========================================================================
+Woods (shadowvale)
+------------------------------------------------------------------------
+Cards: 6
+Avg strength cost: 7.33
+Avg magic cost:    1.83
+Avg basic rewards:
+  Victory Points   3.17
+  Gold             0.67
+  Strength         0.00
+  Magic            1.67
+Types: Minion: 2, Warden: 1, Boss: 1, Beast: 2
+Type summary:
+  Flex (Minion/Beast/Titan): Minion 2, Beast 2
+  Fixed (Warden/Boss): Warden 1, Boss 1
+  Flex mix (count): Minion 50%, Beast 50%
+  Flex mix (slay-weighted): Minion 36%, Beast 64%
+  Avg slay cost by flex type: Minion 4.00, Beast 7.00
+  Avg slay cost ratio: Minion=1: Minion 1.00, Beast 1.75
+Special rewards:
+  - Take a Citizen.
+  - Gain 2 Magic for each Woods Monster you own.

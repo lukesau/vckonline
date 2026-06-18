@@ -899,6 +899,16 @@ class ShouldIncludeRelicsTests(unittest.TestCase):
     def test_random_excludes_on_high_roll(self, _mock):
         self.assertFalse(_should_include_relics("random"))
 
+    def test_random_lobby_override_excludes(self):
+        self.assertFalse(_should_include_relics(
+            "random", draft_selections={"include_relics": False},
+        ))
+
+    def test_random_lobby_override_includes(self):
+        self.assertTrue(_should_include_relics(
+            "random", draft_selections={"include_relics": True},
+        ))
+
     def test_base_preset_excludes(self):
         self.assertFalse(_should_include_relics("base"))
 

@@ -39,9 +39,9 @@ _DEFAULT_PRESET = {
     "optional_starter_expansion": None,
     "apply_implemented_image_filter": False,
     "draft": False,
-    "include_agents": "never",
-    "include_relics": "never",
-    "expansion_only": None,
+  "include_agents": "never",
+  "include_relics": "never",
+  "expansion_only": None,
 }
 
 # Raw entries keyed by preset id (before alias resolution).

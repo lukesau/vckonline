@@ -155,3 +155,4 @@ Standalone CLI tools (not imported by the app):
 - `scripts/check_db_server.py` — tunnel reachability probe (no venv required)
 - `scripts/dump_tables.py` — dump all card tables to dated INSERT files in `sql/dumps/` (requires venv + tunnel)
 - `scripts/card_image_utils.py` — normalize card artwork to 400×570 JPEG
+- `scripts/generate_rotating_monster_set.py` — generate balanced `fixed_monster_areas` from the full monster pool (requires venv + tunnel)
