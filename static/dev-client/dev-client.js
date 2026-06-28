@@ -2084,11 +2084,11 @@
 
             function resourceSpecLabel(spec) {
                 const raw = (spec || '').toString().trim().toLowerCase();
-                    const m = /^(g|s|m|v|vp)\s*:\s*(\d+)$/.exec(raw);
+                    const m = /^(g|s|m|v|vp|p)\s*:\s*(\d+)$/.exec(raw);
                 if (!m) return raw || '';
                 const n = Number(m[2]);
                 const k = m[1] === 'vp' ? 'v' : m[1];
-                const word = k === 'g' ? 'gold' : k === 's' ? 'strength' : k === 'm' ? 'magic' : 'VP';
+                const word = k === 'g' ? 'gold' : k === 's' ? 'strength' : k === 'm' ? 'magic' : k === 'p' ? 'map' : 'VP';
                 const unit = k === 'v' ? '' : ' ';
                 return k === 'v' ? `${n} VP` : `${n}${unit}${word}`;
             }

@@ -1,0 +1,52 @@
+{
+  "citizen_01_cleric": {
+    "cx": 228,
+    "cy": 180,
+    "size": 180
+  },
+  "citizen_02_merchant": {
+    "cx": 211,
+    "cy": 144,
+    "size": 180
+  },
+  "citizen_03_mercenary": {
+    "cx": 204,
+    "cy": 141,
+    "size": 180
+  },
+  "citizen_04_archer": {
+    "cx": 234,
+    "cy": 182,
+    "size": 180
+  },
+  "citizen_05_peasant": {
+    "cx": 191,
+    "cy": 154,
+    "size": 180
+  },
+  "citizen_06_knight": {
+    "cx": 193,
+    "cy": 148,
+    "size": 180
+  },
+  "citizen_07_rogue": {
+    "cx": 215,
+    "cy": 148,
+    "size": 180
+  },
+  "citizen_08_champion": {
+    "cx": 224,
+    "cy": 178,
+    "size": 180
+  },
+  "citizen_09_paladin": {
+    "cx": 199,
+    "cy": 122,
+    "size": 180
+  },
+  "citizen_10_butcher": {
+    "cx": 194,
+    "cy": 120,
+    "size": 180
+  }
+}
