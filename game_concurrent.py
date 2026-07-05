@@ -365,6 +365,11 @@ class _HarvestChoicesConcurrentHandler:
         return "", s
 
     def apply(self, game, player_id, response):
+        if getattr(game, "pending_event_slay_cost", None):
+            raise ValueError(
+                "Resolve the event roll effect (choose a monster for the extra slay cost) "
+                "before submitting harvest decisions."
+            )
         ca = getattr(game, "concurrent_action", None) or {}
         prompts = ((ca.get("data") or {}).get("prompts") or {}) if isinstance(ca, dict) else {}
         plist = prompts.get(player_id)

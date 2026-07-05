@@ -2473,8 +2473,15 @@ function renderEventSlayCostPrompt(state) {
         const payload = await res.json().catch(() => ({}));
         if (!res.ok) { window.alert(payload?.detail || res.statusText || 'Request failed'); return; }
         removePromptOverlay();
-        if (payload?.game_state) render(payload.game_state);
-        else fetchGameStateFromApi();
+        if (payload?.game_state) {
+          // Bust render dedup so the harvest gate that just opened is never
+          // skipped when tick_id is unchanged (roll effects don't bump it).
+          lastRenderedStateJson = '';
+          render(payload.game_state);
+          if ((payload.game_state.concurrent_action?.pending || []).length) {
+            renderPromptModal(payload.game_state);
+          }
+        } else fetchGameStateFromApi();
       }));
     });
   }
@@ -3741,16 +3748,26 @@ function renderPromptModal(state) {
   }
   lastPromptFingerprint = fingerprint;
 
+  const req = state?.action_required || {};
+  const reqId = req?.id || '';
+  const reqAction = (req?.action || '').toString();
+
+  // Roll-phase monster events (Corrupted Cleric, Mimic, …) open an
+  // event_slay_cost_choice before harvest decisions. Show that first even if
+  // a stale harvest_choices gate is still present client-side.
+  if (reqAction === 'event_slay_cost_choice' || state?.pending_event_slay_cost) {
+    if (reqAction === 'event_slay_cost_choice') {
+      renderEventSlayCostPrompt(state);
+      return;
+    }
+  }
+
   const concurrent = state?.concurrent_action || null;
   const concurrentPending = concurrent && Array.isArray(concurrent.pending) ? concurrent.pending : [];
   if (concurrentPending.length > 0) {
     renderConcurrentPanel(state, concurrent);
     return;
   }
-
-  const req = state?.action_required || {};
-  const reqId = req?.id || '';
-  const reqAction = (req?.action || '').toString();
 
   if (!reqId || reqId === state?.game_id) {
     removePromptOverlay();

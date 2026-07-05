@@ -183,22 +183,7 @@ class LifecycleEngine:
             # Manual harvest: players resolve matching starters/citizens in turn order (active player first).
             if not getattr(self.game, "harvest_processed", False):
                 if getattr(self.game, "harvest_player_order", None) is None:
-                    for p in self.game.player_list:
-                        p.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0, "map": 0}
-                    self.game.harvest_consumed = {}
-                    self.game.harvest_player_idx = 0
-                    self.game.harvest_player_order = self.game._harvest_player_id_order_starting_active()
-                    self.game._harvest_steal_phase_done = False
-                    resting_pid = self.game.resting_player_id()
-                    if resting_pid is not None:
-                        self.game._log_game_event(
-                            f"{self.game._player_label(resting_pid)} is resting (5-player rule); no harvest this turn."
-                        )
-                    # Harvest-phase domain passives (e.g. Jousting Field) must run after deltas are
-                    # cleared for the new harvest round, not during finalize_roll (which ran before
-                    # this reset and would lose passive contributions from harvest_delta tracking).
-                    active = self.game._player_by_id(self.current_player_id())
-                    self.game.harvest._apply_harvest_jousting_passive(active)
+                    self.game.harvest._ensure_harvest_round_initialized()
                 self.game.harvest._harvest_run_automation_until_blocked()
             # Harvest may open an unordered concurrent gate (e.g. concurrent
             # non-steal harvest decisions). If that happens inside this
@@ -214,6 +199,9 @@ class LifecycleEngine:
                 if self.game.action_required.get("action") == "manual_harvest":
                     return False
                 return True
+
+            if not getattr(self.game, "harvest_processed", False):
+                return False
 
             self.game.phase = 'action'
             # baseline actions per turn; may become effect-driven later
@@ -581,6 +569,7 @@ class LifecycleEngine:
         self.game.harvest_player_idx = 0
         self.game.harvest_consumed = {}
         self.game._harvest_steal_phase_done = False
+        self.game.harvest._clear_stale_harvest_concurrent_gate()
 
         # Clear only the leftover finalize prompt; preserve choices opened by
         # roll effects (event slay cost, Flaming Devourer, etc.).

@@ -262,8 +262,58 @@ class HarvestEngine:
                     return True
         return False
 
+    def _clear_stale_harvest_concurrent_gate(self):
+        """Drop a leftover harvest_choices gate before a new harvest round.
+
+        After scan-phase harvest completes the handler clears pending but the
+        same dict can linger with every player listed in completed. The next
+        roll would then skip draining those players and finalize harvest with
+        no payouts.
+        """
+        ca = getattr(self.game, "concurrent_action", None) or None
+        if isinstance(ca, dict) and ca.get("kind") == "harvest_choices":
+            self.game.concurrent_action = None
+
+    def _ensure_harvest_round_initialized(self):
+        """Set up per-round harvest bookkeeping the first time we enter harvest.
+
+        Roll-phase prompts (Corrupted Cleric slay cost, Flaming Devourer banish,
+        etc.) block ``advance_tick`` before this init runs during ``finalize_roll``.
+        Callers that clear those prompts must invoke this (via
+        ``_resume_after_roll_effect_prompt``) before opening harvest automation.
+        """
+        if getattr(self.game, "harvest_player_order", None) is not None:
+            return
+        self._clear_stale_harvest_concurrent_gate()
+        for p in self.game.player_list:
+            p.harvest_delta = {"gold": 0, "strength": 0, "magic": 0, "victory": 0, "map": 0}
+        self.game.harvest_consumed = {}
+        self.game.harvest_player_idx = 0
+        self.game.harvest_player_order = self.game._harvest_player_id_order_starting_active()
+        self.game._harvest_steal_phase_done = False
+        resting_pid = self.game.resting_player_id()
+        if resting_pid is not None:
+            self.game._log_game_event(
+                f"{self.game._player_label(resting_pid)} is resting (5-player rule); no harvest this turn."
+            )
+        active = self.game._player_by_id(self.game.lifecycle.current_player_id())
+        self._apply_harvest_jousting_passive(active)
+
+    def _resume_after_roll_effect_prompt(self):
+        """Continue harvest after a roll-phase per-player prompt clears."""
+        if getattr(self.game, "phase", None) != "harvest":
+            return
+        if getattr(self.game, "harvest_processed", False):
+            return
+        self._ensure_harvest_round_initialized()
+        if self._harvest_action_blocked():
+            return
+        self._harvest_run_automation_until_blocked()
+
     def _harvest_action_blocked(self):
         if self.game.lifecycle.is_blocked_on_concurrent_action():
+            return True
+        if getattr(self.game, "pending_event_slay_cost", None):
             return True
         aid = self.game.action_required.get("id") if self.game.action_required else None
         if not aid or aid == self.game.game_id:
@@ -279,6 +329,7 @@ class HarvestEngine:
             "choose_domain_reward",
             "choose_monster_slay",
             "slay_monster_payment",
+            "event_slay_cost_choice",
         ):
             return True
         if str(aa).startswith("choose ") or str(aa).startswith("choose_player") or str(aa).startswith("choose_monster"):
@@ -697,6 +748,9 @@ class HarvestEngine:
             # Handler not implemented yet (or intentionally disabled).
             return False
 
+        if getattr(self.game, "pending_event_slay_cost", None):
+            return False
+
         ca = getattr(self.game, "concurrent_action", None) or None
         if ca and ca.get("kind") == "harvest_choices":
             # Gate is already active; draining happens inside the concurrent handler.
@@ -894,8 +948,7 @@ class HarvestEngine:
         self.game.payouts._maybe_resume_post_slay_continuation()
         if self.game.phase != "harvest" or getattr(self.game, "harvest_processed", False):
             return
-        if getattr(self.game, "harvest_player_order", None) is None:
-            return
+        self._ensure_harvest_round_initialized()
         if self._harvest_action_blocked():
             return
         self._harvest_run_automation_until_blocked()

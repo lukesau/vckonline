@@ -621,6 +621,7 @@ class DiceEngine:
         self.game.pending_event_slay_cost = None
         self.game.action_required["id"] = self.game.game_id
         self.game.action_required["action"] = ""
+        self.game.harvest._resume_after_roll_effect_prompt()
 
     # ------------------------------------------------------------------
     # Crimson Seas: rolling 6s feeds the Exekratys pool.

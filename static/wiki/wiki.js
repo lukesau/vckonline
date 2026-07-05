@@ -276,15 +276,6 @@
       });
     }
 
-    const implementationGroup = {
-      key: "implementation",
-      label: "Status",
-      options: [
-        { value: "implemented", label: "Implemented" },
-        { value: "unimplemented", label: "Unimplemented" },
-      ],
-    };
-
     const roleGroup = {
       key: "role",
       label: "Role",
@@ -314,7 +305,6 @@
           { value: "off", label: "Off-turn" },
         ],
       });
-      groups.push(implementationGroup);
     } else if (type === "monsters") {
       const areas = unique(cards.map((c) => c.dataset.area)).sort();
       if (areas.length) {
@@ -325,7 +315,6 @@
         groups.push({ key: "monster_type", label: "Type", options: mtypes.map((a) => ({ value: a, label: titleCase(a) })) });
       }
       groups.push({ key: "has_special_reward", label: "Reward", options: [{ value: "yes", label: "Has special" }] });
-      groups.push(implementationGroup);
     } else if (type === "domains") {
       groups.push(roleGroup);
       groups.push({
@@ -336,7 +325,6 @@
           { value: "activation", label: "Activation" },
         ],
       });
-      groups.push(implementationGroup);
       groups.push({ key: "banned", label: "Banned", options: [{ value: "yes", label: "Banned only" }] });
     } else if (type === "dukes") {
       groups.push({ key: "banned", label: "Banned", options: [{ value: "yes", label: "Banned only" }] });
@@ -352,17 +340,14 @@
         ],
       });
       groups.push({ key: "is_monster", label: "Monster", options: [{ value: "yes", label: "Is monster" }] });
-      groups.push(implementationGroup);
     } else if (type === "starters") {
-      groups.push(implementationGroup);
+      // no starter-specific filters
     } else if (type === "nobles") {
       groups.push(roleGroup);
       groups.push({ key: "special", label: "Payout", options: [{ value: "yes", label: "Has special payout" }] });
-      groups.push(implementationGroup);
     } else if (type === "agents") {
-      groups.push(implementationGroup);
+      // no agent-specific filters
     } else if (type === "relics") {
-      groups.push(implementationGroup);
       groups.push({ key: "banned", label: "Banned", options: [{ value: "yes", label: "Banned only" }] });
     }
     return groups;
@@ -382,8 +367,6 @@
       if (!hay.includes(state.search)) return false;
     }
     if (f.expansion && card.dataset.expansion !== f.expansion) return false;
-    if (f.implementation === "implemented" && card.dataset.implementation === "unimplemented") return false;
-    if (f.implementation === "unimplemented" && card.dataset.implementation !== "unimplemented") return false;
 
     if (type === "citizens") {
       if (!passesRoleFilter(card, f.role)) return false;

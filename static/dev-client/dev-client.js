@@ -1586,18 +1586,24 @@
                 const panel = document.getElementById('choicePanel');
                 if (!panel) return;
 
-                // Concurrent (non-ordered) prompts always take precedence over
-                // turn-based action_required: while one is active the engine
-                // will not advance and no per-player turn prompts are valid.
+                // Concurrent (non-ordered) prompts take precedence over turn-based
+                // action_required, except roll-phase monster events (Corrupted Cleric,
+                // Mimic, …) which must pick a slay-cost target before harvest decisions.
+                const req = gameState?.action_required || {};
+                const reqAction = (req?.action || '').toString();
+                if (reqAction === 'event_slay_cost_choice' || gameState?.pending_event_slay_cost) {
+                    if (reqAction === 'event_slay_cost_choice') {
+                        return renderEventSlayCostPrompt(gameState);
+                    }
+                }
+
                 const concurrent = gameState?.concurrent_action || null;
                 const concurrentPending = concurrent && Array.isArray(concurrent.pending) ? concurrent.pending : [];
                 if (concurrentPending.length > 0) {
                     return renderConcurrentActionPanel(gameState, concurrent);
                 }
 
-                const req = gameState?.action_required || {};
                 const reqId = req?.id || '';
-                const reqAction = req?.action || '';
                 const activePlayerId = gameState?.active_player_id || '';
 
                 function harvestTurnBadge(forPlayerId) {

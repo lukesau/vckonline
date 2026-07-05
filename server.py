@@ -2493,8 +2493,18 @@ async def apply_event_slay_cost(game_id: str, request: ApplyEventSlayCostRequest
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    while game.advance_tick():
-        pass
+    # Resume harvest if the roll effect blocked before automation started.
+    # Do not blindly ``while advance_tick()`` — that can over-advance when
+    # harvest is already waiting on the concurrent choices gate.
+    if getattr(game, "phase", None) == "harvest":
+        if (
+            getattr(game, "harvest_processed", False)
+            and not game.lifecycle.is_blocked_on_concurrent_action()
+            and not game.harvest._harvest_action_blocked()
+        ):
+            while game.advance_tick():
+                if getattr(game, "phase", None) == "action":
+                    break
     # Event-slay-cost is a pre-slay payment, not one of the three real
     # player actions, so it does not record a snapshot. The follow-up
     # slay_monster call will be the snapshot anchor.
