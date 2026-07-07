@@ -33,6 +33,7 @@ _DEFAULT_PRESET = {
     "duke_expansion_filters": None,
     "event_expansion_filters": None,
     "exclude_domain_expansions": [],
+    "exclude_starter_expansions": [],
     "guaranteed_domain_expansion": None,
     "fixed_citizen_ids": None,
     "fixed_monster_areas": None,
@@ -77,6 +78,7 @@ def _normalize_raw(data, source_path):
         "duke_expansion_filters",
         "event_expansion_filters",
         "exclude_domain_expansions",
+        "exclude_starter_expansions",
     ):
         val = cfg.get(key)
         if val is None:

@@ -17,6 +17,7 @@ from cards import Starter
 from game_models import LobbyMember
 from game_setup import (
     _choose_optional_starter,
+    _filter_excluded_starter_expansions,
     _is_optional_starter,
     _is_optional_starter_row,
     load_game_data,
@@ -92,6 +93,18 @@ class ChooseOptionalStarterTests(unittest.TestCase):
         self.assertTrue(ids.issubset({3, 4}))
         self.assertGreater(len(ids), 1)
 
+    def test_filter_excludes_crimsonseas_optional_starter(self):
+        coxswain = _make_starter(20, "Coxswain", -1, -1, expansion="crimsonseas")
+        pool = self.pool + [coxswain]
+        filtered = _filter_excluded_starter_expansions(pool, ["crimsonseas"])
+        self.assertEqual({s.name for s in filtered}, {"Herald", "Margrave"})
+        random.seed(0)
+        ids = {
+            _choose_optional_starter(filtered, "random", None).starter_id
+            for _ in range(30)
+        }
+        self.assertNotIn(20, ids)
+
 
 def _optional_starter_ids(player):
     return [
@@ -162,13 +175,23 @@ class OptionalStarterIntegrationTests(unittest.TestCase):
                 ["Margrave"],
             )
 
+    def test_draft_pool_excludes_crimsonseas_optional_starter(self):
+        from game_setup import load_draft_card_pool
+
+        _m, _c, starter_rows = load_draft_card_pool(2)
+        for row in starter_rows:
+            self.assertNotEqual(
+                (row.get("expansion") or "").strip().lower(),
+                "crimsonseas",
+                f"crimsonseas optional starter should not appear in draft pool: {row}",
+            )
+
     def test_random_preset_grants_at_most_one_optional_starter(self):
         from game_setup import load_draft_card_pool
 
         # The random preset can grant any -1/-1 starter that passes
-        # keep_for_random (implemented + has art), so derive the allowed id set
-        # from the live DB instead of hard-coding it — new expansion optional
-        # starters (e.g. Coxswain) shouldn't break this test.
+        # keep_for_random (implemented + has art) and is not excluded by the
+        # preset (Coxswain/crimsonseas is Crimson Seas-only).
         _m, _c, starter_rows = load_draft_card_pool(2)
         allowed_ids = {int(r["id_starters"]) for r in starter_rows}
         self.assertTrue(allowed_ids, "expected at least one keep_for_random optional starter")
@@ -179,6 +202,10 @@ class OptionalStarterIntegrationTests(unittest.TestCase):
             optional_ids = _optional_starter_ids(player)
             self.assertEqual(len(optional_ids), 1)
             self.assertIn(optional_ids[0], allowed_ids)
+            self.assertNotIn(
+                "Coxswain",
+                {s.name for s in player.owned_starters if _is_optional_starter(s)},
+            )
 
 
 if __name__ == "__main__":

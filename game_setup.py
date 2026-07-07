@@ -117,6 +117,19 @@ def _is_optional_starter(card):
         return False
 
 
+def _starter_expansion(row_or_card):
+    if isinstance(row_or_card, dict):
+        return (row_or_card.get("expansion") or "").strip().lower()
+    return (getattr(row_or_card, "expansion", "") or "").strip().lower()
+
+
+def _filter_excluded_starter_expansions(candidates, exclude_expansions):
+    if not exclude_expansions:
+        return list(candidates)
+    blocked = {e.strip().lower() for e in exclude_expansions}
+    return [c for c in candidates if _starter_expansion(c) not in blocked]
+
+
 def _choose_optional_starter(candidates, preset, optional_starter_expansion, draft_selections=None):
     """Pick the optional -1/-1 doubles-or-no-payout starter, or None.
 
@@ -330,9 +343,13 @@ def load_draft_card_pool(n_players: int):
     cursor.execute(
         "SELECT * FROM starters WHERE roll_match1 = -1 AND roll_match2 = -1 ORDER BY id_starters"
     )
+    exclude_starter_expansions = get_preset_config("draft").get("exclude_starter_expansions") or []
     for row in cursor.fetchall():
         if keep_for_random("starter", row):
             starter_candidates.append(dict(row))
+    starter_candidates = _filter_excluded_starter_expansions(
+        starter_candidates, exclude_starter_expansions
+    )
 
     cursor.close()
     conn.close()
@@ -381,6 +398,9 @@ def load_game_data(
     # aren't implemented yet, so exclude them here until they ship rather than
     # letting them leak in.
     exclude_domain_expansions = ()
+    # Optional -1/-1 starters from these expansions are dropped from random/draft
+    # pools (Coxswain is Crimson Seas-only, like its domains).
+    exclude_starter_expansions = ()
     # Expansion whose entire domain set is force-included in the deal before the
     # remaining slots are filled at random. Set by the crimsonseas preset so all
     # of its domains always appear on the board; the fill pool is whatever
@@ -468,6 +488,7 @@ def load_game_data(
     duke_expansion_filters = cfg["duke_expansion_filters"]
     event_expansion_filters = cfg["event_expansion_filters"]
     exclude_domain_expansions = cfg["exclude_domain_expansions"]
+    exclude_starter_expansions = cfg["exclude_starter_expansions"]
     guaranteed_domain_expansion = cfg["guaranteed_domain_expansion"]
     fixed_citizen_ids = cfg["fixed_citizen_ids"]
     fixed_monster_areas = cfg["fixed_monster_areas"]
@@ -863,6 +884,9 @@ def load_game_data(
         # matching the preset's expansion exists.
         core_starters = [s for s in starter_stack if not _is_optional_starter(s)]
         optional_candidates = [s for s in starter_stack if _is_optional_starter(s)]
+        optional_candidates = _filter_excluded_starter_expansions(
+            optional_candidates, exclude_starter_expansions
+        )
         if preset == "random":
             optional_candidates = [
                 s for s in optional_candidates

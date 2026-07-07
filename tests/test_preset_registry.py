@@ -23,6 +23,7 @@ _DEAL_KEYS = (
     "duke_expansion_filters",
     "event_expansion_filters",
     "exclude_domain_expansions",
+    "exclude_starter_expansions",
     "guaranteed_domain_expansion",
     "fixed_citizen_ids",
     "fixed_monster_areas",
@@ -109,6 +110,11 @@ class PresetRegistryTests(unittest.TestCase):
             [19, 2, 41, 14, 33, 34, 35, 36, 9, 48],
         )
         self.assertEqual(cfg["optional_starter_expansion"], "margraves")
+
+    def test_random_and_draft_exclude_crimsonseas_starters(self):
+        for pid in ("random", "draft"):
+            cfg = get_preset_config(pid)
+            self.assertIn("crimsonseas", cfg["exclude_starter_expansions"])
 
     def test_deal_keys_present_for_every_preset(self):
         for pid in all_preset_ids():

@@ -373,6 +373,15 @@ def _preview_starters(cur, cfg):
 
     if cfg["draft"]:
         opt_rows = optional
+        blocked = {
+            e.strip().lower()
+            for e in (cfg.get("exclude_starter_expansions") or [])
+        }
+        if blocked:
+            opt_rows = [
+                r for r in opt_rows
+                if (r.get("expansion") or "").strip().lower() not in blocked
+            ]
         if opt_rows:
             groups.append({
                 "label": "Third starter (voted)",
@@ -383,6 +392,15 @@ def _preview_starters(cur, cfg):
     elif cfg["optional_starter_expansion"] == "random":
         # random preset picks any -1/-1 starter at random
         opt_rows = [r for r in optional if keep_for_random("starter", r)]
+        blocked = {
+            e.strip().lower()
+            for e in (cfg.get("exclude_starter_expansions") or [])
+        }
+        if blocked:
+            opt_rows = [
+                r for r in opt_rows
+                if (r.get("expansion") or "").strip().lower() not in blocked
+            ]
         if opt_rows:
             groups.append({
                 "label": "Third starter (one dealt at random)",

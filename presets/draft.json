@@ -7,6 +7,7 @@
   "event_query": "select_all_events",
   "apply_implemented_image_filter": true,
   "exclude_domain_expansions": ["crimsonseas"],
+  "exclude_starter_expansions": ["crimsonseas"],
   "draft": true,
   "include_agents": "draft",
   "include_relics": "draft"

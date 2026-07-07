@@ -14,6 +14,7 @@ Anything that touches the DB connects to MariaDB at `127.0.0.1:3306` (an SSH por
 - `dev-setup.md`: local environment setup (venv + MariaDB connector)
 - `database.md`: database expectations, SSH tunnel, and stored procedure setup
 - `server.md`: FastAPI server architecture and API surface
+- `vcko-api.md`: client API guide for bots and headless clients (hosted server at vcko.lukesau.com)
 - `game.md`: game engine model and the DB-backed game bootstrap flow
 - `wiki.md`: the read-only `/wiki` card database explorer
 - `testing.md`: how to run the included test scripts
