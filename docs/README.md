@@ -2,8 +2,6 @@
 
 This folder contains developer documentation for the VCK Online dev/test server and game engine.
 
-> **AI coding agents:** start at `../AGENTS.md` in the repo root before reading anything in this folder. It collapses the DB / venv / connector setup into a single page so you can connect on the first try.
-
 ## Bots (no database setup)
 
 The `bots/` package is a separate headless client for playing against the **hosted** server at [vcko.lukesau.com](https://vcko.lukesau.com). It talks only over HTTP — no SSH tunnel, MariaDB, venv, or local FastAPI server required. System Python plus the stdlib is enough:
@@ -15,6 +13,8 @@ python3 scripts/run_bot_match.py --preset base
 See `vcko-api.md` for the full API reference and `bots/` for the client, legal-move enumeration, and bot runner. Unit tests: `python3 -m unittest tests.test_bot_legal_moves -v`.
 
 Everything else in this repo (engine, server, wiki, card dumps) loads card data from the database and needs the setup below.
+
+> **AI coding agents (backend only):** if your work touches the engine, server, database, or venv — not the `bots/` package — start at `../AGENTS.md` in the repo root. It collapses the DB / venv / connector setup into a single page so you can connect on the first try.
 
 ## Database in one paragraph
 
