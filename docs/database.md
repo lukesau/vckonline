@@ -67,7 +67,7 @@ See `sql/INSTALL_PROCEDURES.md` for additional options (mysql client, interactiv
 | `sql/create_all_stored_procedures.sql`, `sql/select_*_sp.sql` | Stored procedure definitions the app calls at runtime |
 | `sql/schema/create_tables.sql`, `sql/create_database.sql` | Database, tables, and user setup |
 | `sql/seed/*.sql` | Committed card-data INSERT dumps |
-| `sql/insert_*.sql` | INSERT templates for adding new card rows |
+| `sql/insert_*_template.sql` | INSERT templates for adding new card rows |
 | `sql/run_sql.sh`, `sql/load_seed_data.sh` | Apply SQL files to the local database |
 | `sql/dumps/` | Generated full-table INSERT dumps from `scripts/dump_tables.py` (gitignored) |
 

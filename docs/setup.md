@@ -68,12 +68,19 @@ See [`database.md`](database.md) for the full procedure list and preset wiring. 
 
 The repo uses the official `mariadb` Python connector, which requires the MariaDB Connector/C native library at install time.
 
+On macOS with Homebrew, `local/setup_venv.sh` and `local/activate_with_env.sh` (gitignored) auto-install Connector/C and set `MARIADB_CONFIG`. Everyone else uses the public scripts at the repo root:
+
 ```bash
 ./setup_venv.sh          # first time: creates .venv and installs requirements
 source ./activate_with_env.sh   # every session
 ```
 
-On macOS, `setup_venv.sh` installs Connector/C via Homebrew if needed. On Linux, install your distro's `libmariadb-dev` (or equivalent) before running `setup_venv.sh`, and set `MARIADB_CONFIG` to point at `mariadb_config` if it is not on your PATH.
+Install MariaDB Connector/C development headers first if `setup_venv.sh` cannot find `mariadb_config`:
+
+- macOS: `brew install mariadb-connector-c`
+- Debian/Ubuntu: `sudo apt-get install libmariadb-dev`
+
+You can also set `MARIADB_CONFIG=/path/to/mariadb_config` before running `setup_venv.sh`.
 
 Do **not** substitute other MySQL drivers (`pymysql`, `mysqlclient`, `sqlalchemy`, etc.) — they are not used in this codebase.
 

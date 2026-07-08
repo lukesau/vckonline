@@ -11,7 +11,7 @@ Layout per sheet:
     cards and the rest are blank and skipped.
 
 Output: images/<kind>/<kind>_<id>_<slug>.jpg, where <id> is the card's DB id
-(see sql/insert_all_agents.sql / sql/insert_all_relics.sql) zero-padded to two
+(see sql/seed/agents.sql / sql/seed/relics.sql) zero-padded to two
 digits so the `/card-image/{type}/{id}` endpoint resolves it. Plus
 images/<kind>/<kind>_back.jpg for the card back.
 """
@@ -27,7 +27,7 @@ SHEETS = [
         # row 2: columns 1-5 are cards, 6-9 blank, 10 is the card back
         "row2_cards": 5,
         # (row, col) -> (db_id, slug). Grid order is left-to-right/top-to-bottom;
-        # db_id is the alphabetical id from sql/insert_all_agents.sql.
+        # db_id is the alphabetical id from sql/seed/agents.sql.
         "names": {
             (1, 1): (9, "kings_herald"), (1, 2): (10, "prefect"), (1, 3): (11, "publican"),
             (1, 4): (12, "sapper"), (1, 5): (13, "squire"), (1, 6): (14, "town_crier"),
@@ -43,7 +43,7 @@ SHEETS = [
         "prefix": "relic",
         # row 2: columns 1-3 are cards, 4-9 blank, 10 is the card back
         "row2_cards": 3,
-        # (row, col) -> (db_id, slug); db_id from sql/insert_all_relics.sql.
+        # (row, col) -> (db_id, slug); db_id from sql/seed/relics.sql.
         "names": {
             (1, 1): (1, "cornelius_ring"), (1, 2): (2, "dragon_orb"), (1, 3): (3, "evermap"),
             (1, 4): (4, "fire_lance"), (1, 5): (5, "gold_bastion"), (1, 6): (6, "lich_sword"),

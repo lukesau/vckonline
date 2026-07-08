@@ -8,7 +8,7 @@
 #
 #   2. Set MARIADB_CONFIG environment variable before pip install:
 #      export MARIADB_CONFIG="/opt/homebrew/Cellar/mariadb-connector-c/3.4.8/bin/mariadb_config"
-#      (or run: ./setup_venv.sh which does this automatically)
+#      (or run: ./setup_venv.sh, or ./local/setup_venv.sh on the maintainer machine)
 #
 #   3. Then install: pip install -r requirements.txt
 mariadb>=1.1.0

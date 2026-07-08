@@ -2,7 +2,7 @@
 
 Development server and game engine for [Valeria Card Kingdoms Online](https://vcko.lukesau.com).
 
-**Just want to play?** Go to [https://vcko.lukesau.com](https://vcko.lukesau.com) — no repo checkout required.
+**Just want to play?** Go to [https://vcko.lukesau.com](https://vcko.lukesau.com). You don't need this repo.
 
 ## Working in this repo
 
