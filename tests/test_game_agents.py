@@ -129,7 +129,7 @@ class ShouldIncludeAgentsTests(unittest.TestCase):
 
 @unittest.skipUnless(
     _db_ready(),
-    "requires active DB tunnel and mariadb module; run source ./activate_with_env.sh first",
+    "requires active DB and mariadb module; run source ./activate_with_env.sh first",
 )
 class AgentsSetupIntegrationTests(unittest.TestCase):
     def setUp(self):

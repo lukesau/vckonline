@@ -18,8 +18,8 @@ slays + activations, each opening a prompt that the player resolves:
   5. After the citizen pick, the engine drains the remaining post-slay
      resume and finalizes harvest, transitioning into the action phase.
 
-Card data is read live from the DB (vckonline@127.0.0.1:3306, SSH-tunneled —
-see `docs/agents.md`) so the test exercises whatever the canonical
+Card data is read live from the DB (vckonline@127.0.0.1:3306 — see
+`docs/setup.md`) so the test exercises whatever the canonical
 special_reward / activation_effect strings are right now. If any of the four
 cards change shape, the test loud-fails at fixture load and the regression
 is unambiguous.
@@ -152,8 +152,7 @@ def _db_available():
 
 @unittest.skipUnless(
     _db_available(),
-    "DB at 127.0.0.1:3306 (vckonline) is required. Start the SSH tunnel: "
-    "ssh -L 3306:localhost:3306 lukesau.com",
+    "DB at 127.0.0.1:3306 (vckonline) is required. See docs/setup.md.",
 )
 class DragoonSlayChainInteractionTests(unittest.TestCase):
     """Drive the Dragoon -> Snow Queen -> Eye of Asteraten -> Gnolls chain.
@@ -472,13 +471,10 @@ class DragoonSlayChainInteractionTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    # Bail out with a clear hint if the tunnel isn't running, instead of a
-    # cryptic mariadb stack trace mid-test.
     if not _db_available():
         sys.stderr.write(
             "DB at 127.0.0.1:3306 (vckonline) is not reachable.\n"
-            "Start the SSH tunnel first: ssh -L 3306:localhost:3306 lukesau.com\n"
-            "See docs/agents.md for details.\n"
+            "See docs/setup.md for database setup.\n"
         )
         sys.exit(2)
     unittest.main()

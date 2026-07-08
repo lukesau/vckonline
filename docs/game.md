@@ -46,9 +46,9 @@ The `Game` object tracks:
   - citizens grouped by roll match, placed into 10 stacks (special-cased for roll 11)
   - domains dealt into 5 stacks of 3, with the top visible/accessible
 
-This function currently assumes local DB connectivity via `127.0.0.1:3306` (typically via SSH port forward).
+This function assumes local DB connectivity via `127.0.0.1:3306`.
 
-See [agents.md](agents.md) for DB setup and [database.md](database.md) for stored procedure installation.
+See [setup.md](setup.md) for DB setup and [database.md](database.md) for stored procedure installation.
 
 ### Debug mode (`debug_mode`)
 

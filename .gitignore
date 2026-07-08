@@ -132,6 +132,9 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
+# Maintainer-only docs (SSH tunnel, remote DB, etc.)
+docs/local/
+
 # Generated table dumps (scripts/dump_tables.py)
 sql/dumps/
 

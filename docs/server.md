@@ -2,8 +2,8 @@
 
 ## Quick start
 
-1. Set up the venv and database — see [agents.md](agents.md).
-2. Confirm the SSH tunnel is up:
+1. Set up the venv and database — see [setup.md](setup.md).
+2. Confirm MariaDB is reachable:
 
    ```bash
    python3 scripts/check_db_server.py

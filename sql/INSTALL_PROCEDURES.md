@@ -4,18 +4,9 @@ All stored procedure SQL files are ready to use. You have several options:
 
 ## Prerequisites
 
-1. **SSH tunnel** — see [docs/agents.md](../docs/agents.md). Probe with `python3 scripts/check_db_server.py` before starting a tunnel.
+1. **Database running** — see [docs/setup.md](../docs/setup.md). Probe with `python3 scripts/check_db_server.py`.
 
-2. **MySQL Client** - Install if needed:
-   ```bash
-   brew install mysql-client
-   ```
-   
-   To add mysql-client to your PATH permanently, add to `~/.zshrc`:
-   ```bash
-   echo 'export PATH="/opt/homebrew/opt/mysql-client/bin:$PATH"' >> ~/.zshrc
-   source ~/.zshrc
-   ```
+2. **MySQL client** — install if needed (e.g. `brew install mysql-client` on macOS).
 
 ## Option 1: Use the Helper Script (Easiest)
 
@@ -25,23 +16,11 @@ All stored procedure SQL files are ready to use. You have several options:
 
 ## Option 2: Use MySQL Client Directly
 
-If mysql is in your PATH (added to ~/.zshrc), you can use:
-
 ```bash
 mysql -h 127.0.0.1 -P 3306 -u vckonline -p vckonline < sql/create_all_stored_procedures.sql
 ```
 
-Or use the full path:
-
-```bash
-/opt/homebrew/opt/mysql-client/bin/mysql -h 127.0.0.1 -P 3306 -u vckonline -p vckonline < sql/create_all_stored_procedures.sql
-```
-
-**Note:** The `-h 127.0.0.1 -P 3306` flags connect through your SSH tunnel to the remote database.
-
 ## Option 3: Interactive MariaDB Session
-
-If you're already logged into MariaDB on the server:
 
 ```sql
 source sql/create_all_stored_procedures.sql;
@@ -64,28 +43,6 @@ Run each procedure file separately using the helper script:
 ./sql/run_sql.sh sql/select_random_dukes_sp.sql
 ./sql/run_sql.sh sql/select_test1_domains_sp.sql
 ./sql/run_sql.sh sql/select_test2_domains_sp.sql
-```
-
-Or using mysql client directly:
-
-```bash
-/opt/homebrew/Cellar/mysql-client/9.5.0/bin/mysql -h 127.0.0.1 -P 3306 -u vckonline -p vckonline < sql/select_base1_citizens_sp.sql
-# ... repeat for each file
-```
-
-Or interactively in MariaDB on the server:
-
-```sql
-source sql/select_base1_citizens_sp.sql;
-source sql/select_base1_monsters_sp.sql;
-source sql/select_base_citizens_sp.sql;
-source sql/select_base_monsters_sp.sql;
-source sql/select_base2_citizens_sp.sql;
-source sql/select_base2_monsters_sp.sql;
-source sql/select_base_domains_sp.sql;
-source sql/select_base_dukes_sp.sql;
-source sql/select_random_domains_sp.sql;
-source sql/select_random_dukes_sp.sql;
 ```
 
 ## Verify Installation
@@ -116,4 +73,3 @@ python3 tests/test_database.py
 - **select_random_dukes()** - Returns all dukes in random order
 - **select_test1_domains()** - Hand-picked 15 domains (ids 1..8 and 93..99), shuffled. Used by the `test1` preset to reproduce the original "first set" the engine was built around.
 - **select_test2_domains()** - 15 random domains drawn from ids 9..24, treated as unbanned. Used by the `test2` preset.
-

@@ -12,7 +12,7 @@ Apply:
 
     python3 scripts/fix_event_text_shorthand.py --commit
 
-Requires the venv + SSH tunnel (see docs/agents.md).
+Requires the venv + database (see docs/setup.md).
 """
 
 import re

@@ -4,7 +4,7 @@ Usage:
     python3 scripts/monster_area_report.py
     python3 scripts/monster_area_report.py -o reports/monster_areas.txt
 
-Requires the venv + SSH tunnel (see docs/agents.md).
+Requires the venv + database (see docs/setup.md).
 """
 
 import argparse

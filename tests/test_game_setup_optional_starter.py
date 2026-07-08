@@ -116,7 +116,7 @@ def _optional_starter_ids(player):
 
 @unittest.skipUnless(
     _db_ready(),
-    "requires active DB tunnel and mariadb module; run source ./activate_with_env.sh first",
+    "requires active DB and mariadb module; run source ./activate_with_env.sh first",
 )
 class OptionalStarterIntegrationTests(unittest.TestCase):
     def setUp(self):

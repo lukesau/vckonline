@@ -2,7 +2,7 @@
 
 ## Connection
 
-See [agents.md](agents.md) for credentials, SSH tunnel, venv, and connector setup.
+See [setup.md](setup.md) for creating the database, loading seed data, and installing stored procedures. See [agents.md](agents.md) for venv and connector conventions.
 
 ## Overview
 
@@ -65,20 +65,18 @@ See `sql/INSTALL_PROCEDURES.md` for additional options (mysql client, interactiv
 | Path | Purpose |
 | ---- | ------- |
 | `sql/create_all_stored_procedures.sql`, `sql/select_*_sp.sql` | Stored procedure definitions the app calls at runtime |
-| `sql/create_starters_table.sql`, `sql/fix_user_setup.sql` | Schema and MariaDB user/grants setup |
+| `sql/schema/create_tables.sql`, `sql/create_database.sql` | Database, tables, and user setup |
+| `sql/seed/*.sql` | Committed card-data INSERT dumps |
 | `sql/insert_*.sql` | INSERT templates for adding new card rows |
-| `sql/run_sql.sh` | Apply a `.sql` file through the SSH tunnel |
+| `sql/run_sql.sh`, `sql/load_seed_data.sh` | Apply SQL files to the local database |
 | `sql/dumps/` | Generated full-table INSERT dumps from `scripts/dump_tables.py` (gitignored) |
 
-One-off data migration scripts (`fix_*.sql`, `add_*.sql`) were removed after being applied to the live DB. To snapshot current card data, run `scripts/dump_tables.py` instead.
+One-off data migration scripts (`fix_*.sql`, `add_*.sql`) were removed after being applied to the live DB. To snapshot current card data, run `scripts/dump_tables.py` (output goes to `sql/dumps/`).
 
 ## User / grants setup
 
-If you have authentication or permissions problems, use:
-
-- `sql/USER_SETUP_GUIDE.md`: investigation and fix commands (create users for `localhost`, `127.0.0.1`, `%`, and grant privileges)
-- `sql/fix_user_setup.sql`: a convenience SQL script in this repo (if you prefer to run a script vs copy/paste commands)
+If authentication fails after following [setup.md](setup.md), re-run `sql/create_database.sql` as a MariaDB admin user.
 
 ## Verifying the DB
 
-See [agents.md](agents.md) for the canonical `check_db_server.py` and `tests/test_database.py` workflow.
+See [setup.md](setup.md) for `check_db_server.py` and `tests/test_database.py`.

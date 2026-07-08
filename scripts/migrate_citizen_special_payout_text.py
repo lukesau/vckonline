@@ -14,7 +14,7 @@ Then commit the changes:
 
     python3 scripts/migrate_citizen_special_payout_text.py --commit
 
-Requires the venv + SSH tunnel (see docs/agents.md).
+Requires the venv + database (see docs/setup.md).
 """
 
 import sys

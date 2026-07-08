@@ -3,7 +3,7 @@ post-duke relic-selection concurrent gate.
 
 These mirror the Agents tests (`tests/test_game_agents.py`). The selection-flow
 tests build minimal in-memory games and need no DB; the dealing tests load
-canonical relic rows from the live DB and skip when the tunnel is down."""
+canonical relic rows from the live DB and skip when the database is unreachable."""
 
 import contextlib
 import importlib.util
@@ -989,7 +989,7 @@ class RelicSelectionFlowTests(unittest.TestCase):
 
 @unittest.skipUnless(
     _db_ready(),
-    "requires active DB tunnel and mariadb module; run source ./activate_with_env.sh first",
+    "requires active DB and mariadb module; run source ./activate_with_env.sh first",
 )
 class RelicsSetupIntegrationTests(unittest.TestCase):
     def _players(self, n):

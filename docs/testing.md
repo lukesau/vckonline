@@ -1,12 +1,12 @@
 # Testing & diagnostics
 
-DB setup: [agents.md](agents.md).
+DB setup: [setup.md](setup.md).
 
 ## Database connectivity
 
 ### Port-level check
 
-`scripts/check_db_server.py` checks whether `127.0.0.1:3306` is reachable (useful to verify your SSH tunnel).
+`scripts/check_db_server.py` checks whether `127.0.0.1:3306` is reachable.
 
 ```bash
 python3 scripts/check_db_server.py
@@ -31,7 +31,7 @@ python3 tests/test_database.py
 
 All tests live in the `tests/` directory (Python `unittest`; there are no JavaScript tests). Each `tests/test_game_*.py` file targets a specific engine surface. The DB-free tests build minimal in-memory `Game` objects and exercise the engine directly. A few interaction tests pull canonical card data from the live DB so they regress against whatever the DB currently encodes (`special_reward`, `activation_effect`, etc.):
 
-- `test_game_dragoon_slay_chain.py` — drives Dragoon's on-turn `slay` payout through a 3-prompt chain (Snow Queen `<domains>` -> Eye of Asteraten `s 5 + slay` -> Gnolls `choose <citizens>`). Skipped automatically when the tunnel isn't up.
+- `test_game_dragoon_slay_chain.py` — drives Dragoon's on-turn `slay` payout through a 3-prompt chain (Snow Queen `<domains>` -> Eye of Asteraten `s 5 + slay` -> Gnolls `choose <citizens>`). Skipped automatically when the database is unreachable.
 
 Run a single test file (from the repo root):
 

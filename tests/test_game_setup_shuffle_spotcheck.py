@@ -33,7 +33,7 @@ def _db_ready():
 class ShadowvaleShuffleSpotcheckTests(unittest.TestCase):
     @unittest.skipUnless(
         _db_ready(),
-        "requires active DB tunnel and mariadb module; run source ./activate_with_env.sh first",
+        "requires active DB and mariadb module; run source ./activate_with_env.sh first",
     )
     def test_shadowvale_duke_and_domain_deals_vary(self):
         players = [

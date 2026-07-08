@@ -2956,7 +2956,7 @@ def _render_wiki_page_response(
         html_text = render_wiki_page(
             _wiki_template(),
             active_tab=active_tab if active_tab in _WIKI_TABS else "citizens",
-            error_message=f"Failed to load card data from database: {exc}. Is the DB tunnel up?",
+            error_message=f"Failed to load card data from database: {exc}. Is MariaDB running?",
             page_title=og_title,
         )
 

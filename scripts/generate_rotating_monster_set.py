@@ -13,7 +13,7 @@ Usage:
     python3 scripts/generate_rotating_monster_set.py --json
     python3 scripts/generate_rotating_monster_set.py -o reports/rotating_set.txt
 
-Requires the venv + SSH tunnel (see docs/agents.md).
+Requires the venv + database (see docs/setup.md).
 """
 
 import argparse
