@@ -243,11 +243,9 @@ class KingsGuardDbTests(unittest.TestCase):
 
     def test_exactly_one_kings_guard_citizen(self):
         try:
-            import mariadb
-            conn = mariadb.connect(
-                user="vckonline", password="vckonline",
-                host="127.0.0.1", port=3306, database="vckonline",
-            )
+            from db_config import connect
+
+            conn = connect()
         except Exception as e:
             self.skipTest(f"DB unavailable: {e}")
         try:

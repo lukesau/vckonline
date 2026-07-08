@@ -38,13 +38,7 @@ from monster_area_balance import (
 )
 from preset_registry import get_preset_config
 
-DB_CONFIG = {
-    "user": "vckonline",
-    "password": "vckonline",
-    "host": "127.0.0.1",
-    "port": 3306,
-    "database": "vckonline",
-}
+from db_config import DB_CONFIG
 
 FLEX_TYPES = ("Minion", "Beast", "Titan")
 

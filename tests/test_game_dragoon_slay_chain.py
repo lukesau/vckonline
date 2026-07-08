@@ -40,13 +40,7 @@ from game import Game
 from game_models import Player
 
 
-DB_CONFIG = {
-    "user": "vckonline",
-    "password": "vckonline",
-    "host": "127.0.0.1",
-    "port": 3306,
-    "database": "vckonline",
-}
+from db_config import DB_CONFIG
 
 DRAGOON_ID = 37
 SNOW_QUEEN_ID = 84

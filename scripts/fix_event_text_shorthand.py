@@ -15,18 +15,15 @@ Apply:
 Requires the venv + database (see docs/setup.md).
 """
 
+import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import mariadb
 
-DB_CONFIG = {
-    "user": "vckonline",
-    "password": "vckonline",
-    "host": "127.0.0.1",
-    "port": 3306,
-    "database": "vckonline",
-}
+from db_config import DB_CONFIG
 
 _COLUMNS = (
     "roll_effect_text",

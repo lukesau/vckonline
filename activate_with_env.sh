@@ -3,6 +3,14 @@
 
 source .venv/bin/activate
 
+if [ -f ".env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source ".env"
+    set +a
+    echo "✓ Loaded .env"
+fi
+
 find_mariadb_config() {
     if [ -n "${MARIADB_CONFIG:-}" ] && [ -x "$MARIADB_CONFIG" ]; then
         echo "$MARIADB_CONFIG"

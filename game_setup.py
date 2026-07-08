@@ -313,15 +313,13 @@ def load_draft_card_pool(n_players: int):
         citizens_by_roll: dict mapping roll_match1 -> list of raw DB rows.
         starter_candidates: list of raw DB rows for the optional -1/-1 starter.
     """
-    import mariadb
+    from db_config import connect
 
     monsters_by_area = {}
     citizens_by_roll = {}
     starter_candidates = []
 
-    conn = mariadb.connect(
-        user="vckonline", password="vckonline", host="127.0.0.1", database="vckonline", port=3306
-    )
+    conn = connect()
     cursor = conn.cursor(dictionary=True)
 
     cursor.callproc("select_all_monsters")
@@ -365,7 +363,7 @@ def load_game_data(
     expansion_only=False,
     duke_select_count=2,
 ):
-    import mariadb
+    from db_config import connect
 
     duke_select_count = int(duke_select_count or 2)
     if duke_select_count not in (2, 3):
@@ -495,9 +493,7 @@ def load_game_data(
     optional_starter_expansion = cfg["optional_starter_expansion"]
     apply_implemented_image_filter = cfg["apply_implemented_image_filter"]
     try:
-        my_connect = mariadb.connect(
-            user="vckonline", password="vckonline", host="127.0.0.1", database="vckonline", port=3306
-        )
+        my_connect = connect()
         my_cursor = my_connect.cursor(dictionary=True)
 
         def _fetch_pool_rows(proc_name, table_name, expansion_filters):

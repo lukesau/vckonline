@@ -3,11 +3,16 @@ Dump all card tables to dated SQL INSERT files in sql/dumps/.
 Usage: python scripts/dump_tables.py
 """
 
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import mariadb
 from datetime import datetime
 from pathlib import Path
 
-DB = dict(user="vckonline", password="vckonline", host="127.0.0.1", database="vckonline", port=3306)
+from db_config import get_db_config
 SQL_DIR = Path(__file__).resolve().parent.parent / "sql" / "dumps"
 
 TABLES = [
@@ -67,7 +72,7 @@ def main():
     stamp = datetime.now().strftime("%Y%m%d%H%M")
     SQL_DIR.mkdir(parents=True, exist_ok=True)
     print(f"Dumping to sql/dumps/*_{stamp}.sql ...")
-    conn = mariadb.connect(**DB)
+    conn = mariadb.connect(**get_db_config())
     cur = conn.cursor()
     for table, id_col, backtick_cols in TABLES:
         dump_table(cur, table, id_col, backtick_cols, stamp)

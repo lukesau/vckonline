@@ -17,13 +17,15 @@ The full developer docs live in this folder. The most-referenced ones:
 
 See [`setup.md`](setup.md) for creating the schema, loading seed data, and installing stored procedures.
 
-```
-host     127.0.0.1
-port     3306
-database vckonline
-user     vckonline
-password vckonline
-```
+Credentials are loaded from `.env` (copy `.env.example` to `.env` and set `VCKO_DB_PASSWORD`). See [`db_config.py`](../db_config.py).
+
+| Variable | Default |
+| -------- | ------- |
+| `VCKO_DB_HOST` | `127.0.0.1` |
+| `VCKO_DB_PORT` | `3306` |
+| `VCKO_DB_NAME` | `vckonline` |
+| `VCKO_DB_USER` | `vckonline` |
+| `VCKO_DB_PASSWORD` | *(required)* |
 
 ### Step 1 — confirm MariaDB is reachable
 
@@ -31,19 +33,14 @@ password vckonline
 python3 scripts/check_db_server.py
 ```
 
-This probes `127.0.0.1:3306` with no Python dependencies. If it fails, MariaDB is not running or not listening on the expected port — see [`setup.md`](setup.md).
+This probes the configured host/port with no Python dependencies. If it fails, MariaDB is not running or not listening on the expected port — see [`setup.md`](setup.md).
 
 ### Step 2 — use the `mariadb` Python connector, nothing else
 
 ```python
-import mariadb
-conn = mariadb.connect(
-    user="vckonline",
-    password="vckonline",
-    host="127.0.0.1",
-    port=3306,
-    database="vckonline",
-)
+from db_config import connect
+
+conn = connect()
 cur = conn.cursor(dictionary=True)   # dictionary=True is the project convention
 ```
 
@@ -69,7 +66,8 @@ python3 tests/test_database.py
 | ------- | ------------ | --- |
 | `ModuleNotFoundError: No module named 'mariadb'` | venv not activated | `source ./activate_with_env.sh` |
 | `Can't connect to MySQL server on '127.0.0.1'` | DB not running | see [`setup.md`](setup.md) |
-| `Access denied for user '...'@'localhost'` | wrong credentials | use `vckonline` / `vckonline` |
+| `VCKO_DB_PASSWORD is not set` | missing `.env` | `cp .env.example .env` and set the password |
+| `Access denied for user '...'@'localhost'` | wrong credentials | check `.env` matches MariaDB |
 | `Unknown column 'citizen_id' in ...` | wrong PK name | use `id_citizens` (see setup.md PK table) |
 | `mariadb_config not found` during `pip install mariadb` | Connector/C not installed | `./setup_venv.sh` |
 
@@ -85,7 +83,7 @@ python3 tests/test_database.py
 - All tests live in `tests/` as `tests/test_<area>.py` (Python `unittest`). Run one file with `python3 -m unittest tests.<module>`, or the whole suite with `python3 -m unittest discover -s tests -t . -p "test_*.py"`.
 - `tests/__init__.py` puts the repo root on `sys.path`.
 - Most engine tests build minimal in-memory `Game` objects without touching the DB. A few interaction tests load canonical card data from the live DB and skip when the database is unreachable.
-- Tests that need the DB hard-code the credentials dict above. Do not parameterize it.
+- Tests that need the DB import credentials from `db_config` (`connect()` or `DB_CONFIG`).
 
 ## Utility scripts (`scripts/`)
 

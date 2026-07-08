@@ -12,6 +12,7 @@
 #
 #   3. Then install: pip install -r requirements.txt
 mariadb>=1.1.0
+python-dotenv>=1.0.0
 
 # UUID generation
 shortuuid>=1.0.0

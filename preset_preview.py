@@ -18,7 +18,7 @@ since the client renders each as an image thumbnail — a pool card with no imag
 can't be shown and would otherwise render as a broken tile.
 """
 
-import mariadb
+from db_config import connect
 
 from banned_cards import banned_domain_ids, banned_duke_ids, banned_relic_ids
 from card_filters import has_card_image, is_unimplemented_event, keep_for_random
@@ -32,13 +32,7 @@ from preset_registry import get_preset_config, preset_label
 
 
 def _connect():
-    return mariadb.connect(
-        user="vckonline",
-        password="vckonline",
-        host="127.0.0.1",
-        database="vckonline",
-        port=3306,
-    )
+    return connect()
 
 
 def _preset_config(preset, expansion_only):

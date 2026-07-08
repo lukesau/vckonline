@@ -6,17 +6,24 @@ For a headless client against the public hosted server (no local database), see 
 
 ## Connection parameters
 
-Every script and test in this repo uses the same hard-coded credentials:
+Credentials live in a `.env` file at the repo root (gitignored). Copy the template and set your password:
 
-```
-host     127.0.0.1
-port     3306
-database vckonline
-user     vckonline
-password vckonline
+```bash
+cp .env.example .env
+# edit .env — set VCKO_DB_PASSWORD
 ```
 
-Mnemonic: **db == user == pass == `vckonline`**.
+| Variable | Default |
+| -------- | ------- |
+| `VCKO_DB_HOST` | `127.0.0.1` |
+| `VCKO_DB_PORT` | `3306` |
+| `VCKO_DB_NAME` | `vckonline` |
+| `VCKO_DB_USER` | `vckonline` |
+| `VCKO_DB_PASSWORD` | *(required — no default)* |
+
+Python code loads these via [`db_config.py`](../db_config.py). Shell helpers (`sql/run_sql.sh`, `activate_with_env.sh`) source `.env` automatically when present.
+
+For a fresh local install, `sql/create_database.sql` bootstraps the `vckonline` user with a placeholder password — set `VCKO_DB_PASSWORD` in `.env` to match whatever you configure in MariaDB.
 
 ## 1. Create the database and user
 
@@ -116,7 +123,8 @@ Open `http://localhost:8000` for the dev HTML client. See [`server.md`](server.m
 | ------- | ------------ | --- |
 | `ModuleNotFoundError: No module named 'mariadb'` | venv not activated | `source ./activate_with_env.sh` |
 | `Can't connect to MySQL server on '127.0.0.1'` | MariaDB not running or wrong port | start MariaDB; confirm it listens on 3306 |
-| `Access denied for user 'vckonline'@'localhost'` | user not created or wrong password | re-run `sql/create_database.sql` |
+| `Access denied for user 'vckonline'@'localhost'` | user not created or wrong password | check `.env` matches MariaDB; re-run `sql/create_database.sql` if needed |
+| `VCKO_DB_PASSWORD is not set` | missing `.env` | `cp .env.example .env` and set the password |
 | `Table 'vckonline.citizens' doesn't exist` | schema not loaded | `./sql/run_sql.sh sql/schema/create_tables.sql` |
 | `PROCEDURE vckonline.select_base_monsters does not exist` | stored procedures missing | `./sql/run_sql.sh sql/create_all_stored_procedures.sql` |
 | `Unknown column 'citizen_id'` | wrong PK name in hand-written SQL | use `id_citizens` (see [`agents.md`](agents.md)) |
@@ -138,3 +146,22 @@ The PK columns are named `id_<table>` (legacy schema), not `<table>_id`:
 | `relics` | `id_relics` |
 
 The Python card classes (`cards.py`) expose them as `citizen_id`, `monster_id`, etc. — the mapping happens in `game_setup.py` when building objects from DB rows.
+
+## Production credential rotation
+
+After deploying this repo to a public-facing host, rotate the database password and keep it only in `.env` on the server (never commit it).
+
+1. Generate a new password: `openssl rand -base64 24`
+2. As a MariaDB admin on the server:
+
+```sql
+ALTER USER 'vckonline'@'localhost' IDENTIFIED BY '<new-password>';
+FLUSH PRIVILEGES;
+```
+
+3. Create `.env` in the app directory with the new `VCKO_DB_PASSWORD` (and other vars if non-default).
+4. Restart the uvicorn/systemd service so Python reloads the environment.
+5. Verify: `python3 tests/test_database.py` (or `python3 -c "from db_config import connect; connect().close(); print('ok')"`).
+6. Mark any GitGuardian alert as resolved — the leaked password in git history is useless after rotation.
+
+MariaDB should remain bound to localhost only; the web app connects via `127.0.0.1` and does not expose port 3306.

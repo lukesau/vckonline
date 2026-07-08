@@ -1,5 +1,8 @@
 -- Create the vckonline database and application user.
 -- Run as a MariaDB admin, e.g.: mysql -u root -p < sql/create_database.sql
+--
+-- This script uses a bootstrap password for fresh local installs. On production
+-- hosts, rotate immediately after setup (see docs/setup.md "Production credential rotation").
 
 CREATE DATABASE IF NOT EXISTS vckonline
   DEFAULT CHARACTER SET utf8mb4

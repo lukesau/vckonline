@@ -16,8 +16,13 @@ All stored procedure SQL files are ready to use. You have several options:
 
 ## Option 2: Use MySQL Client Directly
 
+Requires `.env` with `VCKO_DB_PASSWORD` set (or export the vars manually):
+
 ```bash
-mysql -h 127.0.0.1 -P 3306 -u vckonline -p vckonline < sql/create_all_stored_procedures.sql
+set -a && source .env && set +a
+export MYSQL_PWD="$VCKO_DB_PASSWORD"
+mysql -h "$VCKO_DB_HOST" -P "$VCKO_DB_PORT" -u "$VCKO_DB_USER" "$VCKO_DB_NAME" < sql/create_all_stored_procedures.sql
+unset MYSQL_PWD
 ```
 
 ## Option 3: Interactive MariaDB Session

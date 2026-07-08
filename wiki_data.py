@@ -27,15 +27,11 @@ from card_filters import (
 )
 
 
+from db_config import connect
+
+
 def _connect():
-    import mariadb
-    return mariadb.connect(
-        user="vckonline",
-        password="vckonline",
-        host="127.0.0.1",
-        database="vckonline",
-        port=3306,
-    )
+    return connect()
 
 
 def _fetch_all(cur, sql):

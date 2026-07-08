@@ -172,13 +172,9 @@ class LeviathanDatabaseTests(unittest.TestCase):
             raise unittest.SkipTest("mariadb connector is not installed") from exc
 
         try:
-            conn = mariadb.connect(
-                user="vckonline",
-                password="vckonline",
-                host="127.0.0.1",
-                port=3306,
-                database="vckonline",
-            )
+            from db_config import connect
+
+            conn = connect()
         except mariadb.Error as exc:
             raise unittest.SkipTest(f"database unavailable: {exc}") from exc
 

@@ -8,18 +8,16 @@ Requires the venv + database (see docs/setup.md).
 """
 
 import argparse
+import os
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import mariadb
 
-DB_CONFIG = {
-    "user": "vckonline",
-    "password": "vckonline",
-    "host": "127.0.0.1",
-    "port": 3306,
-    "database": "vckonline",
-}
+from db_config import DB_CONFIG
 
 MONSTER_TYPES = ("Minion", "Titan", "Warden", "Boss", "Beast")
 FLEX_TYPES = ("Minion", "Beast", "Titan")
