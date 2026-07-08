@@ -14,7 +14,7 @@ Apply:
 
     python3 scripts/migrate_monster_special_reward_text.py --commit
 
-Requires the venv + SSH tunnel (see AGENTS.md / docs/database.md).
+Requires the venv + SSH tunnel (see docs/agents.md).
 """
 
 import sys

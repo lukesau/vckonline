@@ -1,8 +1,8 @@
 # Testing & diagnostics
 
-## Database connectivity
+DB setup: [agents.md](agents.md).
 
-> **Reminder:** the DB is at `127.0.0.1:3306` (SSH-forwarded) with **db == user == pass == `vckonline`**. Tunnel: `ssh -L 3306:localhost:3306 lukesau.com`. Tests that need the DB hard-code this dict; see `docs/database.md`.
+## Database connectivity
 
 ### Port-level check
 
@@ -47,5 +47,4 @@ python3 -m unittest discover -s tests -t . -p "test_*.py" -v
 
 ## API server smoke test
 
-See `docs/README_SERVER.md` to run the FastAPI server and use the built-in HTML client at `/`.
-
+See [server.md](server.md) to run the FastAPI server and use the built-in HTML client at `/`.

@@ -19,7 +19,7 @@ slays + activations, each opening a prompt that the player resolves:
      resume and finalizes harvest, transitioning into the action phase.
 
 Card data is read live from the DB (vckonline@127.0.0.1:3306, SSH-tunneled —
-see `docs/database.md`) so the test exercises whatever the canonical
+see `docs/agents.md`) so the test exercises whatever the canonical
 special_reward / activation_effect strings are right now. If any of the four
 cards change shape, the test loud-fails at fixture load and the regression
 is unambiguous.
@@ -478,7 +478,7 @@ if __name__ == "__main__":
         sys.stderr.write(
             "DB at 127.0.0.1:3306 (vckonline) is not reachable.\n"
             "Start the SSH tunnel first: ssh -L 3306:localhost:3306 lukesau.com\n"
-            "See docs/database.md for details.\n"
+            "See docs/agents.md for details.\n"
         )
         sys.exit(2)
     unittest.main()

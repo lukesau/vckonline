@@ -6,7 +6,7 @@ Test database connection and list tables to verify everything works.
 import mariadb
 import sys
 
-# Database configuration based on AGENTS.md
+# Database configuration based on docs/agents.md
 DB_CONFIG = {
     "user": "vckonline",
     "password": "vckonline",

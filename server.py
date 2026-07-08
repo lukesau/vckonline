@@ -431,13 +431,14 @@ def _maybe_start_lobby_game(lb: Lobby):
         duke_select_count=int(getattr(lb, "duke_select_count", 2)),
     )
     new_game = Game(game_state)
-    new_game.last_active_time = time.time()
+    _touch_game_audience(new_game)
     while new_game.advance_tick():
         if getattr(new_game, "phase", None) == "action":
             break
     games[new_game_id] = new_game
     _init_game_rejoin_codes(new_game_id, new_game)
     _record_snapshot(new_game_id, new_game)
+    _shot_clock_reset(new_game_id)
 
     lobbies.pop(lb.lobby_id, None)
     return new_game_id
@@ -602,30 +603,18 @@ def _history_breadcrumb(snap: dict) -> dict:
 
 _GAME_SHUTDOWN_DELAY_S = 30
 
-# ── Hurry-up timer ───────────────────────────────────────────────────────────
-#
-# Per-action shot clock. While the game is waiting on the active player to
-# pick their next standard action (phase=='action' + action_required.action
-# == 'standard_action'), an asyncio task sleeps until `game.hurry_up_deadline`
-# and then auto-takes +1 of the active player's lowest resource (random
-# tie-break among tied lowest), consuming a single standard action so the
-# turn continues as if they had clicked the button themselves.
-#
-# This replaces the older "game has been idle for 3 minutes" countdown that
-# used to share the same UI slot. The state-poll safety net (see PASSIVE_GAME_POLL_MS
-# in static/game/src/01-core.js) reset that older timer on every poll, so it
-# no longer measured real player inactivity. The hurry-up clock is reset only
-# when an action genuinely changes the game's state (see `_hurry_up_reset`
-# call sites), so polls do not extend it.
-#
-# Idle-game cleanup (the 180s sweep in `startup_event`'s cleanup loop) is
-# still useful for closed-browser games and is intentionally left alone.
-HURRY_UP_SECONDS = 180.0
-_hurry_up_tasks: Dict[str, asyncio.Task] = {}
+# Idle-game cleanup: drop in-memory games with no seated-player audience for
+# `_GAME_IDLE_TIMEOUT_S`. Audience is bumped by player state fetches, actions,
+# rejoin, event-slay-cost, and game WebSocket connects — not by server-side
+# auto-play. Stuck prompts with nobody watching are reclaimed after the timeout.
+_GAME_IDLE_TIMEOUT_S = 30 * 60  # 30 minutes
+
+# Display-only action shot clock (nag timer). Arms while waiting on the active
+# player's next standard action. Never auto-plays; client shows countdown to 0:00.
+SHOT_CLOCK_SECONDS = 180.0
 
 
-def _hurry_up_should_run(game) -> bool:
-    """True iff the game is waiting on the active player's next standard action."""
+def _shot_clock_should_run(game) -> bool:
     if not game:
         return False
     if getattr(game, "shutdown", None):
@@ -647,118 +636,73 @@ def _hurry_up_should_run(game) -> bool:
     return True
 
 
-def _hurry_up_cancel(game_id: str) -> None:
-    task = _hurry_up_tasks.pop(game_id, None)
-    if task and not task.done():
-        task.cancel()
-
-
-def _hurry_up_reset(game_id: str) -> None:
-    """(Re)arm the hurry-up clock for `game_id`, or clear it if no action is awaited.
-
-    Called from every endpoint that mutates game state. Cancels any in-flight
-    timer task and either reschedules a fresh `HURRY_UP_SECONDS` window
-    (when the game is waiting on the active player) or clears the deadline.
-    """
-    _hurry_up_cancel(game_id)
+def _shot_clock_reset(game_id: str) -> None:
     game = games.get(game_id)
     if not game:
         return
-    if _hurry_up_should_run(game):
-        deadline = time.time() + HURRY_UP_SECONDS
-        game.hurry_up_deadline = deadline
-        task = asyncio.create_task(_hurry_up_run(game_id, deadline))
-        _hurry_up_tasks[game_id] = task
+    if _shot_clock_should_run(game):
+        game.hurry_up_deadline = time.time() + SHOT_CLOCK_SECONDS
     else:
         game.hurry_up_deadline = 0.0
 
 
-def _hurry_up_ensure(game_id: str) -> None:
-    """Arm the hurry-up clock only if one isn't already armed for this game.
-
-    Used by read-only endpoints (`GET /state`) where engine-driven
-    auto-advances may have entered a new "waiting for active player"
-    window without a real player action. Unlike `_hurry_up_reset` this
-    leaves any existing deadline alone, so the state-poll safety net in
-    the client cannot extend the timer.
-    """
+def _shot_clock_ensure(game_id: str) -> None:
+    """Arm the display clock if needed; never extend an already-running deadline."""
     game = games.get(game_id)
     if not game:
         return
-    if not _hurry_up_should_run(game):
-        _hurry_up_cancel(game_id)
+    if not _shot_clock_should_run(game):
         game.hurry_up_deadline = 0.0
         return
     existing = float(getattr(game, "hurry_up_deadline", 0.0) or 0.0)
-    existing_task = _hurry_up_tasks.get(game_id)
-    if existing > time.time() and existing_task and not existing_task.done():
+    if existing > 0.0:
         return
-    _hurry_up_reset(game_id)
+    game.hurry_up_deadline = time.time() + SHOT_CLOCK_SECONDS
 
 
-async def _hurry_up_run(game_id: str, deadline: float) -> None:
-    try:
-        delay = max(0.0, deadline - time.time())
-        await asyncio.sleep(delay)
-        await _hurry_up_apply(game_id, deadline)
-    except asyncio.CancelledError:
-        return
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"[server] WARNING: hurry-up task for game {game_id} crashed: {exc}")
+def _player_in_game(game, player_id) -> bool:
+    if not player_id:
+        return False
+    pid = str(player_id).strip()
+    if not pid:
+        return False
+    for p in getattr(game, "player_list", []) or []:
+        if str(getattr(p, "player_id", "")) == pid:
+            return True
+    return False
 
 
-def _pick_lowest_resource(player) -> str:
-    """Pick the resource with the lowest score, breaking ties randomly."""
-    resources = {
-        "gold": int(getattr(player, "gold_score", 0) or 0),
-        "strength": int(getattr(player, "strength_score", 0) or 0),
-        "magic": int(getattr(player, "magic_score", 0) or 0),
-    }
-    min_val = min(resources.values())
-    tied = [k for k, v in resources.items() if v == min_val]
-    return random.choice(tied)
+def _game_audience_time(game) -> float:
+    return float(getattr(game, "last_audience_time", None) or getattr(game, "last_active_time", 0) or 0)
 
 
-async def _hurry_up_apply(game_id: str, deadline: float) -> None:
-    game = games.get(game_id)
-    if not game:
-        return
-    # Guard against late firing of a cancelled / superseded task.
-    if not _hurry_up_should_run(game):
-        _hurry_up_reset(game_id)
-        return
-    if abs(float(getattr(game, "hurry_up_deadline", 0) or 0) - deadline) > 0.5:
-        return
+def _touch_game_audience(game) -> None:
+    now = time.time()
+    game.last_audience_time = now
+    game.last_active_time = now
 
-    pid = game.current_player_id()
-    player = game._player_by_id(pid)
-    if not player:
-        return
 
-    chosen = _pick_lowest_resource(player)
-    if not game.consume_player_action(pid, action_type="take_resource"):
-        return
-    try:
-        game.take_resource(pid, chosen)
-    except Exception:
+def _destroy_game(game_id: str) -> None:
+    games.pop(game_id, None)
+    game_histories.pop(game_id, None)
+    _clear_game_rejoin_codes(game_id)
+    global gamers
+    gamers = [g for g in gamers if g.game_id != game_id]
+
+
+def _prune_idle_games(now=None):
+    """Drop in-memory games nobody has touched within `_GAME_IDLE_TIMEOUT_S`."""
+    now = now if now is not None else time.time()
+    removed = []
+    for game_id, game in list(games.items()):
         try:
-            game.lifecycle.rollback_last_consumed_action()
+            if now - _game_audience_time(game) > _GAME_IDLE_TIMEOUT_S:
+                removed.append(game_id)
         except Exception:
-            pass
-        return
-    game._log_game_event(
-        f"Hurry-up timer expired; auto-took +1 {chosen} for {game._player_label(pid)}."
-    )
-    game.finish_turn_if_no_actions_remaining()
-    game.last_active_time = time.time()
-    try:
-        _record_snapshot(game_id, game)
-    except Exception:
-        pass
-    await manager.broadcast(game_id, game)
-    if getattr(game, "phase", None) == "game_over" and not getattr(game, "shutdown", None):
-        await _initiate_game_shutdown(game_id, reason="game_over", initiated_by_player_id=None)
-    _hurry_up_reset(game_id)
+            removed.append(game_id)
+    for game_id in removed:
+        _destroy_game(game_id)
+    return removed
 
 
 # ── Draft mode ───────────────────────────────────────────────────────────────
@@ -1194,14 +1138,14 @@ async def _finish_draft(lobby_id: str):
             duke_select_count=int(getattr(lb, "duke_select_count", 2)),
         )
         new_game = Game(game_state)
-        new_game.last_active_time = time.time()
+        _touch_game_audience(new_game)
         while new_game.advance_tick():
             if getattr(new_game, "phase", None) == "action":
                 break
         games[new_game_id] = new_game
         _init_game_rejoin_codes(new_game_id, new_game)
         _record_snapshot(new_game_id, new_game)
-        _hurry_up_reset(new_game_id)
+        _shot_clock_reset(new_game_id)
         lobbies.pop(lobby_id, None)
         pid_list = [g.player_id for g in gamers if g.game_id == new_game_id]
         await lobby_ws_manager.broadcast_game_started(new_game_id, pid_list)
@@ -1673,7 +1617,7 @@ async def set_ready(request: ReadyRequest):
         return {"message": "Draft starting", "draft_starting": True}
 
     if new_game_id:
-        _hurry_up_reset(new_game_id)
+        _shot_clock_reset(new_game_id)
         pid_list = [g.player_id for g in gamers if g.game_id == new_game_id]
         await lobby_ws_manager.broadcast_game_started(new_game_id, pid_list)
         await lobby_ws_manager.broadcast_lobby()
@@ -1853,7 +1797,7 @@ async def list_active_games():
             players.append(name)
             if pid is not None and active_id is not None and str(pid) == str(active_id):
                 active_name = name
-        last_active = float(getattr(game, "last_active_time", 0.0) or 0.0)
+        last_active = _game_audience_time(game)
         out.append({
             "game_id": game_id,
             "preset": (getattr(game, "preset", "") or ""),
@@ -1904,19 +1848,14 @@ def _serialize_game_for_player(game, viewer_player_id: Optional[str]):
     game_json = json.dumps(game, cls=GameObjectEncoder, indent=2)
     state = json.loads(game_json)
 
-    # Surface the hurry-up clock as seconds remaining (server's clock at
-    # serialization time). The client converts to a local Date.now() deadline
-    # on receipt; subsequent polls re-sync to the latest server view so
-    # the countdown stays smooth even when WS pushes drop. `null` means no
-    # timer is armed (e.g., not action phase, mid-prompt, concurrent gate).
     deadline = float(getattr(game, "hurry_up_deadline", 0.0) or 0.0)
-    if deadline > 0.0 and _hurry_up_should_run(game):
+    if deadline > 0.0 and _shot_clock_should_run(game):
         remaining = max(0.0, deadline - time.time())
         state["hurry_up_seconds_remaining"] = round(remaining, 2)
-        state["hurry_up_total_seconds"] = HURRY_UP_SECONDS
+        state["hurry_up_total_seconds"] = SHOT_CLOCK_SECONDS
     else:
         state["hurry_up_seconds_remaining"] = None
-        state["hurry_up_total_seconds"] = HURRY_UP_SECONDS
+        state["hurry_up_total_seconds"] = SHOT_CLOCK_SECONDS
 
     # Bake "rest of the game" global cost modifiers (Blessed Lands, Dark Lord
     # Rising) into the serialized board so the client's existing card-derived
@@ -2080,14 +2019,13 @@ async def _initiate_game_shutdown(game_id: str, reason: str, initiated_by_player
     await lobby_ws_manager.broadcast_lobby()
 
     # Push state update immediately.
-    _hurry_up_cancel(game_id)
     if hasattr(game, "hurry_up_deadline"):
         game.hurry_up_deadline = 0.0
     await manager.broadcast(game_id, game)
 
-    # A finished game is not torn down on a fixed timer; the existing idle-game
-    # sweep (180s) reclaims it once everyone has stopped viewing. Only the
-    # abandon path destroys promptly so the lobby frees up right away.
+    # A finished game is not torn down on a fixed timer; the idle-game sweep
+    # reclaims it once everyone has stopped viewing. Only the abandon path
+    # destroys promptly so the lobby frees up right away.
     if is_game_over:
         return
 
@@ -2102,7 +2040,6 @@ async def _initiate_game_shutdown(game_id: str, reason: str, initiated_by_player
         games.pop(game_id, None)
         game_histories.pop(game_id, None)
         _clear_game_rejoin_codes(game_id)
-        _hurry_up_cancel(game_id)
         # Just in case anything re-added entries.
         global gamers
         gamers = [gm for gm in gamers if gm.game_id != game_id]
@@ -2125,8 +2062,9 @@ async def get_game_state(game_id: str, player_id: Optional[str] = None):
     game = games.get(game_id)
     if not game:
         return game_not_found_json()
-    
-    game.last_active_time = time.time()
+
+    if player_id and _player_in_game(game, player_id):
+        _touch_game_audience(game)
     # Ensure the beginning-of-turn roll/harvest are automatic (including the very first fetch).
     try:
         while getattr(game, "phase", None) in ("roll", "harvest"):
@@ -2143,9 +2081,7 @@ async def get_game_state(game_id: str, player_id: Optional[str] = None):
     # If the engine already ended the game, kick off the shutdown countdown.
     if getattr(game, "phase", None) == "game_over" and not getattr(game, "shutdown", None):
         await _initiate_game_shutdown(game_id, reason="game_over", initiated_by_player_id=None)
-    # Polls are deliberately a no-op against an already-armed deadline so that
-    # the client's state-poll safety net cannot push back the hurry-up clock.
-    _hurry_up_ensure(game_id)
+    _shot_clock_ensure(game_id)
     return _serialize_game_for_player(game, player_id)
 
 
@@ -2155,8 +2091,8 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
     game = games.get(game_id)
     if not game:
         return game_not_found_json()
-    
-    game.last_active_time = time.time()
+
+    _touch_game_audience(game)
 
     # Snapshots back the dev "Back one step" button. We only record snapshots
     # for action-phase player actions (take resource / hire / build / slay).
@@ -2454,10 +2390,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
 
         if should_snapshot:
             _record_snapshot(game_id, game)
-        # Real player input occurred; (re)arm the hurry-up clock for whoever
-        # the engine is now waiting on -- including the same player's next
-        # action in a 2-action turn, or the next seat after a turn end.
-        _hurry_up_reset(game_id)
+        _shot_clock_reset(game_id)
         # Push updated state to all WebSocket subscribers for this game.
         await manager.broadcast(game_id, game)
         # If this action ended the game, start the countdown once.
@@ -2493,6 +2426,7 @@ async def apply_event_slay_cost(game_id: str, request: ApplyEventSlayCostRequest
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _touch_game_audience(game)
     # Resume harvest if the roll effect blocked before automation started.
     # Do not blindly ``while advance_tick()`` — that can over-advance when
     # harvest is already waiting on the concurrent choices gate.
@@ -2508,7 +2442,7 @@ async def apply_event_slay_cost(game_id: str, request: ApplyEventSlayCostRequest
     # Event-slay-cost is a pre-slay payment, not one of the three real
     # player actions, so it does not record a snapshot. The follow-up
     # slay_monster call will be the snapshot anchor.
-    _hurry_up_reset(game_id)
+    _shot_clock_reset(game_id)
     await manager.broadcast(game_id, game)
     return {"message": "Event slay cost applied", "game_state": _serialize_game_for_player(game, request.player_id)}
 
@@ -2566,10 +2500,10 @@ async def step_game_back(game_id: str):
         history.append(target_snap)
         raise HTTPException(status_code=500, detail=f"Failed to restore snapshot: {exc}")
 
-    rebuilt.last_active_time = time.time()
+    _touch_game_audience(rebuilt)
     games[game_id] = rebuilt
 
-    _hurry_up_reset(game_id)
+    _shot_clock_reset(game_id)
     await manager.broadcast(game_id, rebuilt)
     return {
         "message": "Stepped back",
@@ -2613,6 +2547,8 @@ async def rejoin_game(game_id: str, request: RejoinRequest):
     if not in_game:
         raise HTTPException(status_code=404, detail="That seat is no longer in this game")
 
+    _touch_game_audience(game)
+
     return {"game_id": game_id, "player_id": player_id, "message": "Rejoined"}
 
 
@@ -2641,19 +2577,12 @@ async def startup_event():
     async def cleanup():
         while True:
             await asyncio.sleep(30)  # Check every 30 seconds
-            current_time = time.time()
-            inactive_games = [
-                game_id for game_id, game in games.items()
-                if current_time - game.last_active_time > 180
-            ]
-            for game_id in inactive_games:
-                del games[game_id]
-                game_histories.pop(game_id, None)
-                _clear_game_rejoin_codes(game_id)
-                _hurry_up_cancel(game_id)
-                # Remove gamers from this game
-                global gamers
-                gamers = [g for g in gamers if g.game_id != game_id]
+            try:
+                removed = _prune_idle_games()
+                if removed:
+                    await lobby_ws_manager.broadcast_lobby()
+            except Exception as exc:
+                print(f"[server] WARNING: idle game cleanup failed: {exc}")
     
     asyncio.create_task(cleanup())
 
@@ -2741,6 +2670,7 @@ async def ws_game(websocket: WebSocket, game_id: str, player_id: Optional[str] =
         )
         await websocket.close(code=4004)
         return
+    _touch_game_audience(game)
     await manager.connect(game_id, websocket, player_id)
     try:
         await websocket.send_json({"type": "state", "state": _serialize_game_for_player(game, player_id)})

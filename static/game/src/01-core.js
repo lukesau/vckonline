@@ -113,10 +113,7 @@ let sailBoardScrollLeft = 0;
 /** Narrow carousel: horizontal scrollLeft of each player's `.tableau-cards` strip */
 const tableauStripScrollByPlayerId = {};
 
-/** Server-driven per-action hurry-up clock. The server decides when this
- *  is armed (active player's standard-action wait); the client only
- *  re-syncs the local deadline from the most recent state push or poll.
- *  A null `hurryUpDeadlineMs` means no clock is currently armed. */
+/** Server-driven display-only action shot clock (nag timer; no auto-play). */
 let hurryUpDeadlineMs = null;
 let hurryUpTickHandle = null;
 
@@ -203,9 +200,9 @@ function tickHurryUpTimerElements() {
     });
     return;
   }
-  const left = hurryUpDeadlineMs - Date.now();
+  const left = Math.max(0, hurryUpDeadlineMs - Date.now());
   const label = formatHurryUpCountdownLabel(left);
-  const warn = left <= 30000;
+  const warn = left > 0 && left <= 30000;
   els.forEach(el => {
     el.textContent = label;
     el.classList.toggle('tableau-inactive-timer--warn', warn);

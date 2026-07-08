@@ -8,7 +8,7 @@ For the full end-to-end check use `tests/test_database.py` instead.
 
 The canonical connection parameters for this repo are:
     host=127.0.0.1, port=3306, database=vckonline, user=vckonline, password=vckonline
-The DB is reached via an SSH tunnel; see AGENTS.md / docs/database.md.
+The DB is reached via an SSH tunnel; see docs/agents.md.
 """
 
 import socket

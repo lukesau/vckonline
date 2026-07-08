@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Full database test script - this is the canonical end-to-end check from AGENTS.md
+Full database test script - this is the canonical end-to-end check from docs/agents.md
 """
 
 import mariadb
 import sys
 
-# Database configuration based on AGENTS.md
+# Database configuration based on docs/agents.md
 DB_CONFIG = {
     "user": "vckonline",
     "password": "vckonline",

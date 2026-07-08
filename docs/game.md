@@ -48,7 +48,7 @@ The `Game` object tracks:
 
 This function currently assumes local DB connectivity via `127.0.0.1:3306` (typically via SSH port forward).
 
-See `docs/database.md` for DB setup and stored procedure installation.
+See [agents.md](agents.md) for DB setup and [database.md](database.md) for stored procedure installation.
 
 ### Debug mode (`debug_mode`)
 

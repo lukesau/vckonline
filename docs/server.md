@@ -1,5 +1,57 @@
 # Server (`server.py`)
 
+## Quick start
+
+1. Set up the venv and database — see [agents.md](agents.md).
+2. Confirm the SSH tunnel is up:
+
+   ```bash
+   python3 scripts/check_db_server.py
+   ```
+
+3. Run the server:
+
+   ```bash
+   python3 server.py
+   ```
+
+   Or with uvicorn directly:
+
+   ```bash
+   uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+   ```
+
+   The server starts on `http://localhost:8000`.
+
+4. Open `http://localhost:8000` for the dev HTML client.
+
+This is a development/testing server, not production-ready. Games and lobbies are stored in-memory and are lost on restart.
+
+### Client bundle (`static/game/game.js`)
+
+The browser loads a single script from [`static/game/index.html`](../static/game/index.html). Source is split into ordered files under [`static/game/src/`](../static/game/src/):
+
+| File | Responsibility |
+|------|----------------|
+| `01-core.js` | URL/cookie ids, WebSocket `connect`, idle timer, `mk` / `fmtPhase` / `escapeHtml` |
+| `02-render-and-board.js` | Seats, tableau carousel, `render`, center board, card factory |
+| `03-modals.js` | Player detail, game over/shutdown, card inspect, action confirm, prompt overlay shell |
+| `04-market.js` | Board market hire/build/slay modals |
+| `05-prompts.js` | Required-choice and concurrent-action prompt renderers |
+| `06-lobby-and-boot.js` | Lobby UI/background and boot `init*` calls |
+
+`static/game/game.js` is a build artifact: it is gitignored, overwritten on every server start (via `build_game_js.build()` in [`server.py`](../server.py)), and must not be edited directly.
+
+To rebuild manually without restarting the server:
+
+```bash
+python3 build_game_js.py
+```
+
+The build runs `node --check` on the output if Node is installed; otherwise the syntax check is skipped silently.
+
+For the hosted-server API reference (bots, integrations), see [vcko-api.md](vcko-api.md).
+
 ## What it is
 
 `server.py` is a FastAPI development server that:
@@ -9,8 +61,6 @@
 - Stores active games in-memory (`games`)
 - Exposes REST endpoints for lobby operations and game actions
 - Serves a simple HTML test client at `/`
-
-This server is intended for development/testing, not production.
 
 ## In-memory state
 
@@ -53,9 +103,19 @@ Endpoints:
 
 Spectator mode uses the normal game page with only `game_id` in the query string (`/?game_id=...`) and no `player_id`. Spectators receive the same hidden-info-safe projection used for non-owning viewers (notably hidden duke stubs), connect to `/ws/game/{game_id}` without a player id, and can fetch `/api/game/{game_id}/state` without a `player_id`. The client treats this mode as read-only: prompts render as observer/waiting prompts, "Peek board" is available for blocking prompts, and market/action controls are suppressed.
 
+## Timeouts and cleanup
+
 Lobby cleanup:
 
 - Member idle timeout is `_LOBBY_MEMBER_TIMEOUT_S` (10 minutes). `build_lobby_status_dict` prunes members whose `last_active_time` is older than the cutoff and deletes any lobby that becomes empty as a result. Membership activity is bumped by lobby endpoints and by every `/ws/lobby` `identify` message.
+
+Game idle cleanup:
+
+- A background task runs every 30 seconds and deletes games whose `last_audience_time` is older than 30 minutes (`_GAME_IDLE_TIMEOUT_S`). Audience time is bumped by seated-player `GET /state`, `POST /action`, rejoin, event-slay-cost, and `/ws/game` connects. Games stuck on a prompt with no one watching are reclaimed after the timeout. The server never auto-plays on behalf of idle players.
+
+Action shot clock (display only):
+
+- While the active player is waiting on a standard action during the action phase, the server arms a 3-minute (`SHOT_CLOCK_SECONDS = 180`) countdown exposed to the client as `hurry_up_deadline`. This is a nag timer only — it does not force a play or end the game.
 
 ## Game API
 
@@ -77,7 +137,7 @@ Supported `action_type` values currently include:
 
 ### `submit_concurrent_action`
 
-Used to respond to a `concurrent_action` gate (see `docs/game.md`). The
+Used to respond to a `concurrent_action` gate (see `game.md`). The
 serialized game state exposes a `concurrent_action` object with `kind`,
 `pending`, and `completed` lists; while `pending` is non-empty no other
 turn-based action will succeed. Request body:
@@ -96,13 +156,6 @@ The server validates that the player is in `pending` and that `kind`
 when the last pending player submits, the engine auto-advances out of
 the setup gate.
 
-## Game cleanup
-
-On startup, a background task deletes games inactive for > 180 seconds and prunes the corresponding `gamers` entries.
-
 ## Dev HTML client
 
 The root route `/` serves a simple HTML page that calls the lobby endpoints and can fetch a game state.
-
-For run instructions, see `docs/README_SERVER.md`.
-

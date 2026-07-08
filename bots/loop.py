@@ -3,7 +3,7 @@
 import random
 import time
 
-from bots.client import IllegalActionError, VckoClient
+from bots.client import GameNotFoundError, IllegalActionError, VckoClient
 from bots.legal_moves import enumerate_actions
 
 

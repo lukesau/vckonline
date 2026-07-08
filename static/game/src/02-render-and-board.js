@@ -2469,12 +2469,8 @@ function makeHeader(player, state) {
     nameRow.appendChild(actionsBadge);
 
     const tim = mk('tableau-inactive-timer');
-    tim.title =
-      'Hurry-up timer for this action. If it hits 0:00 the server auto-takes +1 of the active player\'s lowest resource.';
-    tim.setAttribute(
-      'aria-label',
-      'Hurry-up timer for this action. If it hits zero the active player auto-takes their lowest resource.',
-    );
+    tim.title = 'Action shot clock (display only — does not auto-play).';
+    tim.setAttribute('aria-label', 'Action shot clock');
     nameRow.appendChild(tim);
   }
 

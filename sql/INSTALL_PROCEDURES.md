@@ -4,11 +4,7 @@ All stored procedure SQL files are ready to use. You have several options:
 
 ## Prerequisites
 
-1. **SSH Port Forwarding** - Make sure you have an active SSH tunnel:
-   ```bash
-   ssh -L 3306:localhost:3306 lukesau.com
-   ```
-   Keep this terminal open while running SQL commands.
+1. **SSH tunnel** — see [docs/agents.md](../docs/agents.md). Probe with `python3 scripts/check_db_server.py` before starting a tunnel.
 
 2. **MySQL Client** - Install if needed:
    ```bash

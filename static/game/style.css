@@ -506,11 +506,9 @@ html, body {
   border: 1px solid #b78b1f;
 }
 
-/* Hurry-up countdown on whoever’s turn it is (all seats). The server arms
-   this for the active player's standard action and auto-takes +1 of their
-   lowest resource when it hits 0:00 (random tie-break among tied lowest).
-   Polls do NOT reset the deadline -- the server's value is authoritative
-   and is re-synced on every state payload. */
+/* Display-only action shot clock on the active player's tableau. The server
+   arms this during standard_action waits; the client counts down to 0:00 and
+   stops. Polls do not extend the deadline. */
 .tableau-inactive-timer {
   margin-left: auto;
   padding: 2px 8px;

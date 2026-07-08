@@ -275,7 +275,7 @@ Card pool preview for a preset. May return 503 if the preview service is tempora
 Returns the full game JSON for the viewer. Side effects on fetch:
 
 - Auto-advances `roll` and `harvest` phases as far as the engine can without player input
-- Arms the hurry-up timer when waiting on a player's standard action
+- Arms the display-only action shot clock when waiting on a player's standard action
 
 **404:** `{"detail": "Game not found", "drop_stored_game": true}` — clear your stored `game_id`.
 
@@ -379,7 +379,7 @@ The state object is large. These fields drive bot decisions:
 | `agents_slots`, `goods_slots`, `tome_slots`, `noble_slots` | Expansion modules (Crimson Seas) |
 | `exekratys_resources` | Exekratys pool |
 | `pending_event_slay_cost` | Needs `POST /apply_event_slay_cost` before harvest continues |
-| `hurry_up_seconds_remaining` | Shot clock; server auto-takes lowest resource if it expires |
+| `hurry_up_seconds_remaining` | Display-only action shot clock (counts down to 0; no auto-play) |
 | `shutdown` | Game ending (`reason`, `redirect_at`, `initiated_by`) |
 | `my_rejoin_code` | Your rejoin code (only in authenticated view) |
 | `resting_player_id` | At 5 players, who sits out this harvest |
@@ -417,9 +417,9 @@ On each state update, evaluate **in this priority order**:
 - While `action_required.id` is set to someone, the engine is waiting on that prompt.
 - `roll_phase` and `harvest_phase` action types are rejected — the server auto-advances these on state fetch.
 
-### Hurry-up timer
+### Action shot clock (display only)
 
-During the action phase, if the active player is idle on `standard_action` for **180 seconds**, the server automatically performs `take_resource` for their lowest resource. Bots should act before this fires in competitive play.
+During the action phase, while waiting on `standard_action`, the server arms a **180-second** countdown surfaced as `hurry_up_seconds_remaining`. It is a nag timer only — the server never auto-plays when it expires. The client shows `0:00` once time is up.
 
 ---
 
@@ -613,12 +613,11 @@ Owner-only: `expansion_only` restricts domains/dukes to the expansion. `duke_sel
 | Timer | Duration | Effect |
 |-------|----------|--------|
 | Lobby member idle | 600 s (10 min) | Pruned from lobby |
-| Game idle | 180 s | Entire game deleted |
-| Hurry-up (action phase) | 180 s | Auto `take_resource` (lowest) |
+| Game idle | 30 min | Entire game deleted when no seated player has polled or acted |
 | Abandon shutdown | 30 s | Game destroyed, redirect to lobby |
 | Rejoin rate limit | 12 / 60 s | Per game |
 
-Touch lobby endpoints or send WebSocket `identify` to stay active in lobby. Game actions and state fetches refresh game activity.
+Touch lobby endpoints or send WebSocket `identify` to stay active in lobby. Seated-player game actions and `GET /state` refresh the game's audience timestamp and prevent idle cleanup.
 
 ---
 

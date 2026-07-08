@@ -202,14 +202,9 @@ class Game:
         # Each entry: {"player_id": ..., "source_label": ...}.
         self.pending_harvest_slays = list(game_state.get('pending_harvest_slays') or [])
         self.last_active_time = 0
-        # Hurry-up timer (server-side absolute unix seconds). 0 / falsy means
-        # no timer is currently armed. The server (see
-        # `_hurry_up_reset` in server.py) arms this whenever the game is
-        # waiting on the active player to pick their next standard action;
-        # on expiry the server auto-takes +1 of the player's lowest
-        # resource (random tie-break among tied lowest). This intentionally
-        # does NOT round-trip through serialize/save: it's a runtime-only
-        # field that's reseated on game load.
+        self.last_audience_time = 0
+        # Display-only action shot clock (see server.py `_shot_clock_*`). Not
+        # serialized; re-armed at runtime when waiting on standard_action.
         self.hurry_up_deadline = 0.0
         self.game_log = list(game_state.get('game_log') or [])
         self.pending_action_end_queue = list(game_state.get("pending_action_end_queue") or [])

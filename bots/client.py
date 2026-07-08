@@ -20,6 +20,10 @@ class IllegalActionError(VckoApiError):
     pass
 
 
+class GameNotFoundError(VckoApiError):
+    pass
+
+
 class VckoClient:
     def __init__(self, base_url=DEFAULT_BASE_URL):
         self.base_url = base_url.rstrip("/")
@@ -51,7 +55,15 @@ class VckoClient:
             detail = payload.get("detail", e.reason)
             if isinstance(detail, list):
                 detail = json.dumps(detail)
-            err_cls = IllegalActionError if e.code == 400 else VckoApiError
+            if e.code == 400:
+                err_cls = IllegalActionError
+            elif e.code == 404 and (
+                payload.get("drop_stored_game")
+                or "game not found" in str(detail).lower()
+            ):
+                err_cls = GameNotFoundError
+            else:
+                err_cls = VckoApiError
             raise err_cls(e.code, str(detail), payload) from e
 
     def create_lobby(self, name, preset="base", min_players=2):

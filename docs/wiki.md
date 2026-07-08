@@ -42,7 +42,7 @@ The first call to `/api/wiki/cards` runs `wiki_data.load_all_cards_for_wiki()` a
 
 ## DB requirements
 
-Same as the game itself — `vckonline` user on `127.0.0.1:3306` with the standard SSH tunnel from `docs/database.md`. The wiki uses direct `SELECT * FROM <table>` queries, so it does **not** require the stored procedures listed in `docs/database.md` (those are still required for normal game play).
+Same as the game itself — see [agents.md](agents.md) for connection setup. The wiki uses direct `SELECT * FROM <table>` queries, so it does **not** require the stored procedures listed in [database.md](database.md) (those are still required for normal game play).
 
 If the DB is unreachable, `/api/wiki/cards` returns `503` with a `detail` describing the error. The client renders the message in the status bar.
 
@@ -62,7 +62,7 @@ If the DB is unreachable, `/api/wiki/cards` returns `503` with a `detail` descri
 
 ## Unimplemented detection
 
-A row is flagged as `is_unimplemented` when the engine-resolvable effect string the engine would run is `NULL` or whitespace-only. For most card types a `has_*` boolean gates whether the engine will try to resolve that string, so a flagged row with no string is an authored stub that has not been filled in yet. Agents and relics have **no** `has_*` gate — every agent always has an activation effect and every relic always has a passive effect — so for those types the machine column being empty is itself the stub signal (the human-facing `*_effect_text` may still be authored). The predicates live in `card_filters.py` and are imported by both `wiki_data.py` (to render the badge) and `game_setup.py` (to filter the `random` preset's card pool — see `docs/database.md`), so a card the wiki shows as Unimplemented is the same card the random preset refuses to deal.
+A row is flagged as `is_unimplemented` when the engine-resolvable effect string the engine would run is `NULL` or whitespace-only. For most card types a `has_*` boolean gates whether the engine will try to resolve that string, so a flagged row with no string is an authored stub that has not been filled in yet. Agents and relics have **no** `has_*` gate — every agent always has an activation effect and every relic always has a passive effect — so for those types the machine column being empty is itself the stub signal (the human-facing `*_effect_text` may still be authored). The predicates live in `card_filters.py` and are imported by both `wiki_data.py` (to render the badge) and `game_setup.py` (to filter the `random` preset's card pool — see [database.md](database.md)), so a card the wiki shows as Unimplemented is the same card the random preset refuses to deal.
 
 | Card type | Trigger columns |
 |-----------|-----------------|
