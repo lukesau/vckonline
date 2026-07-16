@@ -1791,6 +1791,77 @@ class PlayerActionsEngine:
                     self.game.lifecycle.advance_tick()
                 self.game.lifecycle.finish_turn_if_no_actions_remaining()
 
+    def hire_cost(self, player, top):
+        """Effective gold cost + whether Strength may be spent, for hiring `top`.
+
+        Single source of truth for the hire cost: the duplicate-name surcharge
+        (+1 gold per owned face-up copy) and the Emerald Stronghold / Defiant
+        Ridge / New Shilina Tower modifiers. `hire_citizen` and legal-move
+        enumeration both call this so the emitted payment can never drift from
+        what the engine actually charges. Returns `(scaled_cost, allow_strength)`.
+        """
+        owned_same_name = 0
+        bonus_recruit = getattr(self.game, "pending_bonus_recruit", None) == player.player_id
+        has_emerald = bonus_recruit or self.game._player_has_action_effect_flag(player, "action.emeraldstronghold")
+        if not has_emerald:
+            for c in getattr(player, "owned_citizens", []) or []:
+                if getattr(c, "is_flipped", False):
+                    continue
+                if getattr(c, "name", None) == top.name:
+                    owned_same_name += 1
+            for s in getattr(player, "owned_starters", []) or []:
+                if getattr(s, "name", None) == top.name:
+                    owned_same_name += 1
+        scaled_cost = int(getattr(top, "gold_cost", 0) or 0) + int(owned_same_name)
+        if self.game._player_has_action_effect_flag(player, "action.defiantridge"):
+            scaled_cost = max(0, scaled_cost - 1)
+        has_shilina = self.game._player_has_action_effect_flag(player, "action.newshilinatower")
+        return scaled_cost, has_shilina
+
+    def build_cost(self, player, top):
+        """Effective gold cost to build Domain `top`.
+
+        Single source of truth for the build cost: Pratchett's Plateau (-1) and
+        Blessed Lands (-N). Used by both `build_domain` and enumeration.
+        """
+        gold_cost = int(getattr(top, "gold_cost", 0) or 0)
+        if self.game._player_has_action_effect_flag(player, "action.pratchettsplateau"):
+            gold_cost = max(0, gold_cost - 1)
+        if self.game._player_has_action_effect_flag(player, "action.blessedlands"):
+            gold_cost = max(0, gold_cost - self.game.events.blessed_lands_discount())
+        return gold_cost
+
+    def slay_cost(self, player, top):
+        """Effective `(strength, magic, gold)` slay cost, before optional relics.
+
+        Single source of truth for the slay cost: event extra costs, monster
+        special-cost scaling, Fort Skyler (-1 strength), and Dark Lord Rising
+        (+N magic). Excludes the Thunder Axe relic reduction, which is an
+        optional, player-chosen payment discount applied in `slay_monster`.
+        Used by both `slay_monster` and enumeration.
+        """
+        effective_strength_cost = (
+            int(getattr(top, "strength_cost", 0) or 0)
+            + int(getattr(top, "extra_strength_cost", 0) or 0)
+        )
+        effective_magic_cost = (
+            int(getattr(top, "magic_cost", 0) or 0)
+            + int(getattr(top, "extra_magic_cost", 0) or 0)
+        )
+        effective_gold_cost = int(getattr(top, "extra_gold_cost", 0) or 0)
+        if getattr(top, "has_special_cost", False):
+            cost_deltas = self.game._monster_special_cost_deltas(
+                player, getattr(top, "special_cost", None)
+            )
+            effective_strength_cost += int(cost_deltas.get("s", 0) or 0)
+            effective_magic_cost += int(cost_deltas.get("m", 0) or 0)
+            effective_gold_cost += int(cost_deltas.get("g", 0) or 0)
+        if self.game._player_has_action_effect_flag(player, "action.fortskyler"):
+            effective_strength_cost = max(0, effective_strength_cost - 1)
+        if self.game._player_has_action_effect_flag(player, "action.darklordrising"):
+            effective_magic_cost += self.game.events.dark_lord_surcharge()
+        return effective_strength_cost, effective_magic_cost, effective_gold_cost
+
     def hire_citizen(self, player_id, citizen_id, gp=0, mp=0, sp=0, tome_counts=None):
         """
         Hire the top/accessible citizen from a stack.
@@ -1839,25 +1910,10 @@ class PlayerActionsEngine:
             if not player:
                 raise ValueError("Player not found.")
 
-            owned_same_name = 0
             # Town Crier's one-shot bonus recruit waives the duplicate surcharge
-            # exactly like Emerald Stronghold's passive does.
-            bonus_recruit = getattr(self.game, "pending_bonus_recruit", None) == player_id
-            has_emerald = bonus_recruit or self.game._player_has_action_effect_flag(player, "action.emeraldstronghold")
-            if not has_emerald:
-                for c in getattr(player, "owned_citizens", []) or []:
-                    if getattr(c, "is_flipped", False):
-                        continue
-                    if getattr(c, "name", None) == top.name:
-                        owned_same_name += 1
-                for s in getattr(player, "owned_starters", []) or []:
-                    if getattr(s, "name", None) == top.name:
-                        owned_same_name += 1
-
-            scaled_cost = int(getattr(top, "gold_cost", 0) or 0) + int(owned_same_name)
-            if self.game._player_has_action_effect_flag(player, "action.defiantridge"):
-                scaled_cost = max(0, scaled_cost - 1)
-            has_shilina = self.game._player_has_action_effect_flag(player, "action.newshilinatower")
+            # exactly like Emerald Stronghold's passive does — handled inside
+            # `hire_cost`, the single source of truth for the hire price.
+            scaled_cost, has_shilina = self.hire_cost(player, top)
             _validate_hire_or_domain_gold_payment(player, scaled_cost, gp, sp, mp, allow_strength=has_shilina)
 
             tc = self._sanitize_tome_payment(tome_counts)
@@ -1925,27 +1981,9 @@ class PlayerActionsEngine:
             if not player:
                 raise ValueError("Player not found.")
 
-            # Compute effective costs including any event-applied extra costs.
-            effective_strength_cost = (
-                int(getattr(top, "strength_cost", 0) or 0)
-                + int(getattr(top, "extra_strength_cost", 0) or 0)
-            )
-            effective_magic_cost = (
-                int(getattr(top, "magic_cost", 0) or 0)
-                + int(getattr(top, "extra_magic_cost", 0) or 0)
-            )
-            effective_gold_cost = int(getattr(top, "extra_gold_cost", 0) or 0)
-            if getattr(top, "has_special_cost", False):
-                cost_deltas = self.game._monster_special_cost_deltas(
-                    player, getattr(top, "special_cost", None)
-                )
-                effective_strength_cost += int(cost_deltas.get("s", 0) or 0)
-                effective_magic_cost += int(cost_deltas.get("m", 0) or 0)
-                effective_gold_cost += int(cost_deltas.get("g", 0) or 0)
-            if self.game._player_has_action_effect_flag(player, "action.fortskyler"):
-                effective_strength_cost = max(0, effective_strength_cost - 1)
-            if self.game._player_has_action_effect_flag(player, "action.darklordrising"):
-                effective_magic_cost += self.game.events.dark_lord_surcharge()
+            # Compute effective costs (event extras, special-cost scaling, Fort
+            # Skyler, Dark Lord Rising) via the single source of truth.
+            effective_strength_cost, effective_magic_cost, effective_gold_cost = self.slay_cost(player, top)
 
             # Thunder Axe relic: optionally ignore up to N face-value Magic OR M
             # face-value Strength of the cost. The reduction caps at the monster's
@@ -2123,12 +2161,7 @@ class PlayerActionsEngine:
                         "Domain role requirements not met (citizens and/or nobles): " + ", ".join(missing)
                     )
 
-            gold_cost = int(getattr(top, "gold_cost", 0) or 0)
-            has_pratchett = self.game._player_has_action_effect_flag(player, "action.pratchettsplateau")
-            if has_pratchett:
-                gold_cost = max(0, gold_cost - 1)
-            if self.game._player_has_action_effect_flag(player, "action.blessedlands"):
-                gold_cost = max(0, gold_cost - self.game.events.blessed_lands_discount())
+            gold_cost = self.build_cost(player, top)
             _validate_hire_or_domain_gold_payment(player, gold_cost, gp, sp, mp)
 
             tc = self._sanitize_tome_payment(tome_counts)
