@@ -22,8 +22,6 @@ BINARY_PROMPTS = frozenset({
     "domain_self_convert",
     "may_sail",
     "may_recruit",
-    "harvest_optional_exchange",
-    "harvest_wild_cost_exchange",
     "event_gain_action",
 })
 
@@ -214,6 +212,26 @@ def _enumerate_required_prompt(state, player_id):
         moves.append(_act(player_id, "skip"))
         return moves
 
+    # Harvest exchange prompts use engine-specific verbs, not accept/skip.
+    if action == "harvest_optional_exchange":
+        moves.append(_act(player_id, "confirm_harvest_exchange"))
+        moves.append(_act(player_id, "skip_harvest_exchange"))
+        return moves
+
+    if action == "harvest_wild_cost_exchange":
+        for opt in prc.get("cost_options") or []:
+            r = (opt.get("resource") or "").lower()
+            if r:
+                moves.append(_act(player_id, f"wild_cost_resource {r}"))
+        moves.append(_act(player_id, "skip_harvest_exchange"))
+        return moves
+
+    if action == "harvest_wild_gain_exchange":
+        for r in ("g", "s", "m"):
+            moves.append(_act(player_id, f"wild_gain_resource {r}"))
+        moves.append(_act(player_id, "skip_harvest_exchange"))
+        return moves
+
     if action == "slay_monster_payment":
         # immediate_slay "may slay a Monster" pay stage: wants "slay_pay g s m".
         g = int(prc.get("gold_cost") or 0)
@@ -279,14 +297,6 @@ def _enumerate_required_prompt(state, player_id):
         elif stage == "resource":
             for i in range(len(prc.get("resource_options") or [])):
                 moves.append(_act(player_id, f"steal_resource {i + 1}"))
-        return moves
-
-    if action == "harvest_wild_gain_exchange":
-        options = prc.get("options") or prc.get("gain_options") or []
-        n = max(len(options), 3)
-        for i in range(n):
-            moves.append(_act(player_id, f"choose {i + 1}"))
-        moves.append(_act(player_id, "skip"))
         return moves
 
     if action in CHOOSE_N_PROMPTS or action.startswith("choose "):
