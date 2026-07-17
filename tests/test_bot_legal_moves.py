@@ -253,6 +253,23 @@ class TestBotLegalMoves(unittest.TestCase):
         actions = {m["action"] for m in enumerate_actions(state, "p1")}
         self.assertEqual(actions, expected)
 
+  def test_orphaned_event_slay_cost_still_enumerates(self):
+    state = {
+      "phase": "harvest",
+      "game_id": "game-1",
+      "action_required": {"id": "game-1", "action": ""},
+      "pending_event_slay_cost": {"player_id": "p1", "resource": "m", "amount": 1},
+      "player_list": [{"player_id": "p1"}],
+      "monster_grid": [[{
+        "monster_id": 9,
+        "is_accessible": True,
+      }]],
+    }
+    moves = enumerate_actions(state, "p1")
+    self.assertEqual(len(moves), 1)
+    self.assertEqual(moves[0].get("_route"), "apply_event_slay_cost")
+    self.assertEqual(moves[0].get("monster_id"), 9)
+
   def test_game_over_returns_empty(self):
     state = {"phase": "game_over", "player_list": []}
     self.assertEqual(enumerate_actions(state, "p1"), [])

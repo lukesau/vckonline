@@ -59,6 +59,10 @@ class LifecycleEngine:
         if self.is_blocked_on_concurrent_action():
             return False
 
+        if getattr(self.game, "pending_event_slay_cost", None):
+            self.game.dice.sync_event_slay_cost_prompt()
+            return False
+
         # Block only on required player choices (not on standard action prompts)
         if self.game.action_required and self.game.action_required.get("id") and self.game.action_required.get("id") != self.game.game_id:
             aa = str(self.game.action_required.get("action", "") or "")

@@ -98,6 +98,10 @@ def legal_moves(game, player_id, state=None):
 
     if state is None:
         state = serialize_state(game)
+    sync_slay = getattr(getattr(game, "dice", None), "sync_event_slay_cost_prompt", None)
+    if callable(sync_slay):
+        sync_slay()
+        state = serialize_state(game)
     annotate_effective_costs(game, state, player_id)
     return enumerate_actions(state, player_id)
 
@@ -239,6 +243,39 @@ class StalledGameError(RuntimeError):
     """
 
 
+def describe_stall(game, state=None):
+    """Human-readable snapshot of why the sim might be stuck (for batch logs)."""
+    if state is None:
+        state = serialize_state(game)
+    ar = state.get("action_required") or {}
+    prc = state.get("pending_required_choice") or {}
+    ca = state.get("concurrent_action") or {}
+    lines = [
+        f"phase={state.get('phase')!r} turn={state.get('turn_number')} tick={state.get('tick_id')}",
+        f"action_required id={ar.get('id')!r} action={ar.get('action')!r}"
+        + (" (game_id)" if ar.get("id") == state.get("game_id") else ""),
+        f"pending_required_choice kind={prc.get('kind')!r} verb={prc.get('verb')!r}",
+        f"concurrent kind={ca.get('kind')!r} pending={len(ca.get('pending') or [])}",
+        f"pending_action_end_queue={len(state.get('pending_action_end_queue') or [])}",
+        f"pending_event_slay_cost={bool(state.get('pending_event_slay_cost'))}",
+    ]
+    if ca.get("kind") == "harvest_choices":
+        prompts = (ca.get("data") or {}).get("prompts") or {}
+        for pid in ca.get("pending") or []:
+            plist = prompts.get(pid) or prompts.get(str(pid)) or []
+            lines.append(f"  harvest pending {pid[:8]} prompts={len(plist)}")
+    for p in state.get("player_list") or []:
+        pid = p.get("player_id")
+        n = len(legal_moves(game, pid, state=state))
+        extra = ""
+        if ca.get("kind") == "flip_one_citizen" and pid in (ca.get("pending") or []):
+            oc = p.get("owned_citizens") or []
+            unflipped = sum(1 for c in oc if not c.get("is_flipped"))
+            extra = f" unflipped={unflipped}"
+        lines.append(f"  {p.get('name')}: {n} legal moves{extra}")
+    return "\n".join(lines)
+
+
 def progress_signature(game):
     """Cheap fingerprint of "did anything meaningful change" (no serialization).
 
@@ -320,7 +357,10 @@ def play_random_game(game, rng=None, max_steps=200000):
         if not actors:
             # No one can act but the game is not over -> try to nudge the engine.
             if not game.advance_tick():
-                raise StalledGameError("no legal moves and engine will not advance")
+                raise StalledGameError(
+                    "no legal moves and engine will not advance\n"
+                    + describe_stall(game, state=state)
+                )
             continue
         actor = actors[0]
         moves = legal_moves(game, actor, state=state)
@@ -344,7 +384,8 @@ def play_random_game(game, rng=None, max_steps=200000):
                 f"stalled at phase={getattr(game, 'phase', None)} "
                 f"turn={getattr(game, 'turn_number', None)} "
                 f"action={ar.get('action')!r} prc_kind={prc.get('kind')!r} "
-                f"actor={actor} n_moves={len(moves)}"
+                f"actor={actor} n_moves={len(moves)}\n"
+                + describe_stall(game, state=state)
             )
         steps += 1
 

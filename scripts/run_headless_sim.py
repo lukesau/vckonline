@@ -147,8 +147,12 @@ def _benchmark(args):
         for reason, cnt in sorted(reasons.items(), key=lambda kv: -kv[1]):
             print(f"    {cnt:>4}  {reason}")
         print()
-        print("Sample trace:")
-        print(failures[0].get("trace", failures[0].get("error")))
+        print("Failed seeds:", ", ".join(str(f.get("seed")) for f in failures[:20]))
+        print()
+        print("Sample failure:")
+        print(failures[0].get("error", failures[0].get("trace")))
+        if failures[0].get("trace"):
+            print(failures[0]["trace"])
 
 
 def main():

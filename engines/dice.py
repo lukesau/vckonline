@@ -622,6 +622,23 @@ class DiceEngine:
         self.game.action_required["action"] = ""
         self.game.harvest._resume_after_roll_effect_prompt()
 
+    def sync_event_slay_cost_prompt(self):
+        """Keep action_required aligned with pending_event_slay_cost.
+
+        Harvest concurrent snapshotting and other prompt hand-offs can clear
+        action_required while the slay-cost obligation is still outstanding.
+        """
+        pesc = getattr(self.game, "pending_event_slay_cost", None)
+        if not pesc:
+            return
+        pid = pesc.get("player_id")
+        if not pid:
+            return
+        ar = getattr(self.game, "action_required", None) or {}
+        if ar.get("action") != "event_slay_cost_choice" or ar.get("id") != pid:
+            self.game.action_required["id"] = pid
+            self.game.action_required["action"] = "event_slay_cost_choice"
+
     # ------------------------------------------------------------------
     # Crimson Seas: rolling 6s feeds the Exekratys pool.
     #

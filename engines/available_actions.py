@@ -346,7 +346,7 @@ def _enumerate_required_prompt(state, player_id):
             moves.append(_act(player_id, f"choose {i + 1}"))
             if qualified:
                 moves.append(_act(player_id, f"{qualified} {i + 1}"))
-        if action == "choose_owned_card" or "skip" in (prc.get("kind") or ""):
+        if action == "choose_owned_card" or prc.get("allow_skip") or "skip" in (prc.get("kind") or ""):
             moves.append(_act(player_id, "skip"))
         return moves
 
@@ -399,7 +399,10 @@ def _enumerate_event_slay_cost(state, player_id):
     if pesc.get("player_id") and pesc.get("player_id") != player_id:
         return []
     req = state.get("action_required") or {}
-    if req.get("id") != player_id:
+    req_id = req.get("id")
+    if req_id not in (player_id, state.get("game_id"), None, ""):
+        return []
+    if req_id == state.get("game_id") and not pesc:
         return []
     moves = []
     for top in _accessible_grid_tops(state.get("monster_grid")):
@@ -657,11 +660,10 @@ def enumerate_actions(state, player_id):
         return moves
 
     pesc = state.get("pending_event_slay_cost") or {}
-    if pesc and (not pesc.get("player_id") or pesc.get("player_id") == player_id):
-        req = state.get("action_required") or {}
-        if req.get("id") == player_id and req.get("action") == "event_slay_cost_choice":
-            moves = _enumerate_event_slay_cost(state, player_id)
-            if moves:
-                return moves
+    slay_pid = pesc.get("player_id")
+    if slay_pid and player_id == slay_pid:
+        moves = _enumerate_event_slay_cost(state, player_id)
+        if moves:
+            return moves
 
     return _enumerate_standard_actions(state, player_id)
