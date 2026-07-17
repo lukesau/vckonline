@@ -19,7 +19,6 @@ from game_helpers import (
     _parse_resource_kv,
     _player_resource_balances,
     _balances_allow_payout,
-    _GAME_LOG_MAX,
 )
 from game_concurrent import CONCURRENT_HANDLERS, _new_concurrent_action
 

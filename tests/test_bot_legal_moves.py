@@ -6,6 +6,7 @@ from bots.legal_moves import enumerate_actions
 class TestBotLegalMoves(unittest.TestCase):
   def test_standard_action_includes_take_resource(self):
     state = {
+      "preset": "base",
       "phase": "action",
       "actions_remaining": 2,
       "action_required": {"id": "p1", "action": "standard_action"},
@@ -21,8 +22,27 @@ class TestBotLegalMoves(unittest.TestCase):
     }
     moves = enumerate_actions(state, "p1")
     take = [m for m in moves if m.get("action_type") == "take_resource"]
-    self.assertEqual(len(take), 4)
+    self.assertEqual(len(take), 3)
     resources = {m["resource"] for m in take}
+    self.assertEqual(resources, {"gold", "strength", "magic"})
+
+  def test_crimson_seas_take_resource_includes_map(self):
+    state = {
+      "preset": "crimsonseas",
+      "phase": "action",
+      "actions_remaining": 2,
+      "active_player_id": "p1",
+      "action_required": {"id": "p1", "action": "standard_action"},
+      "player_list": [{"player_id": "p1"}],
+      "citizen_grid": [],
+      "domain_grid": [],
+      "monster_grid": [],
+    }
+    moves = enumerate_actions(state, "p1")
+    resources = {
+      m["resource"] for m in moves
+      if m.get("action_type") == "take_resource"
+    }
     self.assertEqual(resources, {"gold", "strength", "magic", "map"})
 
   def test_standard_action_not_my_turn(self):
@@ -120,6 +140,118 @@ class TestBotLegalMoves(unittest.TestCase):
     }
     moves = enumerate_actions(state, "p1")
     self.assertEqual(moves[0]["action"], "steal_victim 1")
+
+  def test_domain_prompt_verbs_match_engine_handlers(self):
+    cases = (
+      ("choose_domain_to_build", "build_domain_pick", True),
+      ("choose_domain_reward", "grant_domain", False),
+      ("choose_monster_strength", "choose_monster", False),
+    )
+    for required, verb, has_skip in cases:
+      with self.subTest(required=required):
+        state = {
+          "phase": "action",
+          "action_required": {"id": "p1", "action": required},
+          "pending_required_choice": {"options": [{}, {}]},
+          "player_list": [{"player_id": "p1"}],
+        }
+        moves = enumerate_actions(state, "p1")
+        actions = {m["action"] for m in moves}
+        expected = {f"{verb} 1", f"{verb} 2"}
+        if has_skip:
+          expected.add("skip")
+        self.assertEqual(actions, expected)
+
+  def test_domain_self_convert_uses_confirm_verb(self):
+    state = {
+      "phase": "action",
+      "action_required": {"id": "p1", "action": "domain_self_convert"},
+      "pending_required_choice": {"kind": "domain_self_convert"},
+      "player_list": [{"player_id": "p1"}],
+    }
+    actions = {m["action"] for m in enumerate_actions(state, "p1")}
+    self.assertEqual(actions, {"confirm_self_convert", "skip"})
+
+  def test_domain_choose_resource_uses_choice_indices(self):
+    state = {
+      "phase": "action",
+      "action_required": {"id": "p1", "action": "domain_choose_resource"},
+      "pending_required_choice": {
+        "kind": "domain_choose_resource",
+        "choices": [["g", 2], ["v", 1]],
+      },
+      "player_list": [{"player_id": "p1"}],
+    }
+    actions = {m["action"] for m in enumerate_actions(state, "p1")}
+    self.assertEqual(actions, {"choose 1", "choose 2"})
+
+  def test_domain_build_payment_uses_available_resources_and_tomes(self):
+    state = {
+      "phase": "action",
+      "action_required": {"id": "p1", "action": "build_domain_payment"},
+      "pending_required_choice": {"gold_cost": 3},
+      "player_list": [{
+        "player_id": "p1",
+        "gold_score": 1,
+        "magic_score": 1,
+        "owned_tomes": [
+          {"tome_type": "gold", "is_flipped": False},
+          {"tome_type": "magic", "is_flipped": True},
+        ],
+      }],
+    }
+    actions = {m["action"] for m in enumerate_actions(state, "p1")}
+    self.assertIn("build_pay 2 1 1 0 0", actions)
+    self.assertIn("skip", actions)
+    self.assertNotIn("build_pay 3 0 0 0 0", actions)
+
+  def test_bonus_take_one_resource_choice(self):
+    state = {
+      "phase": "harvest",
+      "action_required": {"id": "p1", "action": "bonus_resource_choice"},
+      "player_list": [{"player_id": "p1"}],
+    }
+    actions = {m["action"] for m in enumerate_actions(state, "p1")}
+    self.assertEqual(actions, {"gold", "strength", "magic"})
+
+  def test_event_sequence_uses_filtered_prompt_options(self):
+    cases = (
+      (
+        {
+          "verb": "banish_center_citizen",
+          "stack_options": [1, 4],
+        },
+        {"1", "4"},
+      ),
+      (
+        {
+          "verb": "banish_owned_citizen",
+          "owned_options": [2],
+          "mandatory": False,
+        },
+        {"2", "skip"},
+      ),
+      (
+        {
+          "verb": "place_reserve_monster",
+          "placement_options": [
+            {"grid": "monster", "idx": 2},
+            {"grid": "domain", "idx": 1},
+          ],
+        },
+        {"place monster 2", "place domain 1"},
+      ),
+    )
+    for prompt, expected in cases:
+      with self.subTest(verb=prompt["verb"]):
+        state = {
+          "phase": "action",
+          "action_required": {"id": "p1", "action": "event_sequence"},
+          "pending_required_choice": prompt,
+          "player_list": [{"player_id": "p1"}],
+        }
+        actions = {m["action"] for m in enumerate_actions(state, "p1")}
+        self.assertEqual(actions, expected)
 
   def test_game_over_returns_empty(self):
     state = {"phase": "game_over", "player_list": []}

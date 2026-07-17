@@ -19,7 +19,6 @@ dicts directly to an in-process `Game`.
 RESOURCES = ("gold", "strength", "magic", "map")
 
 BINARY_PROMPTS = frozenset({
-    "domain_self_convert",
     "may_sail",
     "may_recruit",
     "event_gain_action",
@@ -242,15 +241,39 @@ def _enumerate_required_prompt(state, player_id):
         return moves
 
     if action == "build_domain_payment":
-        # domain_build_opportunity pay stage (Ararmartin Ridge): wants "build_pay g m".
-        g = int(prc.get("gold_cost") or 0)
-        moves.append(_act(player_id, f"build_pay {g} 0"))
+        cost = int(prc.get("gold_cost") or 0)
+        me = _player_by_id(state, player_id) or {}
+        gold = int(me.get("gold_score") or 0)
+        magic = int(me.get("magic_score") or 0)
+        tome_counts = {"gold": 0, "magic": 0}
+        for tome in me.get("owned_tomes") or []:
+            if tome.get("is_flipped"):
+                continue
+            kind = tome.get("tome_type")
+            if kind in tome_counts:
+                tome_counts[kind] += 1
+        for gp in range(cost + 1):
+            mp = cost - gp
+            if cost > 0 and gp < 1:
+                continue
+            for tg in range(min(gp, tome_counts["gold"]) + 1):
+                if gp - tg > gold:
+                    continue
+                for tm in range(min(mp, tome_counts["magic"]) + 1):
+                    if mp - tm > magic:
+                        continue
+                    moves.append(_act(player_id, f"build_pay {gp} {mp} {tg} 0 {tm}"))
+        moves.append(_act(player_id, "skip"))
+        return moves
+
+    if action == "domain_self_convert":
+        moves.append(_act(player_id, "confirm_self_convert"))
         moves.append(_act(player_id, "skip"))
         return moves
 
     if action == "domain_choose_resource":
-        for r in ("g", "s", "m", "v"):
-            moves.append(_act(player_id, r))
+        for i in range(len(prc.get("choices") or [])):
+            moves.append(_act(player_id, f"choose {i + 1}"))
         return moves
 
     if action == "relic_wild_exchange":
@@ -299,6 +322,18 @@ def _enumerate_required_prompt(state, player_id):
                 moves.append(_act(player_id, f"steal_resource {i + 1}"))
         return moves
 
+    prompt_verbs = {
+        "choose_domain_to_build": "build_domain_pick",
+        "choose_domain_reward": "grant_domain",
+        "choose_monster_strength": "choose_monster",
+    }
+    if action in prompt_verbs:
+        for i in range(len(prc.get("options") or [])):
+            moves.append(_act(player_id, f"{prompt_verbs[action]} {i + 1}"))
+        if action == "choose_domain_to_build":
+            moves.append(_act(player_id, "skip"))
+        return moves
+
     if action in CHOOSE_N_PROMPTS or action.startswith("choose "):
         options = prc.get("options") or []
         # Some handlers accept the generic "choose N"; others (e.g. the
@@ -324,17 +359,19 @@ def _enumerate_required_prompt(state, player_id):
                     for r in ("g", "s", "m"):
                         moves.append(_act(player_id, f"pay {r} {pid}"))
         elif verb == "banish_center_citizen":
-            for i in range(len(state.get("citizen_grid") or [])):
-                moves.append(_act(player_id, str(i)))
+            for idx in prc.get("stack_options") or []:
+                moves.append(_act(player_id, str(idx)))
         elif verb == "banish_owned_citizen":
-            me = _player_by_id(state, player_id)
-            if me:
-                for i in range(len(me.get("owned_citizens") or [])):
-                    moves.append(_act(player_id, str(i)))
-            moves.append(_act(player_id, "skip"))
+            for idx in prc.get("owned_options") or []:
+                moves.append(_act(player_id, str(idx)))
+            if not prc.get("mandatory"):
+                moves.append(_act(player_id, "skip"))
         elif verb == "place_reserve_monster":
-            for gi in range(len(state.get("monster_grid") or [])):
-                moves.append(_act(player_id, f"place {gi} 0"))
+            for opt in prc.get("placement_options") or []:
+                grid = (opt.get("grid") or "").strip()
+                idx = opt.get("idx")
+                if grid and idx is not None:
+                    moves.append(_act(player_id, f"place {grid} {idx}"))
         return moves
 
     options = prc.get("options") or []
@@ -430,7 +467,8 @@ def _enumerate_standard_actions(state, player_id):
         return []
 
     moves = []
-    for resource in RESOURCES:
+    resources = RESOURCES if (state.get("preset") or "").strip().lower() == "crimsonseas" else RESOURCES[:3]
+    for resource in resources:
         moves.append({
             "player_id": player_id,
             "action_type": "take_resource",

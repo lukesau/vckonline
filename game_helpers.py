@@ -126,4 +126,4 @@ def _balances_allow_payout(balances, payout_vec):
 
 
 # Append-only server log included in serialized game state (same for every client).
-_GAME_LOG_MAX = 400
+# Kept for the full game — no sliding-window trim.
