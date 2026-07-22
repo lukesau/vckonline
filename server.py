@@ -742,6 +742,37 @@ def _drop_bot_policies(game_id: str) -> None:
                 pass
 
 
+_hint_cache: Dict[str, dict] = {}  # game_id -> {"key": (pid, tick, log_len), "future": Future}
+
+
+async def _compute_hint_for(game_id: str, game, player_id: str):
+    """Run hint analysis on a clone in the executor; dedupe concurrent requests
+    for the same game state via a cached future."""
+    state_key = (
+        str(player_id),
+        int(getattr(game, "tick_id", 0) or 0),
+        len(getattr(game, "game_log", None) or []),
+    )
+    entry = _hint_cache.get(game_id)
+    if entry and entry["key"] == state_key:
+        return await asyncio.shield(entry["future"])
+
+    from game_serialization import deserialize_save_dict_to_game, serialize_game_to_save_dict
+
+    save_dict = serialize_game_to_save_dict(game)
+
+    def _compute():
+        from agent.hints import compute_hint
+
+        clone = deserialize_save_dict_to_game(save_dict)
+        clone.sim_mode = True
+        return compute_hint(clone, player_id)
+
+    future = asyncio.get_running_loop().run_in_executor(None, _compute)
+    _hint_cache[game_id] = {"key": state_key, "future": future}
+    return await asyncio.shield(future)
+
+
 def _schedule_bot_turns(game_id: str) -> None:
     """Fire-and-forget the bot driver for this game (no-op without bots)."""
     game = games.get(game_id)
@@ -840,6 +871,7 @@ def _destroy_game(game_id: str) -> None:
     game_histories.pop(game_id, None)
     _clear_game_rejoin_codes(game_id)
     _drop_bot_policies(game_id)
+    _hint_cache.pop(game_id, None)
     global gamers
     gamers = [g for g in gamers if g.game_id != game_id]
 
@@ -2275,6 +2307,37 @@ async def get_game_state(game_id: str, player_id: Optional[str] = None):
     _shot_clock_ensure(game_id)
     _schedule_bot_turns(game_id)
     return _serialize_game_for_player(game, player_id)
+
+
+@app.get("/api/game/{game_id}/hint")
+async def get_game_hint(game_id: str, player_id: str):
+    """What would the Hard bot play here? Analyzes the requesting player's
+    current decision (determinized MCTS on a clone; never mutates the game)
+    and returns short text like "Slay Goblin (5s)" plus top alternatives."""
+    game = games.get(game_id)
+    if not game:
+        return game_not_found_json()
+    if not _player_in_game(game, player_id):
+        raise HTTPException(status_code=403, detail="Not a player in this game")
+    from agent.hints import player_pending_moves
+
+    if player_pending_moves(game, player_id) is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No pending decision to hint — wait for your turn or prompt.",
+        )
+    try:
+        result = await _compute_hint_for(game_id, game, player_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Hint failed: {e}")
+    if result is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No pending decision to hint — wait for your turn or prompt.",
+        )
+    return {"player_id": player_id, **result}
 
 
 @app.post("/api/game/{game_id}/action")

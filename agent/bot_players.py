@@ -20,9 +20,10 @@ BOT_LEVELS = {
     "hard": "Hard Bot",
 }
 
-# Hard-bot search budget: enough to beat greedy ~90% while keeping decisions
-# around a second on modest server hardware.
-HARD_BOT_ITERATIONS = 100
+# Hard-bot search budget. 400 iterations ≈ 2-4s per decision — fine for a
+# turn-based opponent (players reported 200 felt too fast), and the driver
+# computes on an executor against a clone so the server stays responsive.
+HARD_BOT_ITERATIONS = 400
 
 _SINK = io.StringIO()
 

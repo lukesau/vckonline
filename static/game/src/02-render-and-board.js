@@ -422,6 +422,7 @@ function render(state) {
   if (hasBlockingConcurrent && promptOverlayOpen) {
     syncConcurrentPolling(state);
     renderPromptModal(state);
+    syncHintControl(state);
     tickHurryUpTimerElements();
     ensureHurryUpTicking();
     return;
@@ -449,6 +450,7 @@ function render(state) {
   syncConcurrentPolling(state);
   maybeAutoFinalizeRoll(state);
   renderPromptModal(state);
+  syncHintControl(state);
   tickHurryUpTimerElements();
   ensureHurryUpTicking();
 }

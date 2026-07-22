@@ -5598,3 +5598,21 @@ body.is-virtual-keyboard-open .card-modal {
 .lobby-bot-check input { accent-color: #7c5cff; }
 .lobby-bots-disabled { opacity: 0.45; pointer-events: none; }
 .lobby-bot-tag { background: rgba(124, 92, 255, 0.25); }
+
+/* In-game hint button + panel (bot recommendation) */
+.hint-btn {
+  position: fixed; right: 14px; bottom: 74px; z-index: 12000;
+  padding: 8px 14px; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 20px;
+  background: rgba(30, 24, 54, 0.92); color: #f0eaff; font-size: 0.9em; cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+.hint-btn:hover { background: rgba(64, 48, 110, 0.95); }
+.hint-btn:disabled { opacity: 0.7; cursor: wait; }
+.hint-panel {
+  position: fixed; right: 14px; bottom: 118px; z-index: 12000; max-width: 300px;
+  padding: 10px 14px; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 10px;
+  background: rgba(20, 16, 40, 0.96); color: #f0eaff; font-size: 0.9em; cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+.hint-panel-main { font-weight: 600; }
+.hint-panel-alt { opacity: 0.75; font-size: 0.9em; margin-top: 3px; }

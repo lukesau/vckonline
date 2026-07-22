@@ -113,6 +113,104 @@ async function postGameAction(body) {
   else fetchGameStateFromApi();
   return true;
 }
+// ── Hint button ("what would the Hard bot do?") ───────────────────────────
+let hintBtnEl = null;
+let hintPanelEl = null;
+let hintBusy = false;
+let hintShownForKey = '';
+
+function hintStateKey(state) {
+  return `${state?.tick_id ?? ''}:${(state?.game_log || []).length}`;
+}
+
+function viewerOwesDecision(state) {
+  if (!PLAYER_ID || !state || state.phase === 'game_over') return false;
+  const ca = state.concurrent_action;
+  if (ca && Array.isArray(ca.pending) && ca.pending.some(pid => idsMatch(pid, PLAYER_ID))) {
+    return true;
+  }
+  const req = state.action_required || {};
+  return idsMatch(req.id, PLAYER_ID);
+}
+
+function ensureHintElements() {
+  if (hintBtnEl) return;
+  hintBtnEl = document.createElement('button');
+  hintBtnEl.type = 'button';
+  hintBtnEl.id = 'hint-btn';
+  hintBtnEl.className = 'hint-btn';
+  hintBtnEl.textContent = '\u{1F4A1} Hint';
+  hintBtnEl.title = 'Ask the Hard bot what it would play here';
+  hintBtnEl.hidden = true;
+  hintBtnEl.addEventListener('click', requestHint);
+  document.body.appendChild(hintBtnEl);
+
+  hintPanelEl = document.createElement('div');
+  hintPanelEl.id = 'hint-panel';
+  hintPanelEl.className = 'hint-panel';
+  hintPanelEl.hidden = true;
+  hintPanelEl.addEventListener('click', () => { hintPanelEl.hidden = true; });
+  document.body.appendChild(hintPanelEl);
+}
+
+function syncHintControl(state) {
+  ensureHintElements();
+  const show = viewerOwesDecision(state);
+  hintBtnEl.hidden = !show || hintBusy;
+  // A hint describes one specific decision point; drop it once the game moved.
+  if (!show || (hintShownForKey && hintShownForKey !== hintStateKey(state))) {
+    hintPanelEl.hidden = true;
+    hintShownForKey = '';
+  }
+}
+
+function renderHintPanel(lines) {
+  hintPanelEl.innerHTML = '';
+  lines.forEach((line, i) => {
+    const p = document.createElement('div');
+    p.className = i === 0 ? 'hint-panel-main' : 'hint-panel-alt';
+    p.textContent = line;
+    hintPanelEl.appendChild(p);
+  });
+  hintPanelEl.hidden = false;
+}
+
+async function requestHint() {
+  if (hintBusy || !PLAYER_ID) return;
+  hintBusy = true;
+  hintBtnEl.disabled = true;
+  hintBtnEl.textContent = '\u{1F4A1} Thinking…';
+  try {
+    const res = await fetch(
+      `/api/game/${encodeURIComponent(GAME_ID)}/hint?player_id=${encodeURIComponent(PLAYER_ID)}`
+    );
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = payload?.detail || res.statusText || 'Hint unavailable';
+      renderHintPanel([String(detail)]);
+      hintShownForKey = hintStateKey(latestGameState);
+      return;
+    }
+    const lines = [`Bot suggests: ${payload.hint || '?'}`];
+    if (payload.only_move) {
+      lines.push('(only legal move)');
+    } else {
+      (payload.candidates || []).slice(1).forEach(c => {
+        lines.push(`alt: ${c.label} (${c.visit_pct}%)`);
+      });
+    }
+    renderHintPanel(lines);
+    hintShownForKey = hintStateKey(latestGameState);
+  } catch (e) {
+    renderHintPanel(['Hint failed — try again.']);
+  } finally {
+    hintBusy = false;
+    hintBtnEl.disabled = false;
+    hintBtnEl.textContent = '\u{1F4A1} Hint';
+    if (latestGameState) syncHintControl(latestGameState);
+  }
+}
+
 function promptButton(label, onClick, secondary) {
   const b = document.createElement('button');
   b.type = 'button';
