@@ -423,6 +423,7 @@ function render(state) {
     syncConcurrentPolling(state);
     renderPromptModal(state);
     syncHintControl(state);
+    syncTrainingFeedback(state);
     tickHurryUpTimerElements();
     ensureHurryUpTicking();
     return;
@@ -451,6 +452,7 @@ function render(state) {
   maybeAutoFinalizeRoll(state);
   renderPromptModal(state);
   syncHintControl(state);
+  syncTrainingFeedback(state);
   tickHurryUpTimerElements();
   ensureHurryUpTicking();
 }

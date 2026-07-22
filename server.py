@@ -415,6 +415,8 @@ def _serialize_lobby(lb: Lobby):
         "random_no_optional_modules": bool(
             getattr(lb, "random_no_optional_modules", False)
         ),
+        "training_mode": bool(getattr(lb, "training_mode", False)),
+        "move_analysis": bool(getattr(lb, "move_analysis", False)),
         "members": [_serialize_member(m) for m in lb.members],
     }
 
@@ -477,6 +479,11 @@ def _maybe_start_lobby_game(lb: Lobby):
     if bot_levels:
         new_game.bot_levels = bot_levels
         _schedule_bot_turns(new_game_id)
+
+    new_game.training_mode = bool(getattr(lb, "training_mode", False))
+    new_game.move_analysis = bool(getattr(lb, "move_analysis", False))
+    if new_game.training_mode or new_game.move_analysis:
+        _analysis_state[new_game_id] = {"tallies": {}, "feedback": {}}
 
     lobbies.pop(lb.lobby_id, None)
     return new_game_id
@@ -744,6 +751,113 @@ def _drop_bot_policies(game_id: str) -> None:
 
 _hint_cache: Dict[str, dict] = {}  # game_id -> {"key": (pid, tick, log_len), "future": Future}
 
+# Move-quality grading (training mode / move analysis).
+# game_id -> {"tallies": {pid: {category: n}}, "feedback": {pid: feedback_dict}}
+_analysis_state: Dict[str, dict] = {}
+
+_GRADING_REQUEST_FIELDS = (
+    "citizen_id", "domain_id", "monster_id", "event_id", "resource", "action",
+    "response", "kind", "harvest_slot_key", "die_one", "die_two", "payment",
+    "agent_slot_index", "slot_index", "slot_indices", "thunder_axe",
+)
+
+
+def _request_to_move(request: "GameActionRequest") -> dict:
+    """Rebuild the wire-style move dict this action request represents, in the
+    same shape engines/available_actions enumerates (for grading comparison)."""
+    move = {"player_id": request.player_id, "action_type": request.action_type}
+    for field in _GRADING_REQUEST_FIELDS:
+        value = getattr(request, field, None)
+        if value is None:
+            continue
+        if hasattr(value, "model_dump"):
+            value = value.model_dump()
+        elif hasattr(value, "dict") and not isinstance(value, dict):
+            value = value.dict()
+        move[field] = value
+    return move
+
+
+def _grading_enabled(game) -> bool:
+    return bool(getattr(game, "training_mode", False) or getattr(game, "move_analysis", False))
+
+
+def _grading_context(game, request: "GameActionRequest"):
+    """Pre-action snapshot for async grading, or None when this action isn't
+    gradable (grading off, bot player, no decision, or a forced move)."""
+    if not _grading_enabled(game):
+        return None
+    pid = request.player_id
+    if not pid or pid in (getattr(game, "bot_levels", None) or {}):
+        return None
+    from agent.hints import player_pending_moves
+
+    try:
+        moves = player_pending_moves(game, pid)
+    except Exception:
+        return None
+    if not moves or len(moves) < 2:
+        return None
+    from game_serialization import serialize_game_to_save_dict
+
+    return {
+        "save": serialize_game_to_save_dict(game),
+        "player_id": pid,
+        "move": _request_to_move(request),
+    }
+
+
+async def _grade_move_task(game_id: str, ctx: dict) -> None:
+    """Analyze the pre-action snapshot in the executor, record the grade, and
+    push the updated state so training-mode clients see feedback promptly."""
+    from game_serialization import deserialize_save_dict_to_game
+
+    def _compute():
+        from agent.grading import analyze_and_grade
+
+        clone = deserialize_save_dict_to_game(ctx["save"])
+        clone.sim_mode = True
+        return analyze_and_grade(clone, ctx["player_id"], ctx["move"])
+
+    try:
+        feedback = await asyncio.get_running_loop().run_in_executor(None, _compute)
+    except Exception:
+        return
+    if not feedback:
+        return
+    astate = _analysis_state.get(game_id)
+    game = games.get(game_id)
+    if astate is None or game is None:
+        return
+    from agent.grading import empty_tally
+
+    pid = ctx["player_id"]
+    tally = astate["tallies"].setdefault(pid, empty_tally())
+    tally[feedback["category"]] = tally.get(feedback["category"], 0) + 1
+    feedback["seq"] = sum(tally.values())
+    astate["feedback"][pid] = feedback
+    await manager.broadcast(game_id, game)
+
+
+def _move_quality_summary(game) -> list:
+    astate = _analysis_state.get(getattr(game, "game_id", "") or "")
+    if not astate or not astate["tallies"]:
+        return []
+    names = {
+        str(getattr(p, "player_id", "")): getattr(p, "name", "Player")
+        for p in getattr(game, "player_list", []) or []
+    }
+    rows = []
+    for pid, tally in astate["tallies"].items():
+        rows.append({
+            "player_id": pid,
+            "name": names.get(str(pid), "Player"),
+            **{c: int(tally.get(c, 0)) for c in ("perfect", "great", "fine", "blunder", "unrated")},
+            "graded": int(sum(tally.values())),
+        })
+    rows.sort(key=lambda r: -r["graded"])
+    return rows
+
 
 async def _compute_hint_for(game_id: str, game, player_id: str):
     """Run hint analysis on a clone in the executor; dedupe concurrent requests
@@ -872,6 +986,7 @@ def _destroy_game(game_id: str) -> None:
     _clear_game_rejoin_codes(game_id)
     _drop_bot_policies(game_id)
     _hint_cache.pop(game_id, None)
+    _analysis_state.pop(game_id, None)
     global gamers
     gamers = [g for g in gamers if g.game_id != game_id]
 
@@ -1362,6 +1477,10 @@ class CreateLobbyRequest(BaseModel):
     # Bot opponents to seat in the lobby at creation: list of difficulty
     # levels from agent.bot_players.BOT_LEVELS ("easy" | "medium" | "hard").
     bots: Optional[List[str]] = None
+    # Training mode: live per-move feedback vs the Hard bot + end-game summary.
+    training_mode: Optional[bool] = False
+    # Move analysis: end-game move-quality summary only (no live feedback).
+    move_analysis: Optional[bool] = False
 
 
 class JoinLobbyRequest(BaseModel):
@@ -1560,6 +1679,8 @@ async def create_lobby(request: CreateLobbyRequest):
         random_no_optional_modules=random_no_optional_modules,
     )
     lb.created_at = time.time()
+    lb.training_mode = bool(request.training_mode)
+    lb.move_analysis = bool(request.move_analysis)
     lb.members.append(member)
     if bot_levels:
         from agent.bot_players import BOT_LEVELS
@@ -2185,6 +2306,20 @@ def _serialize_game_for_player(game, viewer_player_id: Optional[str]):
         except Exception:
             state["legal_moves"] = []
 
+    # Training mode / move analysis surfaces
+    state["training_mode"] = bool(getattr(game, "training_mode", False))
+    state["move_analysis"] = bool(getattr(game, "move_analysis", False))
+    astate = _analysis_state.get(getattr(game, "game_id", "") or "")
+    if astate:
+        if viewer_player_id and state["training_mode"]:
+            feedback = astate["feedback"].get(str(viewer_player_id))
+            if feedback:
+                state["move_feedback"] = feedback
+        if state.get("phase") == "game_over":
+            summary = _move_quality_summary(game)
+            if summary:
+                state["move_quality_summary"] = summary
+
     return state
 
 
@@ -2348,6 +2483,11 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
         return game_not_found_json()
 
     _touch_game_audience(game)
+
+    # Training mode / move analysis: snapshot the pre-action state now so the
+    # submitted move can be graded against the bot's analysis asynchronously
+    # (never blocks the action; feedback rides a later state push).
+    grade_ctx = _grading_context(game, request)
 
     # Snapshots back the dev "Back one step" button. We only record snapshots
     # for action-phase player actions (take resource / hire / build / slay).
@@ -2646,6 +2786,8 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
         if should_snapshot:
             _record_snapshot(game_id, game)
         _shot_clock_reset(game_id)
+        if grade_ctx is not None:
+            asyncio.create_task(_grade_move_task(game_id, grade_ctx))
         # Push updated state to all WebSocket subscribers for this game.
         await manager.broadcast(game_id, game)
         # If this action ended the game, start the countdown once.

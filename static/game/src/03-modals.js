@@ -342,6 +342,8 @@ function fillGameOverSummaryBody(body, state) {
   }
 
   const list = mk('game-over-standings');
+  const qualityByPid = {};
+  (state.move_quality_summary || []).forEach(q => { qualityByPid[q.player_id] = q; });
   finalScoresSorted(state).forEach(s => {
     const row = mk('game-over-standing-row');
     const rank = mk('rank');
@@ -354,6 +356,21 @@ function fillGameOverSummaryBody(body, state) {
     total.textContent = `${s.total_vp} VP`;
     row.appendChild(total);
     list.appendChild(row);
+    // Training mode / move analysis: per-player move-quality tallies graded
+    // against the Hard bot (perfect = its exact move).
+    const q = qualityByPid[s.player_id];
+    if (q && q.graded > 0) {
+      const qrow = mk('game-over-quality-row');
+      const parts = [
+        `✅ ${q.perfect} perfect`,
+        `\u{1F44D} ${q.great} great`,
+        `\u{1F44C} ${q.fine} fine`,
+        `❌ ${q.blunder} ${q.blunder === 1 ? 'blunder' : 'blunders'}`,
+      ];
+      if (q.unrated > 0) parts.push(`❓ ${q.unrated} unrated`);
+      qrow.textContent = parts.join(' · ');
+      list.appendChild(qrow);
+    }
   });
   body.appendChild(list);
 

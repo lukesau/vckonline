@@ -123,6 +123,15 @@
             <label class="lobby-bot-check"><input type="checkbox" id="lobby-create-bot-medium" value="medium"> Medium Bot</label>
             <label class="lobby-bot-check"><input type="checkbox" id="lobby-create-bot-hard" value="hard"> Hard Bot</label>
           </div>
+          <div class="lobby-field-row lobby-bots-row">
+            <span class="lobby-bots-label">Coaching:</span>
+            <label class="lobby-bot-check" title="Live feedback after every move, graded against the Hard bot, plus an end-game summary">
+              <input type="checkbox" id="lobby-create-training-mode"> Training mode
+            </label>
+            <label class="lobby-bot-check" title="End-game move-quality summary only (no live feedback)">
+              <input type="checkbox" id="lobby-create-move-analysis"> Move analysis
+            </label>
+          </div>
           <p class="lobby-preset-warning" id="lobby-create-bots-warning" role="alert" hidden>
             Bots are not available in draft lobbies.
           </p>

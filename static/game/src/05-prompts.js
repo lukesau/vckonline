@@ -211,6 +211,62 @@ async function requestHint() {
   }
 }
 
+// ── Training-mode move feedback ───────────────────────────────────────────
+let feedbackPanelEl = null;
+let feedbackShownSeq = -1;
+
+const FEEDBACK_STYLES = {
+  perfect: { icon: '✅', title: 'Perfect!', cls: 'is-perfect' },
+  great: { icon: '\u{1F44D}', title: 'Great move', cls: 'is-great' },
+  fine: { icon: '\u{1F44C}', title: 'Fine move', cls: 'is-fine' },
+  blunder: { icon: '❌', title: 'Blunder', cls: 'is-blunder' },
+  unrated: { icon: '❓', title: 'Unrated move', cls: 'is-unrated' },
+};
+
+function ensureFeedbackPanel() {
+  if (feedbackPanelEl) return;
+  feedbackPanelEl = document.createElement('div');
+  feedbackPanelEl.id = 'training-feedback';
+  feedbackPanelEl.className = 'training-feedback';
+  feedbackPanelEl.hidden = true;
+  feedbackPanelEl.addEventListener('click', () => { feedbackPanelEl.hidden = true; });
+  document.body.appendChild(feedbackPanelEl);
+}
+
+function syncTrainingFeedback(state) {
+  ensureFeedbackPanel();
+  const fb = state && state.training_mode ? state.move_feedback : null;
+  if (!fb) {
+    feedbackPanelEl.hidden = true;
+    return;
+  }
+  if ((fb.seq ?? 0) === feedbackShownSeq && feedbackPanelEl.hidden) {
+    return; // user dismissed this one; don't resurrect it on re-renders
+  }
+  const style = FEEDBACK_STYLES[fb.category] || FEEDBACK_STYLES.unrated;
+  const alreadyShown = (fb.seq ?? 0) === feedbackShownSeq && !feedbackPanelEl.hidden;
+  if (alreadyShown) return;
+  feedbackShownSeq = fb.seq ?? 0;
+  feedbackPanelEl.className = `training-feedback ${style.cls}`;
+  feedbackPanelEl.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'training-feedback-head';
+  head.textContent = `${style.icon} ${style.title}`;
+  feedbackPanelEl.appendChild(head);
+  const body = document.createElement('div');
+  body.className = 'training-feedback-body';
+  if (fb.category === 'perfect') {
+    body.textContent = `${fb.your_label} — exactly what the bot would play.`;
+  } else if (fb.category === 'unrated') {
+    body.textContent = `${fb.your_label} — outside the bot's analyzed lines.`;
+  } else {
+    const delta = fb.delta_pct != null ? `−${fb.delta_pct}% win chance` : '';
+    body.textContent = `${fb.your_label} (${delta}). Bot preferred: ${fb.bot_label}.`;
+  }
+  feedbackPanelEl.appendChild(body);
+  feedbackPanelEl.hidden = false;
+}
+
 function promptButton(label, onClick, secondary) {
   const b = document.createElement('button');
   b.type = 'button';

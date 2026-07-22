@@ -1413,6 +1413,8 @@ function initLobbyModal() {
   ).filter(Boolean);
   const createBotsRow = document.getElementById('lobby-create-bots-row');
   const createBotsWarning = document.getElementById('lobby-create-bots-warning');
+  const createTrainingCheck = document.getElementById('lobby-create-training-mode');
+  const createAnalysisCheck = document.getElementById('lobby-create-move-analysis');
   const lobbySheet = overlay ? overlay.querySelector('.lobby-sheet') : null;
   const waitMetaEl = document.getElementById('lobby-wait-meta');
   const presetSelect = document.getElementById('lobby-preset-select');
@@ -2127,6 +2129,8 @@ function initLobbyModal() {
           expansion_only: poolState.expansionOnly,
           random_no_optional_modules: poolState.randomNoOptionalModules,
           bots,
+          training_mode: !!(createTrainingCheck && createTrainingCheck.checked),
+          move_analysis: !!(createAnalysisCheck && createAnalysisCheck.checked),
         }),
       });
       const data = await res.json().catch(() => ({}));
