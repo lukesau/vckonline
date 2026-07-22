@@ -77,6 +77,7 @@ class GreedyPolicy:
 
     def __init__(self, config=None):
         self.cfg = config or GreedyConfig()
+        self.last_decision = None
 
     # ---- resource rates ------------------------------------------------
 
@@ -464,12 +465,52 @@ class GreedyPolicy:
                 values.append(value)
         return values
 
-    def choose(self, game, view, player_id, moves):
+    def analyze(self, game, player_id, moves):
+        """Rank moves by VP-equivalent value; sets ``last_decision``."""
+        from agent.move_summary import move_key
+
         if not moves:
-            return None
+            self.last_decision = {"policy": "greedy", "chosen": None, "candidates": []}
+            return self.last_decision
+        if len(moves) == 1:
+            self.last_decision = {
+                "policy": "greedy",
+                "chosen": moves[0],
+                "candidates": [],
+                "trivial": True,
+            }
+            return self.last_decision
+
         values = self.move_values(game, player_id, moves)
         if values is None:
-            return random.choice(moves)
-        best_value = max(values)
-        best = [m for m, v in zip(moves, values) if v >= best_value - 1e-9]
-        return random.choice(best)
+            chosen = random.choice(moves)
+            self.last_decision = {
+                "policy": "greedy",
+                "chosen": chosen,
+                "candidates": [],
+                "unscored": True,
+            }
+            return self.last_decision
+
+        ranked = sorted(zip(moves, values), key=lambda kv: -kv[1])
+        best_value = ranked[0][1]
+        best = [m for m, v in ranked if v >= best_value - 1e-9]
+        chosen = random.choice(best)
+        candidates = []
+        for move, value in ranked:
+            candidates.append({
+                "move": move,
+                "key": move_key(move),
+                "vp_equiv": value,
+                "delta_from_best": value - best_value,
+            })
+        self.last_decision = {
+            "policy": "greedy",
+            "chosen": chosen,
+            "candidates": candidates,
+            "best_vp_equiv": best_value,
+        }
+        return self.last_decision
+
+    def choose(self, game, view, player_id, moves):
+        return self.analyze(game, player_id, moves)["chosen"]

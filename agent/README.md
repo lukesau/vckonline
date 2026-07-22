@@ -15,6 +15,8 @@ far: base-set, 2-player.
 | `fast_state.py` | Zero-copy dict-view over a live `Game` (optional fast enum path) |
 | `policies.py` | `RandomPolicy` baseline and `GreedyPolicy` — VP-equivalent move valuation |
 | `mcts.py` | Determinized open-loop MCTS with PUCT selection and ε-greedy rollouts |
+| `move_summary.py` | Decision logging + ranked summaries (bot `--compare-greedy`, advisor mode) |
+| `recommend.py` | Read-only move advisor: poll a human game's URL, suggest top-N moves, never play |
 | `reconstruct.py` | Rebuild a playable `Game` from a server wire-state snapshot |
 | `server_bot.py` | Host/join a lobby on a live server and play any policy over the REST API |
 | `validate.py` | Invariant/parity/round-trip validation across hundreds of seeded games |
@@ -45,9 +47,27 @@ python -m agent.server_bot --policy mcts --iterations 200 --host --preset base
 # same, with root-parallel MCTS across CPU cores
 python -m agent.server_bot --policy mcts --iterations 200 --workers 4 --host --preset base
 
+# MCTS with side-by-side greedy comparison (still plays MCTS)
+python -m agent.server_bot --policy mcts --compare-greedy --host --preset base
+
 # after Ctrl-C / crash mid-game (session auto-saved to agent_session.json)
 python -m agent.server_bot --policy mcts --resume
+
+# move recommendation mode — advise on a live human game (never submits moves)
+python -m agent.recommend --url 'https://vcko.lukesau.com/?game_id=...&player_id=...'
+
+# one-shot recommendation for the current decision, then exit
+python -m agent.recommend --url 'https://vcko.lukesau.com/?game_id=...&player_id=...' --once
 ```
+
+When the bot plays, each greedy or MCTS action also logs a ranked summary
+(visit counts and Q for MCTS; VP-equivalent scores for greedy). Use
+`--compare-greedy` with MCTS to print both rankings plus agree/diverge notes.
+
+**Move recommendation mode** (`agent.recommend`) attaches to a game you are
+playing in the browser: paste the page URL (or pass `--game-id` /
+`--player-id`), and it polls your seat, runs greedy + MCTS, and prints the
+top 5 options from each — without executing anything.
 
 ## Results (2-player, seat-alternating, seeded)
 
@@ -67,5 +87,5 @@ it does not peek at hidden information.
 
 - Reconstruction models the face-down event deck as blank Exhausted tokens.
 - Greedy's effect-string valuation is approximate for unusual payouts.
-- Roadmap: move-recommendation mode, event-composition sampling,
-  self-play-trained value/prior network on top of the existing PUCT search.
+- Roadmap: event-composition sampling, self-play-trained value/prior network on top
+  of the existing PUCT search.
