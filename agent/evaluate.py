@@ -88,7 +88,7 @@ def make_policy(name, args):
     if name == "mcts":
         from agent.mcts import MCTSPolicy
 
-        return MCTSPolicy(iterations=args.iterations)
+        return MCTSPolicy(iterations=args.iterations, workers=args.workers)
     raise ValueError(f"unknown policy {name!r}")
 
 
@@ -99,6 +99,12 @@ def main():
     parser.add_argument("--games", type=int, default=20)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--iterations", type=int, default=60, help="MCTS iterations per decision")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="MCTS root-parallel worker processes (1 = single-process)",
+    )
     parser.add_argument("--swap-seats", action="store_true", default=True)
     args = parser.parse_args()
 
@@ -115,7 +121,13 @@ def main():
             "p2": make_policy(names[1], args),
         }
         name_by_pid = {"p1": names[0], "p2": names[1]}
-        game, steps = play_policy_game(policies, seed=seed)
+        try:
+            game, steps = play_policy_game(policies, seed=seed)
+        finally:
+            for pol in policies.values():
+                close = getattr(pol, "close", None)
+                if callable(close):
+                    close()
         if game.phase != "game_over":
             unfinished += 1
             print(f"game {i + 1}: seed={seed} UNFINISHED ({steps} steps)")

@@ -138,6 +138,9 @@ docs/local/
 # Maintainer-only scripts (Homebrew auto-install helpers, etc.)
 local/
 
+# Agent mid-game resume identity (server_bot)
+agent_session.json
+
 # Generated table dumps (scripts/dump_tables.py)
 sql/dumps/
 

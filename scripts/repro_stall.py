@@ -26,7 +26,7 @@ from agent.headless import (
 def _run(seed):
     seed_everything(seed)
     with contextlib.redirect_stdout(io.StringIO()):
-        game = build_game(preset="base1", num_players=2, seed=seed)
+        game = build_game(preset="base", num_players=2, seed=seed)
         try:
             play_random_game(game)
             return {"seed": seed, "ok": True}

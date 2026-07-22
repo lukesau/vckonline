@@ -770,7 +770,7 @@ python -m agent.play_random --games 10 --seed 1
 python -m agent.evaluate --p1 greedy --p2 random --games 20 --seed 1
 
 # Host a lobby on the public server and wait for a human (or another bot)
-python -m agent.server_bot --policy mcts --host --preset base1
+python -m agent.server_bot --policy mcts --host --preset base
 ```
 
 - **`agent/client.py`** — HTTP client (`VckoClient`) for lobby and game endpoints

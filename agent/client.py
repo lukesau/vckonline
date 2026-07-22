@@ -124,3 +124,12 @@ class VckoClient:
         if route == "apply_event_slay_cost":
             return self.apply_event_slay_cost(game_id, body)
         return self.post_action(game_id, body)
+
+    def rejoin(self, game_id, rejoin_code):
+        """Recover player_id from a rejoin code after a dropped session."""
+        payload = self._request(
+            "POST",
+            f"/api/game/{urllib.parse.quote(str(game_id))}/rejoin",
+            {"rejoin_code": rejoin_code},
+        )
+        return payload.get("game_id") or game_id, payload["player_id"]

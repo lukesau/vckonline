@@ -5,11 +5,11 @@ Runs games fully in-process (no HTTP server, no MariaDB) by driving the engine
 through `agent.headless` (cards from sql/seed via fake_db). Two modes:
 
   # Play one random-vs-random game and print the result:
-  python3 scripts/run_headless_sim.py --preset base1 --players 2 --seed 1
+  python3 scripts/run_headless_sim.py --preset base --players 2 --seed 1
 
   # Benchmark throughput across CPU cores:
   python3 scripts/run_headless_sim.py --benchmark --games 500 --workers 18 \
-      --preset base1 --players 2
+      --preset base --players 2
 """
 
 import argparse
@@ -152,7 +152,7 @@ def _benchmark(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Headless VCKO simulation harness")
-    parser.add_argument("--preset", default="base1")
+    parser.add_argument("--preset", default="base")
     parser.add_argument("--players", type=int, default=2)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--debug", action="store_true", help="deal with debug_mode (rigged dice/resources)")

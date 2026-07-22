@@ -69,7 +69,7 @@ def advance(game):
         pass
 
 
-def new_game(preset="base1", num_players=2, seed=None, game_id="headless",
+def new_game(preset="base", num_players=2, seed=None, game_id="headless",
              debug_mode=False, duke_select_count=2, player_names=None):
     """Deal a fresh game via fake_db + load_game_data; pump to first decision."""
     fake_db.install()

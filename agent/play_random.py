@@ -54,7 +54,7 @@ def _pick_move(moves):
     return move
 
 
-def play_random_game(seed=None, max_steps=20000, verbose=False, preset="base1"):
+def play_random_game(seed=None, max_steps=20000, verbose=False, preset="base"):
     game = new_game(seed=seed, preset=preset)
     steps = 0
     stuck_streak = 0
@@ -101,7 +101,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--games", type=int, default=1)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--preset", default="base1")
+    parser.add_argument("--preset", default="base")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
