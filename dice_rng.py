@@ -7,7 +7,7 @@ passives, so the audit/simulation code here exercises the exact same code path
 as production instead of a hand-copied mirror.
 
 Randomness note: like the rest of the engine these default to the process-global
-``random`` module so ``engines.headless.seed_everything`` keeps working. Pass an
+``random`` module so ``agent.headless.seed_everything`` keeps working. Pass an
 explicit ``random.Random`` instance for isolated, reproducible simulations.
 """
 

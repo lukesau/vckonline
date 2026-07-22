@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Find and dump headless sim stall states (parallel benchmark helper)."""
 
-import io
 import contextlib
+import io
 import os
 import sys
 
@@ -12,53 +12,57 @@ if _REPO_ROOT not in sys.path:
 
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from engines.headless import (
+from agent.headless import (
+    StalledGameError,
     build_game,
+    describe_stall,
+    legal_moves,
     play_random_game,
     seed_everything,
     serialize_state,
-    legal_moves,
-    describe_stall,
-    StalledGameError,
 )
 
 
 def _run(seed):
     seed_everything(seed)
     with contextlib.redirect_stdout(io.StringIO()):
-        game = build_game(preset="base", num_players=2)
+        game = build_game(preset="base1", num_players=2, seed=seed)
         try:
             play_random_game(game)
-            return {"ok": True, "seed": seed}
+            return {"seed": seed, "ok": True}
         except StalledGameError as e:
             state = serialize_state(game)
-            return {"ok": False, "seed": seed, "error": str(e), "detail": describe_stall(game, state)}
+            return {
+                "seed": seed,
+                "ok": False,
+                "error": str(e),
+                "stall": describe_stall(game, state=state),
+                "n_moves": {
+                    p.get("player_id"): len(legal_moves(game, p.get("player_id"), state=state))
+                    for p in (state.get("player_list") or [])
+                },
+            }
+        except Exception as e:
+            import traceback
+            return {"seed": seed, "ok": False, "error": f"{e}", "trace": traceback.format_exc()}
 
 
 def main():
-    import argparse
-    p = argparse.ArgumentParser()
-    p.add_argument("--games", type=int, default=500)
-    p.add_argument("--seed", type=int, default=1)
-    p.add_argument("--workers", type=int, default=8)
-    args = p.parse_args()
-
-    tasks = [args.seed + i for i in range(args.games)]
-    failures = []
-    with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        futs = {pool.submit(_run, s): s for s in tasks}
-        for fut in as_completed(futs):
+    seeds = list(range(1, int(sys.argv[1]) + 1)) if len(sys.argv) > 1 else list(range(1, 51))
+    workers = min(os.cpu_count() or 1, len(seeds))
+    print(f"Probing {len(seeds)} seeds on {workers} workers...")
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_run, s) for s in seeds]
+        for fut in as_completed(futures):
             r = fut.result()
-            if not r.get("ok"):
-                failures.append(r)
-
-    print(f"failures: {len(failures)}/{len(tasks)}")
-    for f in failures[:10]:
-        print()
-        print("seed", f["seed"])
-        print("error", f["error"])
-        for line in (f.get("detail") or "").splitlines():
-            print(" ", line)
+            if r.get("ok"):
+                continue
+            print(f"\n=== stall seed={r['seed']} ===")
+            print(r.get("error"))
+            if r.get("stall"):
+                print(r["stall"])
+            if r.get("trace"):
+                print(r["trace"])
 
 
 if __name__ == "__main__":

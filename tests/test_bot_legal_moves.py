@@ -1,6 +1,6 @@
 import unittest
 
-from bots.legal_moves import enumerate_actions
+from engines.available_actions import enumerate_actions
 
 
 class TestBotLegalMoves(unittest.TestCase):

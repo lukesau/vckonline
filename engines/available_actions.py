@@ -7,12 +7,12 @@ it can be called three ways without divergence:
 
 - server-side, to attach `legal_moves` onto the state payload (so no client has
   to reimplement this),
-- by the headless simulator (`engines.headless`), which serializes a live
+- by the headless simulator (`agent.headless`), which serializes a live
   `Game` and enumerates the acting player's moves,
 - by any external bot that only has a state snapshot.
 
 Each returned move is a POST-ready dict in the same shape the server's
-`/action` route consumes; `engines.headless.apply_move` applies the identical
+`/action` route consumes; `agent.headless.apply_move` applies the identical
 dicts directly to an in-process `Game`.
 """
 
@@ -41,6 +41,82 @@ def _player_by_id(state, player_id):
         if p.get("player_id") == player_id:
             return p
     return None
+
+
+def parse_roll_modifiers(me):
+    """Owned roll.set_one_die modifiers -> [(domain_id, kind, value, gold_cost)]."""
+    mods = []
+    role_counts = None
+    for d in me.get("owned_domains") or []:
+        if d.get("is_flipped"):
+            continue
+        effect = str(d.get("passive_effect") or "").strip()
+        if not effect.startswith("roll.set_one_die"):
+            continue
+        kv = dict(tok.split("=", 1) for tok in effect.split()[1:] if "=" in tok)
+        cost_spec = (kv.get("cost") or "").strip()
+        cost = 0
+        if cost_spec.startswith("g:"):
+            cost = int(cost_spec[2:])
+        elif cost_spec.startswith("g_per_owned_role:"):
+            role = cost_spec.split(":", 1)[1].replace("_citizen", "")
+            if role_counts is None:
+                role_counts = {}
+                for c in me.get("owned_citizens") or []:
+                    if c.get("is_flipped"):
+                        continue
+                    for r in ("shadow", "holy", "soldier", "worker"):
+                        role_counts[r] = role_counts.get(r, 0) + int(c.get(f"{r}_count") or 0)
+            cost = role_counts.get(role, 0)
+        if "target" in kv:
+            mods.append((d.get("domain_id"), "target", int(kv["target"]), cost))
+        elif "subtract" in kv:
+            mods.append((d.get("domain_id"), "subtract", int(kv["subtract"]), cost))
+    return mods
+
+
+def _enumerate_finalize_roll(state, player_id, me):
+    pr = state.get("pending_roll") or {}
+    r1 = int(pr.get("rolled_die_one") or 0)
+    r2 = int(pr.get("rolled_die_two") or 0)
+    keep = {"player_id": player_id, "action_type": "finalize_roll"}
+    if not (1 <= r1 <= 6 and 1 <= r2 <= 6):
+        return [keep]
+    gold = int(me.get("gold_score") or 0)
+    mods = parse_roll_modifiers(me)
+    if not mods:
+        return [keep]
+
+    def modified(rolled, kind, value):
+        fd = value if kind == "target" else rolled - value
+        return fd if 1 <= fd <= 6 and fd != rolled else None
+
+    seen = {(r1, r2)}
+    moves = [keep]
+
+    def add(fd1, fd2, cost):
+        if (fd1, fd2) in seen or cost > gold:
+            return
+        seen.add((fd1, fd2))
+        moves.append({
+            "player_id": player_id, "action_type": "finalize_roll",
+            "die_one": fd1, "die_two": fd2, "_mod_cost_gold": cost,
+        })
+
+    for did_a, kind_a, val_a, cost_a in mods:
+        f1 = modified(r1, kind_a, val_a)
+        f2 = modified(r2, kind_a, val_a)
+        if f1 is not None:
+            add(f1, r2, cost_a)
+        if f2 is not None:
+            add(r1, f2, cost_a)
+        for did_b, kind_b, val_b, cost_b in mods:
+            if did_b == did_a:
+                continue
+            g2 = modified(r2, kind_b, val_b)
+            if f1 is not None and g2 is not None:
+                add(f1, g2, cost_a + cost_b)
+    return moves
 
 
 def _top_of_stack(stack):
@@ -190,11 +266,8 @@ def _enumerate_required_prompt(state, player_id):
     moves = []
 
     if action == "finalize_roll":
-        moves.append({
-            "player_id": player_id,
-            "action_type": "finalize_roll",
-        })
-        return moves
+        me = _player_by_id(state, player_id) or {}
+        return _enumerate_finalize_roll(state, player_id, me)
 
     if action == "event_slay_cost_choice":
         return _enumerate_event_slay_cost(state, player_id)

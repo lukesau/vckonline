@@ -26,9 +26,7 @@ import json
 import math
 import random
 
-from agent.fast_state import fast_state
-from agent.headless import acting_player_ids, advance, apply_move, clone_game
-from agent.moves import enumerate_moves
+from agent.headless import acting_player_ids, advance, apply_move, clone_game, legal_moves
 from agent.play_random import _fingerprint
 from agent.policies import GreedyPolicy
 
@@ -164,7 +162,7 @@ class MCTSPolicy:
         guard = 0
         while game.phase != "game_over":
             for pid in acting_player_ids(game):
-                moves = enumerate_moves(fast_state(game), pid)
+                moves = legal_moves(game, pid)
                 if moves:
                     return pid, moves
             if not game.advance_tick():

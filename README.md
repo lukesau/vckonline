@@ -8,7 +8,7 @@ Development server and game engine for [Valeria Card Kingdoms Online](https://vc
 
 | Goal | Start here |
 |------|------------|
-| Run bots against the hosted server (no DB) | [`docs/vcko-api.md`](docs/vcko-api.md) |
+| Run agents / headless sims against hosted server (no DB) | [`docs/vcko-api.md`](docs/vcko-api.md) / [`agent/README.md`](agent/README.md) |
 | Set up database + venv for local dev | [`docs/setup.md`](docs/setup.md) |
 | Run the local FastAPI server | [`docs/server.md`](docs/server.md) |
 | Full doc index | [`docs/README.md`](docs/README.md) |

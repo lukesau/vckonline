@@ -146,8 +146,19 @@ def connect(**kwargs):
 
 
 def install():
-    """Point db_config.connect at the fake. load_game_data resolves it lazily, so
-    patching the module attribute is enough — no engine changes."""
+    """Point db_config.connect at the fake and seed card_pool from sql/seed.
+
+    load_game_data prefers card_pool.ensure_loaded() (bulk SELECT * FROM each
+    table). Injecting the parsed seed tables into card_pool means agent deals
+    never open MariaDB, while the live server still loads from the real DB.
+    """
     import db_config
+    import card_pool
 
     db_config.connect = connect
+    tables = get_tables()
+    pool = {}
+    for name in card_pool.TABLES:
+        pool[name] = [dict(r) for r in (tables.get(name) or [])]
+    card_pool.reset_pool()
+    card_pool._POOL = pool

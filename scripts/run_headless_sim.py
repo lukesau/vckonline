@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 """Headless VCKO simulation harness.
 
-Runs games fully in-process (no HTTP server, no polling) by driving the engine
-directly through `engines.headless`. Two modes:
+Runs games fully in-process (no HTTP server, no MariaDB) by driving the engine
+through `agent.headless` (cards from sql/seed via fake_db). Two modes:
 
   # Play one random-vs-random game and print the result:
-  python3 scripts/run_headless_sim.py --preset base --players 2 --seed 1
+  python3 scripts/run_headless_sim.py --preset base1 --players 2 --seed 1
 
   # Benchmark throughput across CPU cores:
   python3 scripts/run_headless_sim.py --benchmark --games 500 --workers 18 \
-      --preset base --players 2
-
-Requires a one-time DB load per worker process (card tables via `card_pool`).
-Activate the venv first: `source ./activate_with_env.sh`.
+      --preset base1 --players 2
 """
 
 import argparse
@@ -28,12 +25,10 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from engines.headless import build_game, play_random_game, seed_everything
+from agent.headless import build_game, play_random_game, seed_everything
 
 
 def _run_one(seed, preset, num_players, debug_mode, duke_select_count, quiet=True):
-    # The engine prints game-log lines to stdout; at scale that spam dominates
-    # wall time and floods logs, so silence it during simulation.
     sink = io.StringIO() if quiet else sys.stdout
     seed_everything(seed)
     t0 = time.perf_counter()
@@ -43,6 +38,7 @@ def _run_one(seed, preset, num_players, debug_mode, duke_select_count, quiet=Tru
             num_players=num_players,
             debug_mode=debug_mode,
             duke_select_count=duke_select_count,
+            seed=seed,
         )
         t1 = time.perf_counter()
         result = play_random_game(game)
@@ -54,7 +50,6 @@ def _run_one(seed, preset, num_players, debug_mode, duke_select_count, quiet=Tru
 
 
 def _stall_reason(msg):
-    """Compact category for a stall/error message so failures can be tallied."""
     for tok in str(msg).split():
         if tok.startswith("action="):
             return tok
@@ -64,8 +59,6 @@ def _stall_reason(msg):
 def _worker(args):
     (seed, preset, num_players, debug_mode, duke_select_count) = args
     try:
-        from card_pool import ensure_loaded
-        ensure_loaded()
         return {"ok": True, **_run_one(seed, preset, num_players, debug_mode, duke_select_count, quiet=True)}
     except Exception as e:
         import traceback
@@ -159,7 +152,7 @@ def _benchmark(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Headless VCKO simulation harness")
-    parser.add_argument("--preset", default="base")
+    parser.add_argument("--preset", default="base1")
     parser.add_argument("--players", type=int, default=2)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--debug", action="store_true", help="deal with debug_mode (rigged dice/resources)")

@@ -15,9 +15,7 @@ import io
 import random
 import time
 
-from agent.fast_state import fast_state
-from agent.headless import acting_player_ids, advance, apply_move, new_game
-from agent.moves import enumerate_moves
+from agent.headless import acting_player_ids, advance, apply_move, legal_moves, new_game
 from agent.play_random import _fingerprint, _prompt_debug
 
 _SINK = io.StringIO()
@@ -41,15 +39,14 @@ def play_policy_game(policies, seed=None, max_steps=20000):
         steps += 1
         if steps > max_steps:
             return game, steps
-        view = fast_state(game)
         before = _fingerprint(game)
         moved = False
         noops = []
         for pid in acting_player_ids(game):
-            moves = enumerate_moves(view, pid)
+            moves = legal_moves(game, pid)
             policy = policies[pid]
             while moves:
-                move = policy.choose(game, view, pid, moves)
+                move = policy.choose(game, None, pid, moves)
                 if move is None:
                     break
                 moves.remove(move)
