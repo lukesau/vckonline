@@ -53,6 +53,10 @@ python -m agent.server_bot --policy mcts --compare-greedy --host --preset base
 # after Ctrl-C / crash mid-game (session auto-saved to agent_session.json)
 python -m agent.server_bot --policy mcts --resume
 
+# play your seat in an existing game (paste the browser URL)
+python -m agent.server_bot --policy mcts --iterations 200 --workers 4 \\
+  --url 'https://vcko.lukesau.com/?game_id=...&player_id=...'
+
 # move recommendation mode — advise on a live human game (never submits moves)
 python -m agent.recommend --url 'https://vcko.lukesau.com/?game_id=...&player_id=...'
 
@@ -65,9 +69,10 @@ When the bot plays, each greedy or MCTS action also logs a ranked summary
 `--compare-greedy` with MCTS to print both rankings plus agree/diverge notes.
 
 **Move recommendation mode** (`agent.recommend`) attaches to a game you are
-playing in the browser: paste the page URL (or pass `--game-id` /
-`--player-id`), and it polls your seat, runs greedy + MCTS, and prints the
-top 5 options from each — without executing anything.
+playing in the browser: paste the page URL, and it polls your seat, runs
+greedy + MCTS, and prints the top 5 options from each — without executing
+anything. Use `agent.server_bot --url` with the same link when you want the
+bot to take over and play that seat automatically.
 
 ## Results (2-player, seat-alternating, seeded)
 

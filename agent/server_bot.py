@@ -11,6 +11,9 @@ Resume after restarting mid-game (session file written automatically):
   python -m agent.server_bot --policy mcts --game-id <ID> --player-id <ID>
   python -m agent.server_bot --policy mcts --game-id <ID> --rejoin-code BLUE-FOX-42
 
+Play an existing in-progress game from the browser URL (take over that seat):
+  python -m agent.server_bot --policy mcts --url 'https://vcko.lukesau.com/?game_id=...&player_id=...'
+
 Point at a local server with --base-url http://127.0.0.1:8000.
 
 The loop uses engines.available_actions for move enumeration and, for greedy/mcts,
@@ -24,6 +27,7 @@ import time
 from pathlib import Path
 
 from agent.client import DEFAULT_BASE_URL, GameNotFoundError, IllegalActionError, VckoClient
+from agent.game_url import parse_game_url
 from agent.move_summary import analyze_compare, format_compare_block, format_decision
 from engines.available_actions import enumerate_actions
 from agent.reconstruct import game_from_wire
@@ -269,7 +273,7 @@ def main():
         default=1,
         help="MCTS root-parallel worker processes (1 = single-process search)",
     )
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    parser.add_argument("--base-url", default=None, help=f"API host (default: from --url or {DEFAULT_BASE_URL})")
     parser.add_argument("--preset", default="base")
     parser.add_argument("--name", default=None)
     parser.add_argument(
@@ -292,6 +296,10 @@ def main():
         help="resume from --session-file after a mid-game restart",
     )
     group.add_argument(
+        "--url",
+        help="browser game URL with game_id and player_id; play that seat automatically",
+    )
+    group.add_argument(
         "--game-id",
         help="resume a specific game (requires --player-id and/or --rejoin-code)",
     )
@@ -305,7 +313,17 @@ def main():
     if args.compare_greedy and args.policy != "mcts":
         parser.error("--compare-greedy requires --policy mcts")
 
-    client = VckoClient(base_url=args.base_url)
+    base_url = args.base_url
+    game_id = args.game_id
+    player_id = args.player_id
+    if args.url:
+        url_base, url_game_id, url_player_id = parse_game_url(args.url)
+        base_url = base_url or url_base
+        game_id = game_id or url_game_id
+        player_id = player_id or url_player_id
+    base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
+
+    client = VckoClient(base_url=base_url)
     policy = _make_policy(args.policy, args.iterations, workers=args.workers)
     name = args.name or f"{args.policy.upper()} Bot"
     log = lambda msg: print(msg, flush=True)
@@ -340,20 +358,33 @@ def main():
             resume_and_play(
                 client,
                 policy,
-                args.game_id or sess["game_id"],
-                args.player_id or sess["player_id"],
+                game_id or sess["game_id"],
+                player_id or sess["player_id"],
                 args.poll_interval,
                 log,
                 session_path=session_path,
                 rejoin_code=args.rejoin_code or sess.get("rejoin_code"),
                 compare_greedy=compare_greedy,
             )
+        elif args.url:
+            if not game_id or not player_id:
+                raise SystemExit("--url must include game_id and player_id")
+            resume_and_play(
+                client,
+                policy,
+                game_id,
+                player_id,
+                args.poll_interval,
+                log,
+                session_path=session_path,
+                compare_greedy=compare_greedy,
+            )
         else:
             resume_and_play(
                 client,
                 policy,
-                args.game_id,
-                args.player_id,
+                game_id,
+                player_id,
                 args.poll_interval,
                 log,
                 session_path=session_path,

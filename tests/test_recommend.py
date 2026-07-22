@@ -2,8 +2,8 @@
 
 import unittest
 
+from agent.game_url import parse_game_url
 from agent.move_summary import format_recommendation_block, move_key
-from agent.recommend import parse_game_url
 
 
 class RecommendUrlTests(unittest.TestCase):
