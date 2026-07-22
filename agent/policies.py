@@ -40,6 +40,12 @@ class GreedyConfig:
     expected_total_turns = 32   # observed biased-random games run 27-45 turns
     min_remaining_turns = 3     # never value future income at zero mid-game
     unparsed_effect_value = 1.0 # VP-equivalent guess for effects we can't parse
+    # Liquidity premiums: most dukes convert g/s/m at the same end-game rate,
+    # which would leave take_resource choices tied. But magic is a wild for
+    # both gold costs (hire/build) and strength costs (slay), and gold pays
+    # for the most things outright, so a marginal magic > gold > strength.
+    magic_flex_premium = 1.12
+    gold_flex_premium = 1.05
     # assumed end-game tableau for duke selection at game start
     est_citizens = 8
     est_domains = 5
@@ -82,9 +88,9 @@ class GreedyPolicy:
             return 1.0 / m if m > 0 else 0.25
 
         return {
-            "g": rate("gold_multiplier"),
+            "g": rate("gold_multiplier") * self.cfg.gold_flex_premium,
             "s": rate("strength_multiplier"),
-            "m": rate("magic_multiplier"),
+            "m": rate("magic_multiplier") * self.cfg.magic_flex_premium,
             "v": 1.0,
             "p": 0.3,  # maps (Crimson Seas); irrelevant in base1
         }

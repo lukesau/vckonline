@@ -163,11 +163,18 @@ def _enumerate_standard(state, player_id):
             s_cost = max(0, s_cost - 1)
         m_costs = [m_cost] + ([m_cost + 1, m_cost + 2] if has_darklord else [])
         for mc in m_costs:
-            if gold < g_cost or strength < s_cost or magic < mc:
+            if gold < g_cost or magic < mc:
+                continue
+            if strength >= s_cost:
+                pay = {"gold": g_cost, "strength": s_cost, "magic": mc}
+            elif s_cost > 0 and strength >= 1 and magic >= mc + (s_cost - strength):
+                # Excess magic wilds toward the strength cost (needs >=1 strength paid)
+                pay = {"gold": g_cost, "strength": strength, "magic": mc + (s_cost - strength)}
+            else:
                 continue
             move = {
                 "player_id": player_id, "action_type": "slay_monster",
-                "payment": {"gold": g_cost, "strength": s_cost, "magic": mc},
+                "payment": pay,
             }
             if is_event:
                 move["event_id"] = top.get("event_id")
