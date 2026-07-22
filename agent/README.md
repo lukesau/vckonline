@@ -62,9 +62,29 @@ it does not peek at hidden information.
   registered its area as a 6th `monster_stack_areas` entry
   (`engines/domain_effects.py` `_return_monster_to_stack`).
 
+## Self-play training pipeline
+
+| Module | Purpose |
+|---|---|
+| `features.py` | Viewer-relative state features (projected VP via the engine's scorer, income model, tableau/board depletion) |
+| `selfplay.py` | Generate labeled positions from ε-greedy self-play (~160k positions from 3k games in ~80s) |
+| `value_net.py` / `train_value.py` | Numpy MLP predicting P(win); v1 reaches ~72% held-out accuracy |
+| `models/value_v1.npz` | Committed trained weights; used by the `mcts-nn` policy |
+
+```bash
+python -m agent.selfplay --games 3000 --seed 1 --out agent/data/selfplay_v1.npz
+python -m agent.train_value --data agent/data/selfplay_v1.npz --out agent/models/value_v1.npz
+python -m agent.evaluate --p1 mcts-nn --p2 greedy --games 20 --iterations 100
+```
+
+`mcts-nn` replaces MCTS leaf rollouts with the value net (~5x cheaper per
+iteration). The pipeline loops: regenerate data with the stronger agent,
+retrain, re-evaluate.
+
 ## Known simplifications / next steps
 
 - Reconstruction models the face-down event deck as blank Exhausted tokens.
 - Greedy's effect-string valuation is approximate for unusual payouts.
-- Roadmap: move-recommendation mode, event-composition sampling,
-  self-play-trained value/prior network on top of the existing PUCT search.
+- Roadmap: move-recommendation mode, event-composition sampling, learned
+  policy priors (currently greedy-derived), pipeline iteration with
+  search-generated data.

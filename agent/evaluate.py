@@ -84,6 +84,10 @@ def play_policy_game(policies, seed=None, max_steps=20000):
 def make_policy(name, args):
     from agent.policies import GreedyPolicy, RandomPolicy
 
+    iterations = args.iterations
+    if getattr(args, "iterations2", None) is not None and name == args.p2:
+        iterations = args.iterations2
+
     if name == "random":
         return RandomPolicy()
     if name == "greedy":
@@ -91,7 +95,14 @@ def make_policy(name, args):
     if name == "mcts":
         from agent.mcts import MCTSPolicy
 
-        return MCTSPolicy(iterations=args.iterations)
+        return MCTSPolicy(iterations=iterations)
+    if name == "mcts-nn":
+        from agent.mcts import MCTSPolicy
+        from agent.value_net import DEFAULT_MODEL_PATH
+
+        policy = MCTSPolicy(iterations=iterations, value_path=DEFAULT_MODEL_PATH)
+        policy.name = "mcts-nn"
+        return policy
     raise ValueError(f"unknown policy {name!r}")
 
 
@@ -102,6 +113,8 @@ def main():
     parser.add_argument("--games", type=int, default=20)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--iterations", type=int, default=60, help="MCTS iterations per decision")
+    parser.add_argument("--iterations2", type=int, default=None,
+                        help="override iterations for --p2 (equal-time comparisons)")
     parser.add_argument("--swap-seats", action="store_true", default=True)
     args = parser.parse_args()
 

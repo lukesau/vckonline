@@ -1,0 +1,4 @@
+# Self-play training data is regenerable (python -m agent.selfplay) and large;
+# only trained model weights (agent/models/) are committed.
+*
+!.gitignore

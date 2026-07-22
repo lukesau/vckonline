@@ -33,11 +33,18 @@ def _make_policy(name, iterations):
         from agent.mcts import MCTSPolicy
 
         return MCTSPolicy(iterations=iterations)
+    if name == "mcts-nn":
+        from agent.mcts import MCTSPolicy
+        from agent.value_net import DEFAULT_MODEL_PATH
+
+        policy = MCTSPolicy(iterations=iterations, value_path=DEFAULT_MODEL_PATH)
+        policy.name = "mcts-nn"
+        return policy
     raise ValueError(f"unknown policy {name!r}")
 
 
 def _needs_game_object(policy):
-    return policy.name in ("greedy", "mcts")
+    return policy.name in ("greedy", "mcts", "mcts-nn")
 
 
 def play_tick(client, game_id, player_id, state, policy, log):
@@ -137,7 +144,8 @@ def join_and_play(client, policy, lobby_id, name, poll_interval, log):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--policy", default="mcts", choices=("random", "greedy", "mcts"))
+    parser.add_argument("--policy", default="mcts",
+                        choices=("random", "greedy", "mcts", "mcts-nn"))
     parser.add_argument("--iterations", type=int, default=100)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--preset", default="base1")

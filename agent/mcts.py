@@ -64,7 +64,8 @@ class MCTSPolicy:
     name = "mcts"
 
     def __init__(self, iterations=100, exploration=1.5, rollout_cap=250, descent_cap=400,
-                 rollout_epsilon=0.15, top_k=12, prior_temperature=2.0, determinize=True):
+                 rollout_epsilon=0.15, top_k=12, prior_temperature=2.0, determinize=True,
+                 value_path=None):
         self.iterations = iterations
         self.exploration = exploration
         self.rollout_cap = rollout_cap
@@ -74,6 +75,22 @@ class MCTSPolicy:
         self.prior_temperature = prior_temperature
         self.determinize = determinize
         self._greedy = GreedyPolicy()
+        # Learned leaf evaluator (self-play value net). When set, expansion
+        # leaves are scored by the net instead of playing a rollout — the
+        # first learned component swapped into the search.
+        self._value_net = None
+        if value_path:
+            from agent.value_net import ValueNet
+
+            self._value_net = ValueNet.load(value_path)
+
+    def _leaf_value(self, game, root_pid):
+        from agent.features import extract
+
+        try:
+            return self._value_net.predict_one(extract(game, root_pid))
+        except Exception:
+            return self._projected_reward(game, root_pid)
 
     # ---- determinization (ISMCTS-style) --------------------------------
 
@@ -291,7 +308,10 @@ class MCTSPolicy:
                     path.append(child)
                     node = child
                     if fresh:
-                        reward = self._rollout(sim, player_id)
+                        if self._value_net is not None and sim.phase != "game_over":
+                            reward = self._leaf_value(sim, player_id)
+                        else:
+                            reward = self._rollout(sim, player_id)
                         break
                 for visited in path:
                     visited.visits += 1
