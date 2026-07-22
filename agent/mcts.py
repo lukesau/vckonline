@@ -25,12 +25,12 @@ under the GIL) without sharing a mutable tree across processes.
 
 import contextlib
 import io
-import json
 import math
 import random
 from concurrent.futures import ProcessPoolExecutor
 
 from agent.headless import acting_player_ids, advance, apply_move, clone_game, legal_moves
+from agent.move_summary import move_key
 from agent.play_random import _fingerprint
 from agent.policies import GreedyPolicy
 
@@ -49,7 +49,7 @@ class _Node:
 
 
 def _move_key(move):
-    return json.dumps(move, sort_keys=True, default=str)
+    return move_key(move)
 
 
 def _biased_random_move(moves):
@@ -82,7 +82,7 @@ def _parallel_worker(payload):
     game.sim_mode = True
     # workers=1 so the child search stays in-process
     policy = MCTSPolicy(workers=1, **cfg)
-    return policy._root_visits(game, player_id, moves, iterations)
+    return policy._root_search(game, player_id, moves, iterations)
 
 
 class MCTSPolicy:
@@ -101,6 +101,7 @@ class MCTSPolicy:
         self.determinize = determinize
         self.workers = max(1, int(workers))
         self._greedy = GreedyPolicy()
+        self.last_decision = None
         self._pool = None
 
     def _config_for_worker(self):
@@ -283,8 +284,8 @@ class MCTSPolicy:
                 best_key, best_score = key, score
         return best_key
 
-    def _root_visits(self, game, player_id, moves, iterations):
-        """Run `iterations` of search; return {move_key: visit_count} at the root."""
+    def _root_search(self, game, player_id, moves, iterations):
+        """Run ``iterations`` of search; return root stats and ranked candidates."""
         root = _Node()
         root_moves_by_key = {_move_key(m): m for m in moves}
 
@@ -348,25 +349,63 @@ class MCTSPolicy:
         _SINK.seek(0)
         _SINK.truncate(0)
 
-        visits = {}
+        priors = root.priors
+        if priors is None:
+            priors = self._compute_priors(game, player_id, root_moves_by_key)
+        by_key = {}
         for key, child in root.children.items():
-            if key in root_moves_by_key:
-                visits[key] = int(child.visits)
-        return visits
+            if key not in root_moves_by_key:
+                continue
+            by_key[key] = {
+                "move": root_moves_by_key[key],
+                "key": key,
+                "visits": int(child.visits),
+                "value": float(child.value),
+            }
+        return self._build_search_result(by_key, priors, root_moves_by_key, iterations)
 
-    def _parallel_root_visits(self, game, player_id, moves):
-        """Root-parallel search: independent trees, sum visit counts."""
+    def _build_search_result(self, by_key, priors, root_moves_by_key, iterations):
+        uniform = 1.0 / max(len(root_moves_by_key), 1)
+        total_visits = sum(entry["visits"] for entry in by_key.values())
+        candidates = []
+        for key, entry in by_key.items():
+            visits = entry["visits"]
+            q = entry["value"] / visits if visits else 0.5
+            prior = (priors or {}).get(key, uniform)
+            candidates.append({
+                "move": entry["move"],
+                "key": key,
+                "visits": visits,
+                "visit_pct": (100.0 * visits / total_visits) if total_visits else 0.0,
+                "q": q,
+                "prior": prior,
+            })
+        candidates.sort(key=lambda c: (-c["visits"], -c["q"]))
+        return {
+            "by_key": by_key,
+            "candidates": candidates,
+            "iterations": iterations,
+            "total_visits": total_visits,
+            "priors": priors,
+        }
+
+    def _root_visits(self, game, player_id, moves, iterations):
+        """Backward-compatible visit-count map from a root search."""
+        result = self._root_search(game, player_id, moves, iterations)
+        return {key: entry["visits"] for key, entry in result["by_key"].items()}
+
+    def _parallel_root_search(self, game, player_id, moves):
+        """Root-parallel search: independent trees, merge visit/value totals."""
         from game_serialization import serialize_game_to_save_dict
 
         budgets = [b for b in _split_budget(self.iterations, self.workers) if b > 0]
         if not budgets:
-            return {}
+            return self._build_search_result({}, {}, {_move_key(m): m for m in moves}, 0)
         if len(budgets) == 1:
-            return self._root_visits(game, player_id, moves, budgets[0])
+            return self._root_search(game, player_id, moves, budgets[0])
 
         save_dict = serialize_game_to_save_dict(game)
         cfg = self._config_for_worker()
-        # Drop keys the worker reconstructs itself
         cfg.pop("iterations", None)
         base_seed = random.randrange(1 << 30)
         payloads = [
@@ -374,28 +413,59 @@ class MCTSPolicy:
             for i, budget in enumerate(budgets)
         ]
         pool = self._get_pool()
-        totals = {}
-        for partial in pool.map(_parallel_worker, payloads):
-            for key, n in partial.items():
-                totals[key] = totals.get(key, 0) + n
-        return totals
-
-    def choose(self, game, view, player_id, moves):
-        if not moves:
-            return None
-        if len(moves) < 2:
-            return moves[0]
         root_moves_by_key = {_move_key(m): m for m in moves}
+        merged = {}
+        for partial in pool.map(_parallel_worker, payloads):
+            for key, entry in partial.get("by_key", {}).items():
+                if key not in root_moves_by_key:
+                    continue
+                bucket = merged.setdefault(key, {"visits": 0, "value": 0.0, "move": entry["move"]})
+                bucket["visits"] += entry["visits"]
+                bucket["value"] += entry["value"]
+        priors = self._compute_priors(game, player_id, root_moves_by_key)
+        return self._build_search_result(merged, priors, root_moves_by_key, self.iterations)
+
+    def _parallel_root_visits(self, game, player_id, moves):
+        """Root-parallel search: independent trees, sum visit counts."""
+        result = self._parallel_root_search(game, player_id, moves)
+        return {key: entry["visits"] for key, entry in result["by_key"].items()}
+
+    def analyze(self, game, player_id, moves):
+        """Run search and record ranked root candidates on ``last_decision``."""
+        if not moves:
+            self.last_decision = {"policy": "mcts", "chosen": None, "candidates": []}
+            return self.last_decision
+        if len(moves) < 2:
+            self.last_decision = {
+                "policy": "mcts",
+                "chosen": moves[0],
+                "candidates": [],
+                "trivial": True,
+            }
+            return self.last_decision
 
         if self.workers > 1:
-            visits = self._parallel_root_visits(game, player_id, moves)
+            search = self._parallel_root_search(game, player_id, moves)
         else:
-            visits = self._root_visits(game, player_id, moves, self.iterations)
+            search = self._root_search(game, player_id, moves, self.iterations)
 
-        best_key, best_visits = None, -1
-        for key, n in visits.items():
-            if key in root_moves_by_key and n > best_visits:
-                best_key, best_visits = key, n
-        if best_key is None:
-            return random.choice(moves)
-        return root_moves_by_key[best_key]
+        chosen = None
+        best_visits = -1
+        for entry in search["candidates"]:
+            if entry["visits"] > best_visits:
+                chosen = entry["move"]
+                best_visits = entry["visits"]
+        if chosen is None:
+            chosen = random.choice(moves)
+
+        self.last_decision = {
+            "policy": "mcts",
+            "chosen": chosen,
+            "candidates": search["candidates"],
+            "iterations": self.iterations,
+            "workers": self.workers,
+        }
+        return self.last_decision
+
+    def choose(self, game, view, player_id, moves):
+        return self.analyze(game, player_id, moves)["chosen"]

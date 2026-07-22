@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 from agent.client import DEFAULT_BASE_URL, GameNotFoundError, IllegalActionError, VckoClient
+from agent.move_summary import analyze_compare, format_compare_block, format_decision
 from engines.available_actions import enumerate_actions
 from agent.reconstruct import game_from_wire
 
@@ -100,7 +101,27 @@ def _update_session_from_state(session_path, client, game_id, player_id, state, 
         log(f"session saved → {session_path}")
 
 
-def play_tick(client, game_id, player_id, state, policy, log):
+def _choose_move(game, player_id, moves, policy, log, compare_greedy=False):
+    """Pick a move and log a policy-specific decision summary."""
+    if policy.name == "random":
+        return policy.choose(game, None, player_id, moves)
+
+    if compare_greedy and policy.name == "mcts":
+        greedy_decision, mcts_decision = analyze_compare(game, player_id, moves, policy)
+        for line in format_compare_block(greedy_decision, mcts_decision, game):
+            log(line)
+        return mcts_decision["chosen"]
+
+    if hasattr(policy, "analyze"):
+        decision = policy.analyze(game, player_id, moves)
+        for line in format_decision(decision, game):
+            log(line)
+        return decision["chosen"]
+
+    return policy.choose(game, None, player_id, moves)
+
+
+def play_tick(client, game_id, player_id, state, policy, log, compare_greedy=False):
     """Take one action if any is available. Returns (new_state, acted)."""
     moves = enumerate_actions(state, player_id)
     if not moves:
@@ -108,8 +129,8 @@ def play_tick(client, game_id, player_id, state, policy, log):
     game = game_from_wire(state, player_id) if _needs_game_object(policy) else None
     remaining = list(moves)
     while remaining:
-        move = policy.choose(game, None, player_id, remaining) if game is not None \
-            else policy.choose(None, None, player_id, remaining)
+        move = _choose_move(game, player_id, remaining, policy, log, compare_greedy=compare_greedy) \
+            if game is not None else policy.choose(None, None, player_id, remaining)
         if move is None:
             return state, False
         remaining.remove(move)
@@ -125,7 +146,7 @@ def play_tick(client, game_id, player_id, state, policy, log):
 
 
 def play_until_over(client, game_id, player_id, policy, poll_interval=1.5, log=print,
-                    session_path=None):
+                    session_path=None, compare_greedy=False):
     state = client.get_state(game_id, player_id)
     _update_session_from_state(session_path, client, game_id, player_id, state, log)
     log(f"playing game {game_id} as {player_id}")
@@ -133,7 +154,10 @@ def play_until_over(client, game_id, player_id, policy, poll_interval=1.5, log=p
     while (state.get("phase") or "").strip() != "game_over":
         tick_before = state.get("tick_id")
         try:
-            state, acted = play_tick(client, game_id, player_id, state, policy, log)
+            state, acted = play_tick(
+                client, game_id, player_id, state, policy, log,
+                compare_greedy=compare_greedy,
+            )
         except GameNotFoundError:
             log("game disappeared (server shutdown or cleanup)")
             clear_session(session_path)
@@ -153,7 +177,8 @@ def play_until_over(client, game_id, player_id, policy, poll_interval=1.5, log=p
     return state
 
 
-def host_and_play(client, policy, preset, name, poll_interval, log, session_path=None):
+def host_and_play(client, policy, preset, name, poll_interval, log, session_path=None,
+                  compare_greedy=False):
     bot_id, lobby_id = client.create_lobby(name, preset=preset, min_players=2)
     log(f"Hosting lobby {lobby_id} (preset {preset}) at {client.base_url}")
     log("Join from your browser, then click Ready. Waiting for an opponent…")
@@ -168,7 +193,7 @@ def host_and_play(client, policy, preset, name, poll_interval, log, session_path
         if status.get("in_game") and status.get("game_id"):
             return play_until_over(
                 client, status["game_id"], bot_id, policy, poll_interval, log,
-                session_path=session_path,
+                session_path=session_path, compare_greedy=compare_greedy,
             )
         time.sleep(poll_interval)
     log("Opponent joined — readying up.")
@@ -188,10 +213,12 @@ def host_and_play(client, policy, preset, name, poll_interval, log, session_path
     log(f"Game started: {game_id}")
     return play_until_over(
         client, game_id, bot_id, policy, poll_interval, log, session_path=session_path,
+        compare_greedy=compare_greedy,
     )
 
 
-def join_and_play(client, policy, lobby_id, name, poll_interval, log, session_path=None):
+def join_and_play(client, policy, lobby_id, name, poll_interval, log, session_path=None,
+                  compare_greedy=False):
     bot_id, _ = client.join_lobby(name, lobby_id)
     log(f"Joined lobby {lobby_id} as {name}; readying up.")
     game_id = None
@@ -210,11 +237,12 @@ def join_and_play(client, policy, lobby_id, name, poll_interval, log, session_pa
     log(f"Game started: {game_id}")
     return play_until_over(
         client, game_id, bot_id, policy, poll_interval, log, session_path=session_path,
+        compare_greedy=compare_greedy,
     )
 
 
 def resume_and_play(client, policy, game_id, player_id, poll_interval, log,
-                    session_path=None, rejoin_code=None):
+                    session_path=None, rejoin_code=None, compare_greedy=False):
     if rejoin_code and not player_id:
         game_id, player_id = client.rejoin(game_id, rejoin_code)
         log(f"rejoined via code → player_id={player_id}")
@@ -223,7 +251,7 @@ def resume_and_play(client, policy, game_id, player_id, poll_interval, log,
     try:
         return play_until_over(
             client, game_id, player_id, policy, poll_interval, log,
-            session_path=session_path,
+            session_path=session_path, compare_greedy=compare_greedy,
         )
     except GameNotFoundError:
         log(f"game {game_id} not found on server — clearing session")
@@ -244,6 +272,11 @@ def main():
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--preset", default="base")
     parser.add_argument("--name", default=None)
+    parser.add_argument(
+        "--compare-greedy",
+        action="store_true",
+        help="MCTS only: rank with greedy too, show overlap/divergence, still play MCTS",
+    )
     parser.add_argument("--poll-interval", type=float, default=1.5)
     parser.add_argument(
         "--session-file",
@@ -269,24 +302,30 @@ def main():
     if args.game_id and not (args.player_id or args.rejoin_code):
         parser.error("--game-id requires --player-id and/or --rejoin-code")
 
+    if args.compare_greedy and args.policy != "mcts":
+        parser.error("--compare-greedy requires --policy mcts")
+
     client = VckoClient(base_url=args.base_url)
     policy = _make_policy(args.policy, args.iterations, workers=args.workers)
     name = args.name or f"{args.policy.upper()} Bot"
     log = lambda msg: print(msg, flush=True)
     session_path = args.session_file
+    compare_greedy = args.compare_greedy
     if args.policy == "mcts" and args.workers > 1:
         log(f"MCTS: {args.iterations} iterations across {args.workers} workers")
+    if compare_greedy:
+        log("compare-greedy: running greedy analysis alongside MCTS (playing MCTS)")
 
     try:
         if args.host:
             host_and_play(
                 client, policy, args.preset, name, args.poll_interval, log,
-                session_path=session_path,
+                session_path=session_path, compare_greedy=compare_greedy,
             )
         elif args.join:
             join_and_play(
                 client, policy, args.join, name, args.poll_interval, log,
-                session_path=session_path,
+                session_path=session_path, compare_greedy=compare_greedy,
             )
         elif args.resume:
             try:
@@ -307,6 +346,7 @@ def main():
                 log,
                 session_path=session_path,
                 rejoin_code=args.rejoin_code or sess.get("rejoin_code"),
+                compare_greedy=compare_greedy,
             )
         else:
             resume_and_play(
@@ -318,6 +358,7 @@ def main():
                 log,
                 session_path=session_path,
                 rejoin_code=args.rejoin_code,
+                compare_greedy=compare_greedy,
             )
     finally:
         close = getattr(policy, "close", None)
