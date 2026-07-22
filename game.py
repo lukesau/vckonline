@@ -711,6 +711,8 @@ class Game:
         return "spent " + ", ".join(parts)
 
     def _log_game_event(self, message):
+        if getattr(self, "sim_mode", False):
+            return
         if not hasattr(self, "game_log") or self.game_log is None:
             self.game_log = []
         self.game_log.append({

@@ -1,9 +1,10 @@
 """Headless, in-process game driver for large-scale simulation.
 
 This is the fast path that bypasses the HTTP server, the lobby flow, and any
-polling: it builds a `Game` directly, serializes it to the canonical wire dict,
-enumerates legal moves via `engines.available_actions`, and applies the exact
-same move dicts back onto the live `Game` object.
+polling: it builds a `Game` directly, serializes it to the canonical wire dict
+(via `game_to_state_dict`, no JSON round-trip), enumerates legal moves via
+`engines.available_actions`, and applies the exact same move dicts back onto
+the live `Game` object. Games run in `sim_mode` (no game-log append overhead).
 
 `apply_move` is a framework-agnostic re-implementation of the essential parts of
 `server.perform_game_action` (action consumption, the engine call, end-of-turn
@@ -17,12 +18,11 @@ results. Parallelism should be across processes (see `scripts/run_headless_sim.p
 never threads sharing the global RNG.
 """
 
-import json
 import random
 
 from game import Game
 from game_models import GameMember
-from game_serialization import GameObjectEncoder
+from game_serialization import game_to_state_dict
 
 _AUTO_PHASES = ("roll", "harvest")
 _MAX_PUMP = 10000
@@ -34,8 +34,8 @@ def seed_everything(seed):
 
 
 def serialize_state(game):
-    """Full (non-redacted) wire dict, the shape `enumerate_actions` expects."""
-    return json.loads(json.dumps(game, cls=GameObjectEncoder))
+    """Full wire dict for legal-move enumeration (no JSON round-trip)."""
+    return game_to_state_dict(game)
 
 
 def _pump_auto_phases(game):
@@ -59,10 +59,13 @@ def build_game(preset="base", num_players=2, player_names=None,
                debug_mode=False, duke_select_count=2, game_id=None):
     """Deal a fresh game and pump it to the first real decision point.
 
-    Requires DB connectivity (card data comes from MariaDB via
-    `game_setup.load_game_data`). Returns a live `Game`.
+    Card data comes from the in-memory card pool (one DB bulk load per process).
+    Returns a live `Game` in sim_mode (no game-log append overhead).
     """
+    from card_pool import ensure_loaded
     from game_setup import load_game_data
+
+    ensure_loaded()
 
     if game_id is None:
         import uuid
@@ -84,6 +87,7 @@ def build_game(preset="base", num_players=2, player_names=None,
         duke_select_count=duke_select_count,
     )
     game = Game(game_state)
+    game.sim_mode = True
     _pump_auto_phases(game)
     return game
 

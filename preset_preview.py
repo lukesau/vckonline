@@ -18,10 +18,9 @@ since the client renders each as an image thumbnail — a pool card with no imag
 can't be shown and would otherwise render as a broken tile.
 """
 
-from db_config import connect
-
 from banned_cards import banned_domain_ids, banned_duke_ids, banned_relic_ids
 from card_filters import has_card_image, is_unimplemented_event, keep_for_random
+from card_pool import ensure_loaded, fetch_agents, fetch_pool_rows, fetch_relics, fetch_starters
 from game_setup import (
     AGENT_SLOT_COUNT,
     _filter_monster_areas_for_random,
@@ -40,16 +39,8 @@ def _preset_config(preset, expansion_only):
     return get_preset_config(preset, expansion_only=expansion_only)
 
 
-def _fetch_pool_rows(cur, proc_name, table_name, expansion_filters):
-    if expansion_filters:
-        placeholders = ", ".join(["%s"] * len(expansion_filters))
-        cur.execute(
-            f"SELECT * FROM {table_name} WHERE expansion IN ({placeholders})",
-            tuple(expansion_filters),
-        )
-    else:
-        cur.callproc(proc_name)
-    return cur.fetchall()
+def _fetch_pool_rows(proc_name, table_name, expansion_filters):
+    return fetch_pool_rows(proc_name, table_name, expansion_filters)
 
 
 def _card(kind, card_id, name, expansion):
@@ -61,8 +52,8 @@ def _card(kind, card_id, name, expansion):
     }
 
 
-def _preview_monsters(cur, cfg, players):
-    rows = _fetch_pool_rows(cur, cfg["monster_query"], "monsters", cfg["monster_expansion_filters"])
+def _preview_monsters(cfg, players):
+    rows = _fetch_pool_rows(cfg["monster_query"], "monsters", cfg["monster_expansion_filters"])
     # The preview always shows the full stack, including the is_extra 7th card
     # that only ships with 5-player games (flagged with a badge client-side).
     # For random/draft we still mirror which AREAS are deal-eligible at this
@@ -124,8 +115,8 @@ def _preview_monsters(cur, cfg, players):
     }
 
 
-def _preview_citizens(cur, cfg, players):
-    rows = _fetch_pool_rows(cur, cfg["citizen_query"], "citizens", cfg["citizen_expansion_filters"])
+def _preview_citizens(cfg, players):
+    rows = _fetch_pool_rows(cfg["citizen_query"], "citizens", cfg["citizen_expansion_filters"])
     if cfg["apply_implemented_image_filter"]:
         rows = [
             r for r in rows
@@ -194,8 +185,8 @@ def _preview_citizens(cur, cfg, players):
     }
 
 
-def _preview_domains(cur, cfg, players):
-    rows = _fetch_pool_rows(cur, cfg["domain_query"], "domains", cfg["domain_expansion_filters"])
+def _preview_domains(cfg, players):
+    rows = _fetch_pool_rows(cfg["domain_query"], "domains", cfg["domain_expansion_filters"])
     excluded = set(cfg["exclude_domain_expansions"])
     banned = set(banned_domain_ids())
     rows = [
@@ -224,8 +215,8 @@ def _preview_domains(cur, cfg, players):
     }
 
 
-def _preview_dukes(cur, cfg, players, duke_select_count):
-    rows = _fetch_pool_rows(cur, cfg["duke_query"], "dukes", cfg["duke_expansion_filters"])
+def _preview_dukes(cfg, players, duke_select_count):
+    rows = _fetch_pool_rows(cfg["duke_query"], "dukes", cfg["duke_expansion_filters"])
     banned = set(banned_duke_ids())
     rows = [
         r for r in rows
@@ -243,8 +234,8 @@ def _preview_dukes(cur, cfg, players, duke_select_count):
     }
 
 
-def _preview_events(cur, cfg, players):
-    rows = _fetch_pool_rows(cur, cfg["event_query"], "events", cfg["event_expansion_filters"])
+def _preview_events(cfg, players):
+    rows = _fetch_pool_rows(cfg["event_query"], "events", cfg["event_expansion_filters"])
     if cfg["apply_implemented_image_filter"]:
         rows = [r for r in rows if keep_for_random("event", r)]
     else:
@@ -275,12 +266,11 @@ def _module_intro(mode):
     return "fixed", "This module is always included."
 
 
-def _preview_agents(cur, cfg):
+def _preview_agents(cfg):
     mode = cfg.get("include_agents") or "never"
     if mode == "never":
         return None
-    cur.execute("SELECT * FROM agents ORDER BY id_agents")
-    rows = cur.fetchall() or []
+    rows = fetch_agents()
     rows = [r for r in rows if has_card_image("agent", r.get("id_agents"))]
     cards = [_card("agent", r["id_agents"], r["name"], r.get("expansion")) for r in rows]
     if not cards:
@@ -299,14 +289,13 @@ def _preview_agents(cur, cfg):
     }
 
 
-def _preview_relics(cur, cfg, players):
+def _preview_relics(cfg, players):
     mode = cfg.get("include_relics") or "never"
     if mode == "never":
         return None
-    cur.execute("SELECT * FROM relics ORDER BY id_relics")
     banned = set(banned_relic_ids())
     rows = [
-        r for r in (cur.fetchall() or [])
+        r for r in fetch_relics()
         if int(r["id_relics"]) not in banned
         and has_card_image("relic", r.get("id_relics"))
     ]
@@ -341,9 +330,8 @@ def _preview_relics(cur, cfg, players):
     }
 
 
-def _preview_starters(cur, cfg):
-    cur.execute("SELECT * FROM starters ORDER BY id_starters")
-    rows = cur.fetchall()
+def _preview_starters(cfg):
+    rows = fetch_starters()
     core = []
     optional = []
     for r in rows:
@@ -448,25 +436,18 @@ def load_preset_preview(preset, expansion_only=False, players=4, duke_select_cou
     if preset == "random":
         cfg["optional_starter_expansion"] = "random"
 
-    conn = _connect()
-    try:
-        cur = conn.cursor(dictionary=True)
-        try:
-            sections = [
-                _preview_starters(cur, cfg),
-                _preview_monsters(cur, cfg, players),
-                _preview_citizens(cur, cfg, players),
-                _preview_domains(cur, cfg, players),
-                _preview_dukes(cur, cfg, players, duke_select_count),
-                _preview_events(cur, cfg, players),
-                _preview_agents(cur, cfg),
-                _preview_relics(cur, cfg, players),
-            ]
-            sections = [s for s in sections if s is not None]
-        finally:
-            cur.close()
-    finally:
-        conn.close()
+    ensure_loaded()
+    sections = [
+        _preview_starters(cfg),
+        _preview_monsters(cfg, players),
+        _preview_citizens(cfg, players),
+        _preview_domains(cfg, players),
+        _preview_dukes(cfg, players, duke_select_count),
+        _preview_events(cfg, players),
+        _preview_agents(cfg),
+        _preview_relics(cfg, players),
+    ]
+    sections = [s for s in sections if s is not None]
 
     return {
         "preset": preset,

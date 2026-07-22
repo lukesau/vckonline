@@ -11,7 +11,7 @@ directly through `engines.headless`. Two modes:
   python3 scripts/run_headless_sim.py --benchmark --games 500 --workers 18 \
       --preset base --players 2
 
-Requires DB connectivity (card data is dealt via game_setup.load_game_data).
+Requires a one-time DB load per worker process (card tables via `card_pool`).
 Activate the venv first: `source ./activate_with_env.sh`.
 """
 
@@ -64,6 +64,8 @@ def _stall_reason(msg):
 def _worker(args):
     (seed, preset, num_players, debug_mode, duke_select_count) = args
     try:
+        from card_pool import ensure_loaded
+        ensure_loaded()
         return {"ok": True, **_run_one(seed, preset, num_players, debug_mode, duke_select_count, quiet=True)}
     except Exception as e:
         import traceback
@@ -124,7 +126,7 @@ def _benchmark(args):
         print(f"  Turns/game:  mean {statistics.mean(turns):.1f}  "
               f"min {min(turns)}  max {max(turns)}")
         print(f"  Build time:  mean {statistics.mean(build_s) * 1000:.0f} ms  "
-              f"(DB deal; dominates if games are short)")
+              f"(in-memory deal; dominates if games are short)")
         print(f"  Play time:   mean {statistics.mean(play_s) * 1000:.0f} ms")
         if win_scores:
             print(f"  Winning VP:  mean {statistics.mean(win_scores):.1f}  "
