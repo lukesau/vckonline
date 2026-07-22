@@ -1174,6 +1174,25 @@ function openDiceInfoModal(state) {
     panel.appendChild(rejoinHost);
   }
 
+  const logToolbar = mk('dice-info-log-toolbar');
+  const copyLogBtn = document.createElement('button');
+  copyLogBtn.type = 'button';
+  copyLogBtn.className = 'dice-info-rejoin-btn';
+  copyLogBtn.textContent = 'Copy log';
+  copyLogBtn.addEventListener('click', async () => {
+    const s = latestGameState || state;
+    const text = gameLogPlainText(s);
+    const copyFn = (typeof VCK_REJOIN !== 'undefined' && VCK_REJOIN.copyText)
+      ? VCK_REJOIN.copyText
+      : null;
+    const ok = copyFn ? await copyFn(text) : false;
+    const prev = copyLogBtn.textContent;
+    copyLogBtn.textContent = ok ? 'Copied!' : 'Copy failed';
+    setTimeout(() => { copyLogBtn.textContent = prev; }, 1500);
+  });
+  logToolbar.appendChild(copyLogBtn);
+  panel.appendChild(logToolbar);
+
   const logHost = document.createElement('div');
   panel.appendChild(logHost);
 
@@ -2307,6 +2326,13 @@ function makeTableauMonsterFan(cards, mode) {
     wrap.appendChild(cardEl);
   });
   return wrap;
+}
+
+function gameLogPlainText(state) {
+  return ((state && state.game_log) || []).map(entry => {
+    const msg = (entry && typeof entry === 'object' ? entry.msg : entry);
+    return (msg ?? '').toString();
+  }).join('\n');
 }
 
 function makeGameLog(state) {

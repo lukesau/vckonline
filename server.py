@@ -1962,6 +1962,19 @@ def _serialize_game_for_player(game, viewer_player_id: Optional[str]):
             if code:
                 state["my_rejoin_code"] = code
 
+    # Single source of truth for legal moves: enumerate them here (engine side)
+    # from the same wire dict clients receive, so no client has to reimplement
+    # the rules. Computed AFTER cost modifiers (discounts/surcharges) are baked
+    # into `state`, so affordability checks use the adjusted costs. Never let an
+    # enumeration bug break a plain state fetch.
+    if viewer_player_id:
+        try:
+            from engines.available_actions import annotate_effective_costs, enumerate_actions
+            annotate_effective_costs(game, state, str(viewer_player_id))
+            state["legal_moves"] = enumerate_actions(state, str(viewer_player_id))
+        except Exception:
+            state["legal_moves"] = []
+
     return state
 
 

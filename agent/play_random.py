@@ -9,8 +9,14 @@ import io
 import random
 import time
 
-from agent.headless import acting_player_ids, advance, apply_move, new_game, wire_state
-from agent.moves import enumerate_moves
+from agent.headless import (
+    acting_player_ids,
+    advance,
+    apply_move,
+    legal_moves,
+    new_game,
+    progress_signature,
+)
 
 _SINK = io.StringIO()
 
@@ -25,27 +31,7 @@ def _quiet(fn, *args, **kwargs):
 
 
 def _fingerprint(game):
-    ca = getattr(game, "concurrent_action", None) or {}
-    data = ca.get("data") or {}
-    prompts = data.get("prompts") or {}
-    return (
-        game.phase,
-        game.turn_number,
-        game.actions_remaining,
-        int(getattr(game, "tick_id", 0) or 0),
-        len(game.game_log or []),
-        repr(game.action_required),
-        repr(game.pending_required_choice),
-        ca.get("kind"),
-        data.get("phase"),
-        tuple(ca.get("pending") or ()),
-        tuple(sorted(ca.get("completed") or ())),
-        len(ca.get("responses") or {}),
-        tuple(
-            (pid, tuple(p.get("id") for p in (v or []) if isinstance(p, dict)))
-            for pid, v in sorted(prompts.items())
-        ),
-    )
+    return progress_signature(game)
 
 
 def _prompt_debug(game):
@@ -57,12 +43,7 @@ def _prompt_debug(game):
 
 
 def _pick_move(moves):
-    """Random, but biased toward buying/slaying over hoarding resources.
-
-    Pure-uniform play hoards resources and can leave the end-game conditions
-    (stack exhaustion) unreached for hundreds of turns; preferring the moves
-    that deplete stacks keeps playouts finite and is a more realistic baseline.
-    """
+    """Random, but biased toward buying/slaying over hoarding resources."""
     builders = [m for m in moves if m.get("action_type") in ("hire_citizen", "build_domain", "slay_monster")]
     if builders and random.random() < 0.75:
         pool = builders
@@ -73,21 +54,19 @@ def _pick_move(moves):
     return move
 
 
-def play_random_game(seed=None, max_steps=20000, verbose=False):
-    game = new_game(seed=seed)
-    _quiet(advance, game)
+def play_random_game(seed=None, max_steps=20000, verbose=False, preset="base1"):
+    game = new_game(seed=seed, preset=preset)
     steps = 0
     stuck_streak = 0
     while game.phase != "game_over":
         steps += 1
         if steps > max_steps:
-            return game, steps  # unfinished; caller reports phase != game_over
-        state = wire_state(game)
+            return game, steps
         before = _fingerprint(game)
         moved = False
         noops = []
         for pid in acting_player_ids(game):
-            moves = enumerate_moves(state, pid)
+            moves = legal_moves(game, pid)
             while moves:
                 move = _pick_move(moves)
                 try:
@@ -97,8 +76,6 @@ def play_random_game(seed=None, max_steps=20000, verbose=False):
                         print(f"  rejected {move}: {e}")
                     continue
                 if _fingerprint(game) == before:
-                    # Either the engine silently ignored a malformed response,
-                    # or our snapshot went stale mid-step; retry from fresh.
                     noops.append(move)
                     continue
                 moved = True
@@ -112,7 +89,7 @@ def play_random_game(seed=None, max_steps=20000, verbose=False):
             stuck_streak += 1
             if stuck_streak >= 5:
                 raise RuntimeError(f"All moves were no-ops ({noops!r}) at {_prompt_debug(game)}")
-            continue  # re-snapshot and retry
+            continue
         if not _quiet(game.advance_tick):
             raise RuntimeError(f"Stalled at step {steps} with no legal moves: {_prompt_debug(game)}")
         _quiet(advance, game)
@@ -124,6 +101,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--games", type=int, default=1)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--preset", default="base1")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -132,7 +110,7 @@ def main():
     for i in range(args.games):
         seed = None if args.seed is None else args.seed + i
         start = time.perf_counter()
-        game, steps = play_random_game(seed=seed, verbose=args.verbose)
+        game, steps = play_random_game(seed=seed, verbose=args.verbose, preset=args.preset)
         elapsed = time.perf_counter() - start
         total_time += elapsed
         if game.phase != "game_over":

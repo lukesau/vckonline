@@ -6,11 +6,10 @@ methods via `self.game.<engine>.<method>` (e.g. `self.game.payouts.foo()`),
 and call shared state utilities via `self.game.<util>` (e.g.
 `self.game._log_game_event(...)`).
 """
-import random
 import time
 from constants import *
 from cards import *
-from game_setup import DEBUG_DIE_ONE_VALUES, DEBUG_DIE_TWO_VALUES
+from dice_rng import roll_dice_pair, roll_die
 from game_helpers import (
     _n,
     _validate_hire_or_domain_gold_payment,
@@ -20,7 +19,6 @@ from game_helpers import (
     _parse_resource_kv,
     _player_resource_balances,
     _balances_allow_payout,
-    _GAME_LOG_MAX,
 )
 from game_concurrent import CONCURRENT_HANDLERS, _new_concurrent_action
 
@@ -59,6 +57,10 @@ class LifecycleEngine:
 
         # Block on any active concurrent (non-ordered) prompt first.
         if self.is_blocked_on_concurrent_action():
+            return False
+
+        if getattr(self.game, "pending_event_slay_cost", None):
+            self.game.dice.sync_event_slay_cost_prompt()
             return False
 
         # Block only on required player choices (not on standard action prompts)
@@ -496,12 +498,7 @@ class LifecycleEngine:
         # (pending_roll, finalize_roll, _apply_roll_modification, harvest
         # matching, roll_events) is unchanged -- only the source distribution
         # of d1/d2 differs.
-        if self.game.debug_mode:
-            d1 = random.choice(DEBUG_DIE_ONE_VALUES)
-            d2 = random.choice(DEBUG_DIE_TWO_VALUES)
-        else:
-            d1 = random.randint(1, 6)
-            d2 = random.randint(1, 6)
+        d1, d2 = roll_dice_pair(debug_mode=self.game.debug_mode)
         ds = d1 + d2
         self.game.rolled_die_one = d1
         self.game.rolled_die_two = d2
@@ -630,7 +627,7 @@ class LifecycleEngine:
         if die_index not in (1, 2):
             raise ValueError("die_index must be 1 or 2.")
         rolled = self.game.pending_roll or {}
-        new_val = random.randint(1, 6)
+        new_val = roll_die()
         if die_index == 1:
             old_val = int(rolled.get("rolled_die_one", 1) or 1)
             rolled["rolled_die_one"] = new_val
@@ -674,8 +671,8 @@ class LifecycleEngine:
         rolled = self.game.pending_roll or {}
         old_one = int(rolled.get("rolled_die_one", 1) or 1)
         old_two = int(rolled.get("rolled_die_two", 1) or 1)
-        new_one = random.randint(1, 6)
-        new_two = random.randint(1, 6)
+        new_one = roll_die()
+        new_two = roll_die()
         rolled["rolled_die_one"] = new_one
         rolled["rolled_die_two"] = new_two
         rolled["rolled_die_sum"] = new_one + new_two

@@ -8,17 +8,16 @@ Join an existing lobby:
 
 Point at a local server with --base-url http://127.0.0.1:8000.
 
-The loop mirrors bots/loop.py but uses agent.moves.enumerate_moves (engine-exact
-costs and prompt verbs) and, for greedy/mcts, reconstructs a playable Game from
-each wire snapshot via agent.reconstruct so the policy can search it.
+The loop uses engines.available_actions for move enumeration and, for greedy/mcts,
+reconstructs a playable Game from each wire snapshot via agent.reconstruct so the
+policy can search it.
 """
 
 import argparse
 import time
 
-from bots.client import DEFAULT_BASE_URL, GameNotFoundError, IllegalActionError, VckoClient
-
-from agent.moves import enumerate_moves
+from agent.client import DEFAULT_BASE_URL, GameNotFoundError, IllegalActionError, VckoClient
+from engines.available_actions import enumerate_actions
 from agent.reconstruct import game_from_wire
 
 
@@ -42,7 +41,7 @@ def _needs_game_object(policy):
 
 def play_tick(client, game_id, player_id, state, policy, log):
     """Take one action if any is available. Returns (new_state, acted)."""
-    moves = enumerate_moves(state, player_id)
+    moves = enumerate_actions(state, player_id)
     if not moves:
         return state, False
     game = game_from_wire(state, player_id) if _needs_game_object(policy) else None

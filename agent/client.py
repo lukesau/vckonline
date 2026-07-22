@@ -118,7 +118,7 @@ class VckoClient:
         return payload.get("game_state") or payload
 
     def execute_move(self, game_id, move):
-        """POST a move dict from legal_moves.enumerate_actions."""
+        """POST a move dict from engines.available_actions.enumerate_actions."""
         route = move.get("_route", "action")
         body = {k: v for k, v in move.items() if not k.startswith("_")}
         if route == "apply_event_slay_cost":

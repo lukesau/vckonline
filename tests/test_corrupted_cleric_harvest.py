@@ -188,6 +188,22 @@ class CorruptedClericHarvestTests(unittest.TestCase):
         self.assertIsNotNone(game.pending_event_slay_cost)
 
 
+    def test_sync_event_slay_cost_prompt_restores_orphaned_action(self):
+        p1 = Player("p1", "Player 1")
+        game = make_game_for_test([p1])
+        game.phase = "harvest"
+        game.pending_event_slay_cost = {
+            "player_id": "p1",
+            "resource": "m",
+            "amount": 1,
+            "event_name": "Corrupted Cleric",
+        }
+        game.action_required = {"id": game.game_id, "action": ""}
+        game.dice.sync_event_slay_cost_prompt()
+        self.assertEqual(game.action_required.get("id"), "p1")
+        self.assertEqual(game.action_required.get("action"), "event_slay_cost_choice")
+
+
     def test_apply_event_slay_cost_opens_harvest_without_extra_advance(self):
         """apply_event_slay_cost must bootstrap harvest itself (server endpoint path)."""
         p1 = Player("p1", "Player 1")

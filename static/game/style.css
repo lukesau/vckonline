@@ -1901,6 +1901,12 @@ html, body {
   margin-top: 4px;
 }
 
+.dice-info-log-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
 .dice-info-modal .game-log {
   margin: 4px 0 0;
   max-height: min(200px, 40vh);

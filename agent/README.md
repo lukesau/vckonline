@@ -1,30 +1,37 @@
 # agent/ — game-playing AI for VCK Online
 
 A headless simulator and a ladder of increasingly strong agents for Valeria
-Card Kingdoms, built entirely alongside the existing engine — **no engine,
-server, or bots/ files are modified**. Scope so far: base-set, 2-player.
+Card Kingdoms. Deals from `sql/seed/*.sql` in memory (no MariaDB). Scope so
+far: base-set, 2-player.
 
 ## What's here
 
 | Module | Purpose |
 |---|---|
-| `seed_data.py` | Parses `sql/seed/*.sql` into in-memory card tables — no MariaDB needed |
-| `fake_db.py` | In-memory stand-in for `db_config.connect` so the real `load_game_data` bootstrap runs unmodified |
-| `headless.py` | Build/advance/apply-move/clone `Game` objects in-process (mirrors server.py's action dispatch) |
-| `moves.py` | Legal-move enumeration with engine-exact costs and prompt verbs (fixes several gaps in `bots/legal_moves.py`) |
-| `fast_state.py` | Zero-copy dict-view over a live `Game` (~10x faster than JSON serialization per step) |
-| `policies.py` | `RandomPolicy` baseline and `GreedyPolicy` — VP-equivalent move valuation incl. duke scoring deltas and expected future harvest income |
-| `mcts.py` | Determinized open-loop MCTS with PUCT selection (greedy-softmax priors) and ε-greedy rollouts |
-| `reconstruct.py` | Rebuild a playable `Game` from a server wire-state snapshot (samples hidden info) |
+| `seed_data.py` | Parses `sql/seed/*.sql` into in-memory card tables |
+| `fake_db.py` | Seeds `card_pool` + patches `db_config.connect` so `load_game_data` runs without MariaDB |
+| `headless.py` | Build/advance/apply-move/clone `Game` objects; stall-safe random driver |
+| `client.py` | HTTP client for the hosted/local VCK Online API |
+| `fast_state.py` | Zero-copy dict-view over a live `Game` (optional fast enum path) |
+| `policies.py` | `RandomPolicy` baseline and `GreedyPolicy` — VP-equivalent move valuation |
+| `mcts.py` | Determinized open-loop MCTS with PUCT selection and ε-greedy rollouts |
+| `reconstruct.py` | Rebuild a playable `Game` from a server wire-state snapshot |
 | `server_bot.py` | Host/join a lobby on a live server and play any policy over the REST API |
 | `validate.py` | Invariant/parity/round-trip validation across hundreds of seeded games |
 | `evaluate.py` / `play_random.py` | Head-to-head evaluation harness and random-playout smoke driver |
 
+Legal moves come from `engines.available_actions` (same enumerator the server
+attaches to wire state), with engine-exact effective costs stamped by
+`agent.headless.legal_moves`.
+
 ## Quickstart (no database required)
 
 ```bash
-# smoke test: full random games, ~0.2s each
+# smoke test: full random games
 python -m agent.play_random --games 10 --seed 1
+
+# batch / throughput (multiprocess)
+python3 scripts/run_headless_sim.py --benchmark --games 100 --workers 4
 
 # validation suite
 python -m agent.validate --games 300 --seed 1
@@ -33,7 +40,7 @@ python -m agent.validate --games 300 --seed 1
 python -m agent.evaluate --p1 greedy --p2 random --games 50 --seed 1
 
 # host a bot lobby on the hosted server and play against it
-python -m agent.server_bot --policy mcts --iterations 200 --host --preset base
+python -m agent.server_bot --policy mcts --iterations 200 --host --preset base1
 ```
 
 ## Results (2-player, seat-alternating, seeded)
@@ -49,18 +56,6 @@ python -m agent.server_bot --policy mcts --iterations 200 --host --preset base
 MCTS is determinized (ISMCTS-style): each search iteration re-randomizes
 buried domain cards, the undealt event deck order, and the opponent's duke —
 it does not peek at hidden information.
-
-## Engine findings made along the way
-
-- The engine is fully synchronous (docs/game.md's background-thread note is
-  stale) and silently ignores malformed prompt responses.
-- `bots/legal_moves.py` emits generic verbs/printed costs for several prompts
-  the engine keys on specific verbs/effective costs; `agent/moves.py`
-  documents and implements the full verb + payment table.
-- Latent engine bug: returning an owned Undead Samurai minion via a
-  `domain_return_owned` prompt raises IndexError when the Lord event
-  registered its area as a 6th `monster_stack_areas` entry
-  (`engines/domain_effects.py` `_return_monster_to_stack`).
 
 ## Known simplifications / next steps
 

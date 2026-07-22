@@ -3,16 +3,14 @@
 Usage: python -m agent.validate --games 200 --seed 1 [--parity-every 1]
 
 Checks per step:
-  - fast-path move enumeration (fast_state view) matches the serialized
-    wire-state path exactly, for every player (--parity-every controls sampling)
+  - legal_moves via serialize_state matches wire_state enumeration path
+    (--parity-every controls sampling)
   - no player resource ever goes negative; actions_remaining stays sane
   - phase is always a known value
 Checks per game:
   - the game terminates within the step cap
   - final_scores/final_result are present and internally consistent
-    (rank ordering matches total_vp with the tableau-size tie-break)
   - mid-game serialize -> deserialize -> serialize round trip is stable
-    (checked once per game at a random step)
 """
 
 import argparse
@@ -22,9 +20,17 @@ import json
 import random
 import time
 
-from agent.fast_state import fast_state
-from agent.headless import acting_player_ids, advance, apply_move, new_game, wire_state
-from agent.moves import enumerate_moves
+from engines.available_actions import annotate_effective_costs, enumerate_actions
+
+from agent.headless import (
+    acting_player_ids,
+    advance,
+    apply_move,
+    legal_moves,
+    new_game,
+    serialize_state,
+    wire_state,
+)
 from agent.play_random import _fingerprint, _pick_move, _prompt_debug
 
 KNOWN_PHASES = {
@@ -53,14 +59,15 @@ def _check_resources(game):
 
 
 def _check_move_parity(game, state):
-    fast = fast_state(game)
+    wire = wire_state(game)
     for p in game.player_list:
         pid = p.player_id
-        slow_moves = enumerate_moves(state, pid)
-        fast_moves = enumerate_moves(fast, pid)
-        if slow_moves != fast_moves:
+        slow_moves = legal_moves(game, pid, state=state)
+        annotate_effective_costs(game, wire, pid)
+        wire_moves = enumerate_actions(wire, pid)
+        if slow_moves != wire_moves:
             raise ValidationError(
-                f"move parity mismatch for {pid}:\n  slow={slow_moves!r}\n  fast={fast_moves!r}"
+                f"move parity mismatch for {pid}:\n  slow={slow_moves!r}\n  wire={wire_moves!r}"
             )
 
 
@@ -77,7 +84,10 @@ def _check_roundtrip(game):
         d1, d2 = json.dumps(save1, sort_keys=True), json.dumps(save2, sort_keys=True)
         for i, (a, b) in enumerate(zip(d1, d2)):
             if a != b:
-                raise ValidationError(f"serialize round trip diverges at char {i}: ...{d1[i-60:i+60]}... vs ...{d2[i-60:i+60]}...")
+                raise ValidationError(
+                    f"serialize round trip diverges at char {i}: "
+                    f"...{d1[i-60:i+60]}... vs ...{d2[i-60:i+60]}..."
+                )
         raise ValidationError("serialize round trip: length mismatch")
 
 
@@ -113,7 +123,7 @@ def validate_game(seed, max_steps=20000, parity_every=1):
         steps += 1
         if steps > max_steps:
             raise ValidationError(f"did not terminate in {max_steps} steps: {_prompt_debug(game)}")
-        state = wire_state(game)
+        state = serialize_state(game)
         if parity_every and steps % parity_every == 0:
             _check_move_parity(game, state)
         if steps == roundtrip_step:
@@ -122,7 +132,7 @@ def validate_game(seed, max_steps=20000, parity_every=1):
         moved = False
         noops = []
         for pid in acting_player_ids(game):
-            moves = enumerate_moves(state, pid)
+            moves = legal_moves(game, pid, state=state)
             while moves:
                 move = _pick_move(moves)
                 try:
@@ -162,8 +172,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--games", type=int, default=200)
     parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--parity-every", type=int, default=1,
-                        help="check fast/slow move parity every N steps (0 = off)")
+    parser.add_argument(
+        "--parity-every",
+        type=int,
+        default=1,
+        help="check serialize/wire move parity every N steps (0 = off)",
+    )
     args = parser.parse_args()
 
     start = time.perf_counter()
