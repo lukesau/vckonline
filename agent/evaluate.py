@@ -15,9 +15,7 @@ import io
 import random
 import time
 
-from agent.fast_state import fast_state
-from agent.headless import acting_player_ids, advance, apply_move, new_game
-from agent.moves import enumerate_moves
+from agent.headless import acting_player_ids, advance, apply_move, legal_moves, new_game
 from agent.play_random import _fingerprint, _prompt_debug
 
 _SINK = io.StringIO()
@@ -41,15 +39,14 @@ def play_policy_game(policies, seed=None, max_steps=20000):
         steps += 1
         if steps > max_steps:
             return game, steps
-        view = fast_state(game)
         before = _fingerprint(game)
         moved = False
         noops = []
         for pid in acting_player_ids(game):
-            moves = enumerate_moves(view, pid)
+            moves = legal_moves(game, pid)
             policy = policies[pid]
             while moves:
-                move = policy.choose(game, view, pid, moves)
+                move = policy.choose(game, None, pid, moves)
                 if move is None:
                     break
                 moves.remove(move)
@@ -95,12 +92,13 @@ def make_policy(name, args):
     if name == "mcts":
         from agent.mcts import MCTSPolicy
 
-        return MCTSPolicy(iterations=iterations)
+        return MCTSPolicy(iterations=iterations, workers=args.workers)
     if name == "mcts-nn":
         from agent.mcts import MCTSPolicy
         from agent.value_net import DEFAULT_MODEL_PATH
 
-        policy = MCTSPolicy(iterations=iterations, value_path=DEFAULT_MODEL_PATH)
+        policy = MCTSPolicy(iterations=iterations, workers=args.workers,
+                            value_path=DEFAULT_MODEL_PATH)
         policy.name = "mcts-nn"
         return policy
     raise ValueError(f"unknown policy {name!r}")
@@ -115,6 +113,12 @@ def main():
     parser.add_argument("--iterations", type=int, default=60, help="MCTS iterations per decision")
     parser.add_argument("--iterations2", type=int, default=None,
                         help="override iterations for --p2 (equal-time comparisons)")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="MCTS root-parallel worker processes (1 = single-process)",
+    )
     parser.add_argument("--swap-seats", action="store_true", default=True)
     args = parser.parse_args()
 
@@ -131,7 +135,13 @@ def main():
             "p2": make_policy(names[1], args),
         }
         name_by_pid = {"p1": names[0], "p2": names[1]}
-        game, steps = play_policy_game(policies, seed=seed)
+        try:
+            game, steps = play_policy_game(policies, seed=seed)
+        finally:
+            for pol in policies.values():
+                close = getattr(pol, "close", None)
+                if callable(close):
+                    close()
         if game.phase != "game_over":
             unfinished += 1
             print(f"game {i + 1}: seed={seed} UNFINISHED ({steps} steps)")

@@ -118,9 +118,18 @@ class VckoClient:
         return payload.get("game_state") or payload
 
     def execute_move(self, game_id, move):
-        """POST a move dict from legal_moves.enumerate_actions."""
+        """POST a move dict from engines.available_actions.enumerate_actions."""
         route = move.get("_route", "action")
         body = {k: v for k, v in move.items() if not k.startswith("_")}
         if route == "apply_event_slay_cost":
             return self.apply_event_slay_cost(game_id, body)
         return self.post_action(game_id, body)
+
+    def rejoin(self, game_id, rejoin_code):
+        """Recover player_id from a rejoin code after a dropped session."""
+        payload = self._request(
+            "POST",
+            f"/api/game/{urllib.parse.quote(str(game_id))}/rejoin",
+            {"rejoin_code": rejoin_code},
+        )
+        return payload.get("game_id") or game_id, payload["player_id"]

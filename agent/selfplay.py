@@ -20,10 +20,8 @@ from pathlib import Path
 
 import numpy as np
 
-from agent.fast_state import fast_state
 from agent.features import FEATURE_VERSION, N_FEATURES, extract
-from agent.headless import acting_player_ids, advance, apply_move, new_game
-from agent.moves import enumerate_moves
+from agent.headless import acting_player_ids, advance, apply_move, legal_moves, new_game
 from agent.play_random import _fingerprint
 from agent.policies import GreedyPolicy, RandomPolicy
 
@@ -47,15 +45,14 @@ def play_selfplay_game(seed, epsilon=0.15, sample_every=2, max_steps=20000):
         if steps % sample_every == 0 and game.phase == "action":
             for p in game.player_list:
                 samples.append((extract(game, p.player_id), p.player_id))
-        view = fast_state(game)
         before = _fingerprint(game)
         moved = False
         noops = []
         for pid in acting_player_ids(game):
-            moves = enumerate_moves(view, pid)
+            moves = legal_moves(game, pid)
             while moves:
                 policy = rando if random.random() < epsilon else greedy
-                move = policy.choose(game, view, pid, moves)
+                move = policy.choose(game, None, pid, moves)
                 if move is None:
                     break
                 moves.remove(move)

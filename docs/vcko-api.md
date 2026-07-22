@@ -760,20 +760,25 @@ Replace `play_tick` with real strategy. For prompt-to-action mappings beyond the
 
 ---
 
-## In-repo bots
+## In-repo agents
 
-This repository includes a Python bot package for headless matches against the hosted server:
+This repository includes an `agent/` package for headless sims and matches against the hosted server:
 
 ```bash
-python3 scripts/run_bot_match.py --preset base --poll-interval 1.5
+# Offline random / greedy / MCTS evaluation (no database)
+python -m agent.play_random --games 10 --seed 1
+python -m agent.evaluate --p1 greedy --p2 random --games 20 --seed 1
+
+# Host a lobby on the public server and wait for a human (or another bot)
+python -m agent.server_bot --policy mcts --host --preset base
 ```
 
-- **`bots/client.py`** — HTTP client (`VckoClient`) for lobby and game endpoints
-- **`bots/legal_moves.py`** — client-side legal move enumeration from state JSON
-- **`bots/control_bot.py`** / **`bots/game_logic_bot.py`** — two bot classes (both random for checkpoint 1)
-- **`bots/runner.py`** — creates a 2-player lobby and runs both bots in parallel threads
+- **`agent/client.py`** — HTTP client (`VckoClient`) for lobby and game endpoints
+- **`engines/available_actions.py`** — canonical legal-move enumeration from state JSON
+- **`agent/headless.py`** — in-process game driver (seed-file deals, no MariaDB)
+- **`agent/server_bot.py`** — host/join and play with random / greedy / MCTS policies
 
-No local server or database is required. Both bots use `debug_mode: true` on ready by default (100/100/100 resources). Pass `--no-debug` for a normal game.
+No local server or database is required for agent sims or HTTP play against the hosted API.
 
 Unit tests: `python3 -m unittest tests.test_bot_legal_moves -v`
 

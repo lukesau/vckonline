@@ -313,17 +313,15 @@ def load_draft_card_pool(n_players: int):
         citizens_by_roll: dict mapping roll_match1 -> list of raw DB rows.
         starter_candidates: list of raw DB rows for the optional -1/-1 starter.
     """
-    from db_config import connect
+    from card_pool import ensure_loaded, fetch_optional_starter_candidates, fetch_pool_rows
+
+    ensure_loaded()
 
     monsters_by_area = {}
     citizens_by_roll = {}
     starter_candidates = []
 
-    conn = connect()
-    cursor = conn.cursor(dictionary=True)
-
-    cursor.callproc("select_all_monsters")
-    monster_rows = cursor.fetchall()
+    monster_rows = fetch_pool_rows("select_all_monsters", "monsters")
     filtered = _filter_monster_areas_for_random(monster_rows, n_players)
     for row in filtered:
         area = row["area"]
@@ -331,26 +329,20 @@ def load_draft_card_pool(n_players: int):
     for area in monsters_by_area:
         monsters_by_area[area].sort(key=lambda r: int(r.get("monster_order", 0)))
 
-    cursor.callproc("select_all_citizens")
-    citizen_rows = cursor.fetchall()
+    citizen_rows = fetch_pool_rows("select_all_citizens", "citizens")
     for row in citizen_rows:
         if keep_for_random("citizen", row) and not int(row.get("special_citizen") or 0):
             roll = int(row["roll_match1"])
             citizens_by_roll.setdefault(roll, []).append(dict(row))
 
-    cursor.execute(
-        "SELECT * FROM starters WHERE roll_match1 = -1 AND roll_match2 = -1 ORDER BY id_starters"
-    )
     exclude_starter_expansions = get_preset_config("draft").get("exclude_starter_expansions") or []
-    for row in cursor.fetchall():
+    for row in fetch_optional_starter_candidates():
         if keep_for_random("starter", row):
             starter_candidates.append(dict(row))
     starter_candidates = _filter_excluded_starter_expansions(
         starter_candidates, exclude_starter_expansions
     )
 
-    cursor.close()
-    conn.close()
     return monsters_by_area, citizens_by_roll, starter_candidates
 
 
@@ -363,8 +355,6 @@ def load_game_data(
     expansion_only=False,
     duke_select_count=2,
 ):
-    from db_config import connect
-
     duke_select_count = int(duke_select_count or 2)
     if duke_select_count not in (2, 3):
         raise ValueError(f"duke_select_count must be 2 or 3, got {duke_select_count}")
@@ -493,19 +483,22 @@ def load_game_data(
     optional_starter_expansion = cfg["optional_starter_expansion"]
     apply_implemented_image_filter = cfg["apply_implemented_image_filter"]
     try:
-        my_connect = connect()
-        my_cursor = my_connect.cursor(dictionary=True)
+        from card_pool import (
+            ensure_loaded,
+            fetch_agents,
+            fetch_domains_by_ids,
+            fetch_kings_guard_citizens,
+            fetch_nobles,
+            fetch_pool_rows,
+            fetch_relics,
+            fetch_starters,
+            fetch_undead_samurai_reserve,
+        )
+
+        ensure_loaded()
 
         def _fetch_pool_rows(proc_name, table_name, expansion_filters):
-            if expansion_filters:
-                placeholders = ", ".join(["%s"] * len(expansion_filters))
-                my_cursor.execute(
-                    f"SELECT * FROM {table_name} WHERE expansion IN ({placeholders})",
-                    tuple(expansion_filters),
-                )
-            else:
-                my_cursor.callproc(proc_name)
-            return my_cursor.fetchall()
+            return fetch_pool_rows(proc_name, table_name, expansion_filters)
 
         results = _fetch_pool_rows(monster_query, "monsters", monster_expansion_filters)
         if apply_implemented_image_filter:
@@ -663,11 +656,7 @@ def load_game_data(
         # player can be handed an extra copy after player setup. Safe to
         # int()-cast and string-interp because the IDs are a module constant.
         if debug_mode and DEBUG_ROLL_MODIFIER_DOMAIN_IDS:
-            ids_csv = ",".join(str(int(i)) for i in DEBUG_ROLL_MODIFIER_DOMAIN_IDS)
-            my_cursor.execute(
-                f"SELECT * FROM domains WHERE id_domains IN ({ids_csv})"
-            )
-            debug_roll_modifier_domain_rows = list(my_cursor.fetchall() or [])
+            debug_roll_modifier_domain_rows = fetch_domains_by_ids(DEBUG_ROLL_MODIFIER_DOMAIN_IDS)
 
         results = _fetch_pool_rows(duke_query, "dukes", duke_expansion_filters)
         # See the matching comment above the domains shuffle: the inline
@@ -707,8 +696,7 @@ def load_game_data(
             )
             duke_stack.append(my_duke)
 
-        my_cursor.execute(starter_query)
-        my_result = my_cursor.fetchall()
+        my_result = fetch_starters()
         for row in my_result:
             my_starter = Starter(
                 row["id_starters"],
@@ -775,12 +763,7 @@ def load_game_data(
         # deck build after monster-area selection). `_filter_monster_areas_for_random`
         # is intentionally not applied — these enter via the event, not as an area.
         try:
-            my_cursor.execute(
-                "SELECT * FROM monsters WHERE area = %s AND monster_type = %s "
-                "ORDER BY monster_order",
-                ("Undead Samurai", "Minion"),
-            )
-            for row in my_cursor.fetchall():
+            for row in fetch_undead_samurai_reserve():
                 undead_samurai_reserve.append(Monster(
                     row["id_monsters"], row["name"], row["area"], row["monster_type"],
                     row["monster_order"], row["strength_cost"], row["magic_cost"],
@@ -797,11 +780,7 @@ def load_game_data(
         # dealt to the deck. There must be exactly one such citizen (validated at
         # arm time so non-kingsguard games never trip the check).
         try:
-            my_cursor.execute(
-                "SELECT * FROM citizens WHERE expansion = %s AND special_citizen = 1",
-                (KINGS_GUARD_EXPANSION,),
-            )
-            kings_guard_reserve = [dict(r) for r in (my_cursor.fetchall() or [])]
+            kings_guard_reserve = fetch_kings_guard_citizens(KINGS_GUARD_EXPANSION)
         except Exception:
             kings_guard_reserve = []
 
@@ -809,8 +788,7 @@ def load_game_data(
         # board, so only load the deck there. Materialized into Noble objects
         # now while the cursor is open; shuffled/dealt below.
         if preset == "crimsonseas":
-            my_cursor.execute("SELECT * FROM nobles")
-            for row in (my_cursor.fetchall() or []):
+            for row in fetch_nobles():
                 noble_pool.append(Noble(
                     row["id_nobles"],
                     row["name"],
@@ -836,20 +814,16 @@ def load_game_data(
                 ))
 
         if include_agents:
-            my_cursor.execute("SELECT * FROM agents ORDER BY id_agents")
-            for row in (my_cursor.fetchall() or []):
+            for row in fetch_agents():
                 agent_pool.append(_agent_from_row(row))
 
         if include_relics:
-            my_cursor.execute("SELECT * FROM relics ORDER BY id_relics")
             skip_relics = banned_relic_ids()
-            for row in (my_cursor.fetchall() or []):
+            for row in fetch_relics():
                 if int(row["id_relics"]) in skip_relics:
                     continue
                 relic_pool.append(_relic_from_row(row))
 
-        my_cursor.close()
-        my_connect.close()
     except Exception as e:
         print(f"Error: {e}")
         # Fallback: plain exhausted tokens if DB load failed

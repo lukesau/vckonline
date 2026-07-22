@@ -27,7 +27,6 @@ from game_helpers import (
     _parse_resource_kv,
     _player_resource_balances,
     _balances_allow_payout,
-    _GAME_LOG_MAX,
 )
 from game_concurrent import (
     _ChooseDukeConcurrentHandler,
@@ -712,14 +711,14 @@ class Game:
         return "spent " + ", ".join(parts)
 
     def _log_game_event(self, message):
+        if getattr(self, "sim_mode", False):
+            return
         if not hasattr(self, "game_log") or self.game_log is None:
             self.game_log = []
         self.game_log.append({
             "tick": int(getattr(self, "tick_id", 0) or 0),
             "msg": str(message),
         })
-        while len(self.game_log) > _GAME_LOG_MAX:
-            self.game_log.pop(0)
 
     def _player_is_resting(self, player_or_id):
         """True if `player_or_id` (a Player or a player_id string) is the resting seat this turn."""

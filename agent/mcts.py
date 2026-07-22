@@ -16,19 +16,21 @@ Hidden information is handled by determinization (ISMCTS-style): each iteration
 re-randomizes everything the root player cannot see — buried domain cards, the
 undealt exhausted/event deck order, and the opponent's duke — so the search
 plans against samples of its information set rather than the true hidden state.
-(One residual leak: the deck's event COMPOSITION is kept, only its order is
-reshuffled; resampling composition from the full event pool is a refinement.)
+
+Parallelism: workers>1 runs root-parallel MCTS via ProcessPoolExecutor — each
+worker builds an independent tree for a share of the iteration budget; visit
+counts at the root are summed. That uses real multiple cores (unlike threads
+under the GIL) without sharing a mutable tree across processes.
 """
 
 import contextlib
 import io
-import json
 import math
 import random
+from concurrent.futures import ProcessPoolExecutor
 
-from agent.fast_state import fast_state
-from agent.headless import acting_player_ids, advance, apply_move, clone_game
-from agent.moves import enumerate_moves
+from agent.headless import acting_player_ids, advance, apply_move, clone_game, legal_moves
+from agent.move_summary import move_key
 from agent.play_random import _fingerprint
 from agent.policies import GreedyPolicy
 
@@ -47,7 +49,7 @@ class _Node:
 
 
 def _move_key(move):
-    return json.dumps(move, sort_keys=True, default=str)
+    return move_key(move)
 
 
 def _biased_random_move(moves):
@@ -60,12 +62,35 @@ def _biased_random_move(moves):
     return random.choice(moves)
 
 
+def _split_budget(total, workers):
+    """Distribute total iterations across workers (remainder to the first workers)."""
+    workers = max(1, int(workers))
+    total = max(0, int(total))
+    base = total // workers
+    rem = total % workers
+    return [base + (1 if i < rem else 0) for i in range(workers)]
+
+
+def _parallel_worker(payload):
+    """Top-level worker entry (must be picklable for ProcessPoolExecutor)."""
+    save_dict, player_id, moves, iterations, cfg, seed = payload
+    if seed is not None:
+        random.seed(seed)
+    from game_serialization import deserialize_save_dict_to_game
+
+    game = deserialize_save_dict_to_game(save_dict)
+    game.sim_mode = True
+    # workers=1 so the child search stays in-process
+    policy = MCTSPolicy(workers=1, **cfg)
+    return policy._root_search(game, player_id, moves, iterations)
+
+
 class MCTSPolicy:
     name = "mcts"
 
     def __init__(self, iterations=100, exploration=1.5, rollout_cap=250, descent_cap=400,
                  rollout_epsilon=0.15, top_k=12, prior_temperature=2.0, determinize=True,
-                 value_path=None):
+                 workers=1, value_path=None):
         self.iterations = iterations
         self.exploration = exploration
         self.rollout_cap = rollout_cap
@@ -74,10 +99,15 @@ class MCTSPolicy:
         self.top_k = top_k
         self.prior_temperature = prior_temperature
         self.determinize = determinize
+        self.workers = max(1, int(workers))
         self._greedy = GreedyPolicy()
+        self.last_decision = None
+        self._pool = None
         # Learned leaf evaluator (self-play value net). When set, expansion
         # leaves are scored by the net instead of playing a rollout — the
-        # first learned component swapped into the search.
+        # first learned component swapped into the search. Stored as a path
+        # so root-parallel workers can load it themselves (picklable config).
+        self.value_path = value_path
         self._value_net = None
         if value_path:
             from agent.value_net import ValueNet
@@ -91,6 +121,32 @@ class MCTSPolicy:
             return self._value_net.predict_one(extract(game, root_pid))
         except Exception:
             return self._projected_reward(game, root_pid)
+
+    def _config_for_worker(self):
+        return {
+            "iterations": self.iterations,
+            "exploration": self.exploration,
+            "rollout_cap": self.rollout_cap,
+            "descent_cap": self.descent_cap,
+            "rollout_epsilon": self.rollout_epsilon,
+            "top_k": self.top_k,
+            "prior_temperature": self.prior_temperature,
+            "determinize": self.determinize,
+            "value_path": self.value_path,
+        }
+
+    def _get_pool(self):
+        if self.workers <= 1:
+            return None
+        if self._pool is None:
+            self._pool = ProcessPoolExecutor(max_workers=self.workers)
+        return self._pool
+
+    def close(self):
+        """Shut down the worker pool (optional; process exit also cleans up)."""
+        if self._pool is not None:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+            self._pool = None
 
     # ---- determinization (ISMCTS-style) --------------------------------
 
@@ -181,7 +237,7 @@ class MCTSPolicy:
         guard = 0
         while game.phase != "game_over":
             for pid in acting_player_ids(game):
-                moves = enumerate_moves(fast_state(game), pid)
+                moves = legal_moves(game, pid)
                 if moves:
                     return pid, moves
             if not game.advance_tick():
@@ -247,16 +303,13 @@ class MCTSPolicy:
                 best_key, best_score = key, score
         return best_key
 
-    def choose(self, game, view, player_id, moves):
-        if not moves:
-            return None
-        if len(moves) < 2:
-            return moves[0]
+    def _root_search(self, game, player_id, moves, iterations):
+        """Run ``iterations`` of search; return root stats and ranked candidates."""
         root = _Node()
         root_moves_by_key = {_move_key(m): m for m in moves}
 
         with contextlib.redirect_stdout(_SINK):
-            for _ in range(self.iterations):
+            for _ in range(iterations):
                 sim = clone_game(game)
                 if self.determinize:
                     self._determinize(sim, player_id)
@@ -290,7 +343,6 @@ class MCTSPolicy:
                         break
                     if node.priors is None:
                         node.priors = self._compute_priors(sim, pid, moves_by_key)
-                    # restrict to the pruned/prioritized set when it applies here
                     candidate_keys = [k for k in moves_by_key if k in node.priors]
                     if not candidate_keys:
                         candidate_keys = list(moves_by_key)
@@ -319,10 +371,123 @@ class MCTSPolicy:
         _SINK.seek(0)
         _SINK.truncate(0)
 
-        best_key, best_visits = None, -1
+        priors = root.priors
+        if priors is None:
+            priors = self._compute_priors(game, player_id, root_moves_by_key)
+        by_key = {}
         for key, child in root.children.items():
-            if key in root_moves_by_key and child.visits > best_visits:
-                best_key, best_visits = key, child.visits
-        if best_key is None:
-            return random.choice(moves)
-        return root_moves_by_key[best_key]
+            if key not in root_moves_by_key:
+                continue
+            by_key[key] = {
+                "move": root_moves_by_key[key],
+                "key": key,
+                "visits": int(child.visits),
+                "value": float(child.value),
+            }
+        return self._build_search_result(by_key, priors, root_moves_by_key, iterations)
+
+    def _build_search_result(self, by_key, priors, root_moves_by_key, iterations):
+        uniform = 1.0 / max(len(root_moves_by_key), 1)
+        total_visits = sum(entry["visits"] for entry in by_key.values())
+        candidates = []
+        for key, entry in by_key.items():
+            visits = entry["visits"]
+            q = entry["value"] / visits if visits else 0.5
+            prior = (priors or {}).get(key, uniform)
+            candidates.append({
+                "move": entry["move"],
+                "key": key,
+                "visits": visits,
+                "visit_pct": (100.0 * visits / total_visits) if total_visits else 0.0,
+                "q": q,
+                "prior": prior,
+            })
+        candidates.sort(key=lambda c: (-c["visits"], -c["q"]))
+        return {
+            "by_key": by_key,
+            "candidates": candidates,
+            "iterations": iterations,
+            "total_visits": total_visits,
+            "priors": priors,
+        }
+
+    def _root_visits(self, game, player_id, moves, iterations):
+        """Backward-compatible visit-count map from a root search."""
+        result = self._root_search(game, player_id, moves, iterations)
+        return {key: entry["visits"] for key, entry in result["by_key"].items()}
+
+    def _parallel_root_search(self, game, player_id, moves):
+        """Root-parallel search: independent trees, merge visit/value totals."""
+        from game_serialization import serialize_game_to_save_dict
+
+        budgets = [b for b in _split_budget(self.iterations, self.workers) if b > 0]
+        if not budgets:
+            return self._build_search_result({}, {}, {_move_key(m): m for m in moves}, 0)
+        if len(budgets) == 1:
+            return self._root_search(game, player_id, moves, budgets[0])
+
+        save_dict = serialize_game_to_save_dict(game)
+        cfg = self._config_for_worker()
+        cfg.pop("iterations", None)
+        base_seed = random.randrange(1 << 30)
+        payloads = [
+            (save_dict, player_id, moves, budget, cfg, base_seed + i)
+            for i, budget in enumerate(budgets)
+        ]
+        pool = self._get_pool()
+        root_moves_by_key = {_move_key(m): m for m in moves}
+        merged = {}
+        for partial in pool.map(_parallel_worker, payloads):
+            for key, entry in partial.get("by_key", {}).items():
+                if key not in root_moves_by_key:
+                    continue
+                bucket = merged.setdefault(key, {"visits": 0, "value": 0.0, "move": entry["move"]})
+                bucket["visits"] += entry["visits"]
+                bucket["value"] += entry["value"]
+        priors = self._compute_priors(game, player_id, root_moves_by_key)
+        return self._build_search_result(merged, priors, root_moves_by_key, self.iterations)
+
+    def _parallel_root_visits(self, game, player_id, moves):
+        """Root-parallel search: independent trees, sum visit counts."""
+        result = self._parallel_root_search(game, player_id, moves)
+        return {key: entry["visits"] for key, entry in result["by_key"].items()}
+
+    def analyze(self, game, player_id, moves):
+        """Run search and record ranked root candidates on ``last_decision``."""
+        if not moves:
+            self.last_decision = {"policy": "mcts", "chosen": None, "candidates": []}
+            return self.last_decision
+        if len(moves) < 2:
+            self.last_decision = {
+                "policy": "mcts",
+                "chosen": moves[0],
+                "candidates": [],
+                "trivial": True,
+            }
+            return self.last_decision
+
+        if self.workers > 1:
+            search = self._parallel_root_search(game, player_id, moves)
+        else:
+            search = self._root_search(game, player_id, moves, self.iterations)
+
+        chosen = None
+        best_visits = -1
+        for entry in search["candidates"]:
+            if entry["visits"] > best_visits:
+                chosen = entry["move"]
+                best_visits = entry["visits"]
+        if chosen is None:
+            chosen = random.choice(moves)
+
+        self.last_decision = {
+            "policy": "mcts",
+            "chosen": chosen,
+            "candidates": search["candidates"],
+            "iterations": self.iterations,
+            "workers": self.workers,
+        }
+        return self.last_decision
+
+    def choose(self, game, view, player_id, moves):
+        return self.analyze(game, player_id, moves)["chosen"]

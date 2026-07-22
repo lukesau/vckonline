@@ -203,6 +203,34 @@ class GameObjectEncoder(JSONEncoder):
         return super().default(obj)
 
 
+def game_to_state_dict(game):
+    """Serialize a live Game to the wire dict without a JSON round-trip."""
+    enc = GameObjectEncoder()
+    state = enc.default(game)
+
+    def encode_grid(grid):
+        return [[enc.default(c) for c in stack] for stack in (grid or [])]
+
+    state["player_list"] = [enc.default(p) for p in game.player_list]
+    state["monster_grid"] = encode_grid(game.monster_grid)
+    state["citizen_grid"] = encode_grid(game.citizen_grid)
+    state["domain_grid"] = encode_grid(game.domain_grid)
+    state["all_dukes"] = [d.to_dict() for d in (getattr(game, "all_dukes", None) or [])]
+    state["noble_slots"] = [
+        (n.to_dict() if n else None) for n in (getattr(game, "noble_slots", None) or [])
+    ]
+    state["undead_samurai_pool"] = [
+        enc.default(m) for m in (getattr(game, "undead_samurai_pool", None) or [])
+    ]
+    state["kings_guard_pool"] = [
+        enc.default(c) for c in (getattr(game, "kings_guard_pool", None) or [])
+    ]
+    state["banish_pile"] = [enc.default(c) for c in (getattr(game, "banish_pile", None) or [])]
+    if getattr(game, "sim_mode", False):
+        state["game_log"] = []
+    return state
+
+
 # ─── Round-trippable save/load ──────────────────────────────────────────────
 #
 # `GameObjectEncoder` is intentionally slim — it's the wire format clients see.
