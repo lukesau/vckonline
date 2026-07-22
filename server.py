@@ -349,15 +349,23 @@ def _remove_member_from_lobby(lb: Lobby, member: LobbyMember):
 
 
 def _prune_stale_lobbies():
-    """Remove inactive members; delete empty lobbies. Transfer ownership if needed."""
+    """Remove inactive members; delete empty lobbies. Transfer ownership if needed.
+
+    Bots never ping, so they are exempt from the activity cutoff — but a lobby
+    whose humans have all gone stale is deleted even if bots remain seated.
+    """
     cutoff = time.time() - _LOBBY_MEMBER_TIMEOUT_S
     for lb in list(lobbies.values()):
-        kept = [m for m in lb.members if m.last_active_time >= cutoff]
+        kept = [
+            m for m in lb.members
+            if getattr(m, "is_bot", False) or m.last_active_time >= cutoff
+        ]
         if len(kept) != len(lb.members):
             lb.members = kept
             if not any(m.player_id == lb.owner_id for m in kept):
-                lb.owner_id = kept[0].player_id if kept else ""
-        if not lb.members:
+                humans = [m for m in kept if not getattr(m, "is_bot", False)]
+                lb.owner_id = humans[0].player_id if humans else ""
+        if not any(not getattr(m, "is_bot", False) for m in lb.members):
             _cancel_draft(lb.lobby_id)
             lobbies.pop(lb.lobby_id, None)
 
@@ -368,7 +376,32 @@ def _serialize_member(member: LobbyMember):
         "name": member.name,
         "is_ready": bool(member.is_ready),
         "debug_mode": bool(getattr(member, "debug_mode", False)),
+        "is_bot": bool(getattr(member, "is_bot", False)),
     }
+
+
+def _validate_bots(bots, preset):
+    """Normalize the requested bot list. Bots are unsupported in draft (no
+    draft-pick logic) and capped so the lobby stays within the 5-seat table."""
+    from agent.bot_players import BOT_LEVELS
+
+    if not bots:
+        return []
+    levels = [str(b or "").strip().lower() for b in bots]
+    levels = [b for b in levels if b]
+    if not levels:
+        return []
+    if preset == "draft":
+        raise HTTPException(status_code=400, detail="Bots are not supported in draft lobbies.")
+    unknown = [b for b in levels if b not in BOT_LEVELS]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown bot level(s) {unknown}; allowed: {sorted(BOT_LEVELS)}",
+        )
+    if len(levels) > 4:
+        raise HTTPException(status_code=400, detail="At most 4 bots per lobby.")
+    return levels
 
 
 def _serialize_lobby(lb: Lobby):
@@ -439,6 +472,11 @@ def _maybe_start_lobby_game(lb: Lobby):
     _init_game_rejoin_codes(new_game_id, new_game)
     _record_snapshot(new_game_id, new_game)
     _shot_clock_reset(new_game_id)
+
+    bot_levels = dict(getattr(lb, "bot_levels", None) or {})
+    if bot_levels:
+        new_game.bot_levels = bot_levels
+        _schedule_bot_turns(new_game_id)
 
     lobbies.pop(lb.lobby_id, None)
     return new_game_id
@@ -672,6 +710,121 @@ def _player_in_game(game, player_id) -> bool:
     return False
 
 
+# ─── Server-side bot players ────────────────────────────────────────────────
+#
+# Lobbies can seat bot opponents (agent/bot_players.py levels). The driver
+# below runs as an asyncio task per game: fast policies (easy/medium) decide
+# directly on the event loop; the hard bot's MCTS analysis runs against a
+# CLONED game in a thread executor so the loop never blocks, and the result
+# is only applied if the live game hasn't moved in the meantime. All game
+# mutation happens on the event loop, which is the server's serializer.
+
+_bot_policies: Dict[str, Dict[str, object]] = {}  # game_id -> {player_id: policy}
+
+
+def _bot_policy_for(game_id: str, player_id: str, level: str):
+    from agent.bot_players import make_policy
+
+    cache = _bot_policies.setdefault(game_id, {})
+    if player_id not in cache:
+        cache[player_id] = make_policy(level)
+    return cache[player_id]
+
+
+def _drop_bot_policies(game_id: str) -> None:
+    cache = _bot_policies.pop(game_id, None) or {}
+    for policy in cache.values():
+        close = getattr(policy, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
+
+
+def _schedule_bot_turns(game_id: str) -> None:
+    """Fire-and-forget the bot driver for this game (no-op without bots)."""
+    game = games.get(game_id)
+    if game is None or not (getattr(game, "bot_levels", None) or {}):
+        return
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return  # not in an event loop (tests drive _run_bot_turns directly)
+    asyncio.create_task(_run_bot_turns(game_id))
+
+
+async def _run_bot_turns(game_id: str) -> None:
+    from agent import bot_players
+
+    game = games.get(game_id)
+    if game is None:
+        return
+    bot_levels = getattr(game, "bot_levels", None) or {}
+    if not bot_levels or getattr(game, "_bots_running", False):
+        return
+    game._bots_running = True
+    try:
+        for _ in range(400):  # hard cap per wake-up; bots re-schedule on events
+            game = games.get(game_id)
+            if game is None or getattr(game, "shutdown", None):
+                return
+            pending = bot_players.pending_bot_decision(game, bot_levels)
+            if pending is None:
+                break
+            player_id, level, moves = pending
+            policy = _bot_policy_for(game_id, player_id, level)
+            if getattr(policy, "name", "") in ("mcts", "mcts-nn") and len(moves) > 1:
+                from game_serialization import (
+                    deserialize_save_dict_to_game,
+                    serialize_game_to_save_dict,
+                )
+
+                save_dict = serialize_game_to_save_dict(game)
+                tick_before = int(getattr(game, "tick_id", 0) or 0)
+                log_before = len(getattr(game, "game_log", None) or [])
+
+                def _compute():
+                    clone = deserialize_save_dict_to_game(save_dict)
+                    clone_pending = bot_players.pending_bot_decision(clone, bot_levels)
+                    if clone_pending is None or clone_pending[0] != player_id:
+                        return None
+                    return bot_players.choose_sync(policy, clone, player_id, clone_pending[2])
+
+                decision = await asyncio.get_running_loop().run_in_executor(None, _compute)
+                game = games.get(game_id)
+                if game is None or getattr(game, "shutdown", None):
+                    return
+                moved_meanwhile = (
+                    int(getattr(game, "tick_id", 0) or 0) != tick_before
+                    or len(getattr(game, "game_log", None) or []) != log_before
+                )
+                if moved_meanwhile:
+                    continue  # a human acted while we were thinking; recompute
+                fresh = bot_players.pending_bot_decision(game, bot_levels)
+                if fresh is None:
+                    break
+                if fresh[0] != player_id:
+                    continue
+                moves = fresh[2]
+            else:
+                decision = bot_players.choose_sync(policy, game, player_id, moves)
+            if not bot_players.apply_bot_decision(game, player_id, moves, decision):
+                break  # nothing progressed — don't spin
+            _touch_game_audience(game)
+            _shot_clock_reset(game_id)
+            await manager.broadcast(game_id, game)
+            await asyncio.sleep(0)  # let queued requests interleave
+        game = games.get(game_id)
+        if game is not None and getattr(game, "phase", None) == "game_over" \
+                and not getattr(game, "shutdown", None):
+            await _initiate_game_shutdown(game_id, reason="game_over", initiated_by_player_id=None)
+    finally:
+        game = games.get(game_id)
+        if game is not None:
+            game._bots_running = False
+
+
 def _game_audience_time(game) -> float:
     return float(getattr(game, "last_audience_time", None) or getattr(game, "last_active_time", 0) or 0)
 
@@ -686,6 +839,7 @@ def _destroy_game(game_id: str) -> None:
     games.pop(game_id, None)
     game_histories.pop(game_id, None)
     _clear_game_rejoin_codes(game_id)
+    _drop_bot_policies(game_id)
     global gamers
     gamers = [g for g in gamers if g.game_id != game_id]
 
@@ -1173,6 +1327,9 @@ class CreateLobbyRequest(BaseModel):
     expansion_only: Optional[bool] = False
     duke_select_count: Optional[int] = 2
     random_no_optional_modules: Optional[bool] = False
+    # Bot opponents to seat in the lobby at creation: list of difficulty
+    # levels from agent.bot_players.BOT_LEVELS ("easy" | "medium" | "hard").
+    bots: Optional[List[str]] = None
 
 
 class JoinLobbyRequest(BaseModel):
@@ -1349,6 +1506,7 @@ async def create_lobby(request: CreateLobbyRequest):
     random_no_optional_modules = _validate_expansion_only(
         request.random_no_optional_modules, default=False
     )
+    bot_levels = _validate_bots(request.bots, preset)
     if expansion_only and preset not in _PRESETS_WITH_EXPANSION_ONLY:
         expansion_only = False
     if random_no_optional_modules and preset != "random":
@@ -1371,6 +1529,24 @@ async def create_lobby(request: CreateLobbyRequest):
     )
     lb.created_at = time.time()
     lb.members.append(member)
+    if bot_levels:
+        from agent.bot_players import BOT_LEVELS
+
+        lb.bot_levels = {}
+        used_names = {member.name}
+        for level in bot_levels:
+            base_name = BOT_LEVELS[level]
+            bot_name = base_name
+            suffix = 2
+            while bot_name in used_names:
+                bot_name = f"{base_name} {suffix}"
+                suffix += 1
+            used_names.add(bot_name)
+            bot_id = str(shortuuid.uuid())
+            bot_member = LobbyMember(bot_name, bot_id, lobby_id=lobby_id, is_bot=True)
+            bot_member.last_active_time = time.time()
+            lb.members.append(bot_member)
+            lb.bot_levels[bot_id] = level
     lobbies[lobby_id] = lb
 
     await lobby_ws_manager.broadcast_lobby()
@@ -1464,6 +1640,8 @@ async def kick_member(request: KickRequest):
     if target is None:
         raise HTTPException(status_code=404, detail="Target is not a member of this lobby")
     _remove_member_from_lobby(lb, target)
+    if getattr(target, "is_bot", False):
+        (getattr(lb, "bot_levels", None) or {}).pop(target_pid, None)
     await lobby_ws_manager.broadcast_lobby()
     return {"message": "Member kicked", "player_id": target_pid}
 
@@ -2095,6 +2273,7 @@ async def get_game_state(game_id: str, player_id: Optional[str] = None):
     if getattr(game, "phase", None) == "game_over" and not getattr(game, "shutdown", None):
         await _initiate_game_shutdown(game_id, reason="game_over", initiated_by_player_id=None)
     _shot_clock_ensure(game_id)
+    _schedule_bot_turns(game_id)
     return _serialize_game_for_player(game, player_id)
 
 
@@ -2409,6 +2588,7 @@ async def perform_game_action(game_id: str, request: GameActionRequest):
         # If this action ended the game, start the countdown once.
         if getattr(game, "phase", None) == "game_over" and not getattr(game, "shutdown", None):
             await _initiate_game_shutdown(game_id, reason="game_over", initiated_by_player_id=None)
+        _schedule_bot_turns(game_id)
         return {"message": "Action performed", "game_state": _serialize_game_for_player(game, request.player_id)}
     
     except HTTPException:
@@ -2457,6 +2637,7 @@ async def apply_event_slay_cost(game_id: str, request: ApplyEventSlayCostRequest
     # slay_monster call will be the snapshot anchor.
     _shot_clock_reset(game_id)
     await manager.broadcast(game_id, game)
+    _schedule_bot_turns(game_id)
     return {"message": "Event slay cost applied", "game_state": _serialize_game_for_player(game, request.player_id)}
 
 

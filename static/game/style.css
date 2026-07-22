@@ -5590,3 +5590,11 @@ body.is-virtual-keyboard-open .card-modal {
     border: none;
   }
 }
+
+/* Lobby bot-opponent selection (create form) */
+.lobby-bots-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.lobby-bots-label { font-size: 0.85em; opacity: 0.85; }
+.lobby-bot-check { display: inline-flex; align-items: center; gap: 5px; font-size: 0.85em; cursor: pointer; }
+.lobby-bot-check input { accent-color: #7c5cff; }
+.lobby-bots-disabled { opacity: 0.45; pointer-events: none; }
+.lobby-bot-tag { background: rgba(124, 92, 255, 0.25); }

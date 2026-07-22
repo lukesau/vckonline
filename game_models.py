@@ -146,12 +146,13 @@ class Player:
 
 
 class LobbyMember:
-    def __init__(self, player_name, player_id, lobby_id=None):
+    def __init__(self, player_name, player_id, lobby_id=None, is_bot=False):
         self.name = player_name
         self.player_id = player_id
         self.lobby_id = lobby_id
-        self.is_ready = False
+        self.is_ready = bool(is_bot)  # bots are always ready
         self.debug_mode = False
+        self.is_bot = bool(is_bot)
         self.last_active_time = 0
 
 

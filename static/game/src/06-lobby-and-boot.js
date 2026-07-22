@@ -1408,6 +1408,11 @@ function initLobbyModal() {
   const createPresetWarning = document.getElementById('lobby-create-preset-warning');
   const createBtn = document.getElementById('lobby-create-btn');
   const backToNameBtn = document.getElementById('lobby-back-to-name-btn');
+  const createBotChecks = ['easy', 'medium', 'hard'].map(
+    level => document.getElementById('lobby-create-bot-' + level)
+  ).filter(Boolean);
+  const createBotsRow = document.getElementById('lobby-create-bots-row');
+  const createBotsWarning = document.getElementById('lobby-create-bots-warning');
   const lobbySheet = overlay ? overlay.querySelector('.lobby-sheet') : null;
   const waitMetaEl = document.getElementById('lobby-wait-meta');
   const presetSelect = document.getElementById('lobby-preset-select');
@@ -1902,6 +1907,12 @@ function initLobbyModal() {
           ownerTag.textContent = 'Owner';
           nameSpan.appendChild(ownerTag);
         }
+        if (m.is_bot) {
+          const botTag = document.createElement('span');
+          botTag.className = 'lobby-owner-tag lobby-bot-tag';
+          botTag.textContent = 'Bot';
+          nameSpan.appendChild(botTag);
+        }
         if (isSelf) {
           const editBtn = document.createElement('button');
           editBtn.type = 'button';
@@ -2104,6 +2115,7 @@ function initLobbyModal() {
       const minPlayers = Number(createMinPlayersSelect.value) || 2;
       const dukeSelectCount = Number(createDukeSelect && createDukeSelect.value) || 2;
       const poolState = poolStateFromSelect(preset, createPoolSelect);
+      const bots = selectedBotLevels();
       const res = await fetch('/api/lobby/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2114,6 +2126,7 @@ function initLobbyModal() {
           duke_select_count: dukeSelectCount,
           expansion_only: poolState.expansionOnly,
           random_no_optional_modules: poolState.randomNoOptionalModules,
+          bots,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -2271,6 +2284,19 @@ function initLobbyModal() {
     });
   }
 
+  function selectedBotLevels() {
+    // Bots are unsupported in draft lobbies (no draft-pick logic server-side).
+    if ((createPresetSelect.value || 'current') === 'draft') return [];
+    return createBotChecks.filter(cb => cb.checked).map(cb => cb.value);
+  }
+
+  function syncBotControls(preset) {
+    const isDraft = preset === 'draft';
+    createBotChecks.forEach(cb => { cb.disabled = isDraft; });
+    if (createBotsRow) createBotsRow.classList.toggle('lobby-bots-disabled', isDraft);
+    if (createBotsWarning) createBotsWarning.hidden = !isDraft;
+  }
+
   if (createPresetSelect) {
     createPresetSelect.addEventListener('change', () => {
       const preset = createPresetSelect.value || 'current';
@@ -2285,6 +2311,7 @@ function initLobbyModal() {
         randomNoOptionalModules: stillNoModules,
       }, true);
       syncPresetWarning(preset, createPresetWarning);
+      syncBotControls(preset);
     });
   }
 
@@ -2510,6 +2537,7 @@ function initLobbyModal() {
       randomNoOptionalModules: false,
     }, true);
     syncPresetWarning(createPresetSelect.value || 'current', createPresetWarning);
+    syncBotControls(createPresetSelect.value || 'current');
   }
 
   openOverlay();
