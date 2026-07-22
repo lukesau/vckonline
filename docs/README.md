@@ -10,7 +10,7 @@ server at [vcko.lukesau.com](https://vcko.lukesau.com). Card deals use
 
 ```bash
 python -m agent.play_random --games 10 --seed 1
-python -m agent.server_bot --policy mcts --host --preset base1
+python -m agent.server_bot --policy mcts --host --preset base
 ```
 
 See [`agent/README.md`](../agent/README.md) and `vcko-api.md` for the API and

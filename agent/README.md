@@ -40,7 +40,13 @@ python -m agent.validate --games 300 --seed 1
 python -m agent.evaluate --p1 greedy --p2 random --games 50 --seed 1
 
 # host a bot lobby on the hosted server and play against it
-python -m agent.server_bot --policy mcts --iterations 200 --host --preset base1
+python -m agent.server_bot --policy mcts --iterations 200 --host --preset base
+
+# same, with root-parallel MCTS across CPU cores
+python -m agent.server_bot --policy mcts --iterations 200 --workers 4 --host --preset base
+
+# after Ctrl-C / crash mid-game (session auto-saved to agent_session.json)
+python -m agent.server_bot --policy mcts --resume
 ```
 
 ## Results (2-player, seat-alternating, seeded)
