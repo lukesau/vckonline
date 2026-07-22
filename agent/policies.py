@@ -46,6 +46,19 @@ class GreedyConfig:
     # for the most things outright, so a marginal magic > gold > strength.
     magic_flex_premium = 1.12
     gold_flex_premium = 1.05
+    # Domain-effect valuation knobs (all VP-equivalents or per-own-turn rates)
+    denial_factor = 1.5        # taking from an opponent > gaining the same amount
+    pay_opponent_factor = 1.3  # paying an opponent < just losing the resources
+    est_hires_per_turn = 0.6   # expected own-turn frequency of hire actions
+    est_slays_per_turn = 0.45
+    est_builds_per_turn = 0.2
+    duplicate_surcharge_avg = 0.7  # avg gold saved per hire by Emerald Stronghold
+    free_citizen_value = 3.0   # "gain a citizen from the center" riders
+    bonus_action_value = 1.5   # may-slay / may-build riders (extra tempo)
+    disruption_value = 1.8     # banish/flip/steal/take opponent-targeting effects
+    reroll_per_turn_value = 0.12
+    immunity_value = 1.2
+    magic_gain_harvest_p = 0.4  # P(a harvest gains any magic) for Opera House
     # assumed end-game tableau for duke selection at game start
     est_citizens = 8
     est_domains = 5
@@ -160,9 +173,9 @@ class GreedyPolicy:
                         key = what.replace("owned_", "") + "_count"
                         if key in roles:
                             count = roles[key]
-                        elif what == "owned_citizen":
+                        elif what in ("owned_citizen", "owned_citizens"):
                             count = len(player.owned_citizens)
-                        elif what == "owned_domains":
+                        elif what in ("owned_domain", "owned_domains"):
                             count = len(player.owned_domains)
                 total += count * self._pairs_value(tokens[-2:], rates, mode="sum")
             elif verb in rates:
@@ -255,6 +268,154 @@ class GreedyPolicy:
         # steering only applies on the player's own roll phase (half the turns)
         return (total_gain / 36.0) * self._remaining_rolls(game) * 0.5
 
+    # ---- domain effect valuation ---------------------------------------
+
+    def _spec_value(self, spec, rates, mode="sum"):
+        """Value 'g:2'-style resource specs (possibly 'wild:2')."""
+        tokens = []
+        for part in (spec or "").split(","):
+            part = part.strip().replace(":", " ")
+            if part:
+                tokens.extend(part.split())
+        return self._pairs_value(tokens, rates, mode=mode)
+
+    def _manipulate_value(self, kv, rates):
+        """One-trigger value of a manipulate_resources effect."""
+        cfg = self.cfg
+        mode = (kv.get("mode") or "").strip()
+        gain = self._spec_value(kv.get("gain", ""), rates)
+        pay = self._spec_value(kv.get("pay", ""), rates, mode="min")
+        take = self._spec_value(kv.get("take", ""), rates)
+        if mode == "gain":
+            return gain
+        if mode == "self_convert":
+            return max(0.0, gain - pay)
+        if mode == "take_from_player":
+            return take * cfg.denial_factor
+        if mode == "pay_to_player":
+            return max(0.0, gain - pay * cfg.pay_opponent_factor)
+        return 0.0
+
+    def _passive_value(self, game, player, rates, effect):
+        """Lifetime VP-equivalent of a domain passive (excl. roll.set_one_die)."""
+        cfg = self.cfg
+        turns_own = self._remaining_rolls(game) * 0.5
+        turns_all = self._remaining_rolls(game)
+        kv = dict(tok.split("=", 1) for tok in effect.split() if "=" in tok)
+
+        for prefix, freq in (
+            ("action.start ", turns_own),
+            ("action.end ", turns_own),
+            ("action.build ", cfg.est_builds_per_turn * turns_own),
+            ("action.hire ", cfg.est_hires_per_turn * turns_own),
+            ("action.slay ", cfg.est_slays_per_turn * turns_own),
+            ("action.on_opponent_slay ", cfg.est_slays_per_turn * turns_own),
+        ):
+            if not effect.startswith(prefix):
+                continue
+            rest = effect[len(prefix):].strip()
+            if rest.startswith("manipulate_resources"):
+                per_trigger = self._manipulate_value(kv, rates)
+            else:
+                per_trigger = self._payout_value(rest, rates, player)
+            return per_trigger * freq
+
+        if effect.startswith("effect.add action."):
+            flag = effect.split("action.", 1)[1]
+            savings = {
+                "defiantridge": 1.0 * rates["g"] * cfg.est_hires_per_turn * turns_own,
+                "emeraldstronghold": cfg.duplicate_surcharge_avg * rates["g"]
+                                     * cfg.est_hires_per_turn * turns_own,
+                "fortskyler": 1.0 * rates["s"] * cfg.est_slays_per_turn * turns_own,
+                "pratchettsplateau": 1.0 * rates["g"] * cfg.est_builds_per_turn * turns_own,
+            }
+            return savings.get(flag, cfg.unparsed_effect_value)
+
+        if effect.startswith("harvest.gain_per_owned_citizen_name") or \
+           effect.startswith("harvest.gain_per_owned_starter_name"):
+            total = 0.0
+            for part in effect.split("+"):
+                tokens = part.strip().split()
+                if len(tokens) < 4:
+                    continue
+                name, res, amount = tokens[1], tokens[2], int(tokens[3])
+                pool = player.owned_starters if "starter_name" in tokens[0] else [
+                    c for c in player.owned_citizens if not getattr(c, "is_flipped", False)
+                ]
+                count = sum(1 for c in pool if getattr(c, "name", None) == name)
+                # named cards are die-matched (Peasant 5 / Knight 6): P=1/3 per roll
+                total += count * amount * rates.get(res, 0) * turns_all / 3.0
+            return total
+
+        if effect.startswith("harvest.on_any_magic_gain"):
+            tokens = effect.split()
+            amount = int(tokens[-1]) if tokens[-1].isdigit() else 1
+            return amount * rates["m"] * cfg.magic_gain_harvest_p * turns_all
+
+        if effect == "immunity.take":
+            return cfg.immunity_value
+
+        if effect.startswith("roll.on_event doubles"):
+            payout = effect.split("doubles", 1)[1].strip()
+            return self._payout_value(payout, rates, player) * turns_all / 6.0
+
+        if effect.startswith("roll.reroll"):
+            return cfg.reroll_per_turn_value * turns_own
+
+        if effect.startswith("action."):  # newshilinatower, northernwall, ...
+            return cfg.unparsed_effect_value
+        return cfg.unparsed_effect_value
+
+    def _activation_effect_value(self, game, player, rates, effect):
+        """One-time VP-equivalent of a domain's on-build activation effect."""
+        cfg = self.cfg
+        total = 0.0
+        for part in effect.split("+"):
+            part = part.strip()
+            if not part:
+                continue
+            kv = dict(tok.split("=", 1) for tok in part.split() if "=" in tok)
+            if part.startswith("choose <"):
+                total += cfg.free_citizen_value
+            elif part in ("slay", "build_domain"):
+                total += cfg.bonus_action_value
+            elif part.startswith((
+                "banish_player_citizen", "banish_random_player_monster",
+                "flip_opponent_citizen", "concurrent_flip_one_citizen",
+                "steal_citizen", "take_owned",
+            )):
+                total += cfg.disruption_value
+            elif part.startswith("banish_center"):
+                total += 1.0
+            elif part.startswith("return_owned"):
+                tokens = part.split()
+                vp = next((int(t) for t in tokens if t.isdigit()), 0)
+                total += vp * 0.5  # VP minus the surrendered card's value, roughly
+            elif part.startswith("manipulate_resources"):
+                total += self._manipulate_value(kv, rates)
+            elif part.startswith("action.modify_monster_strength"):
+                total += 1.0
+            else:
+                total += self._payout_value(part, rates, player)
+        return total
+
+    def _domain_effect_value(self, game, player, rates, card):
+        """Approximate lifetime value of everything a domain DOES (vs just its
+        printed VP/icons): recurring passives x expected remaining triggers,
+        one-time activation payouts, dice steering, savings flags, disruption."""
+        value = 0.0
+        if int(getattr(card, "has_passive_effect", 0) or 0):
+            effect = str(getattr(card, "passive_effect", "") or "").strip()
+            if effect.startswith("roll.set_one_die"):
+                value += self._roll_modifier_future_value(game, player, rates, card)
+            elif effect:
+                value += self._passive_value(game, player, rates, effect)
+        if int(getattr(card, "has_activation_effect", 0) or 0):
+            effect = str(getattr(card, "activation_effect", "") or "").strip()
+            if effect:
+                value += self._activation_effect_value(game, player, rates, effect)
+        return value
+
     # ---- move valuation ------------------------------------------------
 
     def _find_top(self, grid, id_attr, card_id):
@@ -303,11 +464,7 @@ class GreedyPolicy:
             for role in ("shadow", "holy", "soldier", "worker"):
                 value += int(getattr(card, f"{role}_count", 0) or 0) * self._mult(player, f"{role}_multiplier")
             value += self._mult(player, "domain_multiplier")
-            steering = self._roll_modifier_future_value(game, player, rates, card)
-            if steering > 0:
-                value += steering
-            elif int(getattr(card, "has_activation_effect", 0) or 0) or int(getattr(card, "has_passive_effect", 0) or 0):
-                value += self.cfg.unparsed_effect_value
+            value += self._domain_effect_value(game, player, rates, card)
             return value
 
         if at == "slay_monster":
