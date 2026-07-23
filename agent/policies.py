@@ -46,6 +46,12 @@ class GreedyConfig:
     # for the most things outright, so a marginal magic > gold > strength.
     magic_flex_premium = 1.12
     gold_flex_premium = 1.05
+    # Optionality: spending your LAST gold forfeits mixed gold+magic payments
+    # (engine requires >=1 real gold), and your last strength forfeits wild-
+    # magic slays (>=1 real strength). Charge a flat VP-equivalent surcharge
+    # on payments that fully drain either, so priors start on splits that
+    # keep one behind; the search overrides when depleting is actually right.
+    last_coin_premium = 0.15
     # Domain-effect valuation knobs (all VP-equivalents or per-own-turn rates)
     denial_factor = 1.5        # taking from an opponent > gaining the same amount
     pay_opponent_factor = 1.3  # paying an opponent < just losing the resources
@@ -438,10 +444,21 @@ class GreedyPolicy:
         value -= rates["g"] * (g_cost or 0) + rates["s"] * (s_cost or 0) + rates["m"] * (m_cost or 0)
         return value
 
+    def _last_coin_penalty(self, player, gold=0, strength=0):
+        pen = 0.0
+        if gold and gold >= int(getattr(player, "gold_score", 0) or 0):
+            pen += self.cfg.last_coin_premium
+        if strength and strength >= int(getattr(player, "strength_score", 0) or 0):
+            pen += self.cfg.last_coin_premium
+        return pen
+
     def _value_standard(self, game, player, rates, move):
         at = move.get("action_type")
         pay = move.get("payment") or {}
         spent = sum(rates[r[0]] * int(pay.get(r) or 0) for r in ("gold", "strength", "magic"))
+        spent += self._last_coin_penalty(
+            player, gold=int(pay.get("gold") or 0), strength=int(pay.get("strength") or 0)
+        )
 
         if at == "take_resource":
             return rates.get((move.get("resource") or "g")[0], 0.0)
@@ -474,7 +491,11 @@ class GreedyPolicy:
                 return 1.0  # events: slaying reveals/clears; mild positive default
             if card is None:
                 return -spent
-            return self._monster_value(
+            # _monster_value charges only the raw resource cost, so the drain
+            # penalty is applied here (this branch never uses `spent`).
+            return -self._last_coin_penalty(
+                player, gold=int(pay.get("gold") or 0), strength=int(pay.get("strength") or 0)
+            ) + self._monster_value(
                 player, rates,
                 int(getattr(card, "vp_reward", 0) or 0), getattr(card, "monster_type", ""),
                 int(getattr(card, "gold_reward", 0) or 0), int(getattr(card, "strength_reward", 0) or 0),
