@@ -3,6 +3,20 @@ import unittest
 from engines.available_actions import enumerate_actions
 
 
+def _standard_action_state(player, citizen_grid=(), domain_grid=(), monster_grid=()):
+  return {
+    "preset": "base",
+    "phase": "action",
+    "actions_remaining": 2,
+    "active_player_id": player["player_id"],
+    "action_required": {"id": player["player_id"], "action": "standard_action"},
+    "player_list": [player],
+    "citizen_grid": list(citizen_grid),
+    "domain_grid": list(domain_grid),
+    "monster_grid": list(monster_grid),
+  }
+
+
 class TestBotLegalMoves(unittest.TestCase):
   def test_standard_action_includes_take_resource(self):
     state = {
@@ -140,6 +154,95 @@ class TestBotLegalMoves(unittest.TestCase):
     }
     moves = enumerate_actions(state, "p1")
     self.assertEqual(moves[0]["action"], "steal_victim 1")
+
+  def test_hire_enumerates_gold_magic_splits(self):
+    # The turn-5 hint bug: 1 gold + 2 magic must see a 3-cost citizen
+    # (magic is wild for gold, with at least 1 real gold in the payment).
+    player = {"player_id": "p1", "gold_score": 1, "strength_score": 0, "magic_score": 2}
+    citizen = [{"citizen_id": 11, "name": "Knight", "gold_cost": 3, "is_accessible": True}]
+    moves = enumerate_actions(_standard_action_state(player, citizen_grid=[citizen]), "p1")
+    hires = [m for m in moves if m.get("action_type") == "hire_citizen"]
+    self.assertEqual(
+      [m["payment"] for m in hires],
+      [{"gold": 1, "strength": 0, "magic": 2}],
+    )
+
+  def test_hire_pure_gold_stays_lead_payment(self):
+    player = {"player_id": "p1", "gold_score": 5, "strength_score": 0, "magic_score": 5}
+    citizen = [{"citizen_id": 11, "name": "Knight", "gold_cost": 3, "is_accessible": True}]
+    moves = enumerate_actions(_standard_action_state(player, citizen_grid=[citizen]), "p1")
+    payments = [m["payment"] for m in moves if m.get("action_type") == "hire_citizen"]
+    self.assertEqual(payments, [
+      {"gold": 3, "strength": 0, "magic": 0},
+      {"gold": 2, "strength": 0, "magic": 1},
+      {"gold": 1, "strength": 0, "magic": 2},
+    ])
+
+  def test_hire_requires_one_real_gold_with_magic(self):
+    # 0 gold + plenty of magic still cannot hire (engine's >=1 gold rule).
+    player = {"player_id": "p1", "gold_score": 0, "strength_score": 0, "magic_score": 5}
+    citizen = [{"citizen_id": 11, "name": "Knight", "gold_cost": 2, "is_accessible": True}]
+    moves = enumerate_actions(_standard_action_state(player, citizen_grid=[citizen]), "p1")
+    self.assertFalse(any(m.get("action_type") == "hire_citizen" for m in moves))
+
+  def test_build_domain_enumerates_gold_magic_splits(self):
+    player = {"player_id": "p1", "gold_score": 2, "strength_score": 0, "magic_score": 3}
+    domain = [{"domain_id": 5, "gold_cost": 4, "is_visible": True, "is_accessible": True}]
+    moves = enumerate_actions(_standard_action_state(player, domain_grid=[domain]), "p1")
+    payments = [m["payment"] for m in moves if m.get("action_type") == "build_domain"]
+    self.assertEqual(payments, [
+      {"gold": 2, "strength": 0, "magic": 2},
+      {"gold": 1, "strength": 0, "magic": 3},
+    ])
+
+  def test_slay_enumerates_wild_magic_splits(self):
+    # Strength 4 monster, player has 2 strength + 3 magic: wild magic covers
+    # the gap, but each payment keeps at least 1 real strength.
+    player = {"player_id": "p1", "gold_score": 0, "strength_score": 2, "magic_score": 3}
+    monster = [{"monster_id": 9, "strength_cost": 4, "magic_cost": 1, "is_accessible": True}]
+    moves = enumerate_actions(_standard_action_state(player, monster_grid=[monster]), "p1")
+    payments = [m["payment"] for m in moves if m.get("action_type") == "slay_monster"]
+    self.assertEqual(payments, [
+      {"gold": 0, "strength": 2, "magic": 3},
+    ])
+
+  def test_slay_wild_needs_one_real_strength(self):
+    player = {"player_id": "p1", "gold_score": 0, "strength_score": 0, "magic_score": 6}
+    monster = [{"monster_id": 9, "strength_cost": 2, "magic_cost": 0, "is_accessible": True}]
+    moves = enumerate_actions(_standard_action_state(player, monster_grid=[monster]), "p1")
+    self.assertFalse(any(m.get("action_type") == "slay_monster" for m in moves))
+
+  def test_slay_max_strength_stays_lead_payment(self):
+    player = {"player_id": "p1", "gold_score": 0, "strength_score": 3, "magic_score": 2}
+    monster = [{"monster_id": 9, "strength_cost": 3, "magic_cost": 0, "is_accessible": True}]
+    moves = enumerate_actions(_standard_action_state(player, monster_grid=[monster]), "p1")
+    payments = [m["payment"] for m in moves if m.get("action_type") == "slay_monster"]
+    self.assertEqual(payments, [
+      {"gold": 0, "strength": 3, "magic": 0},
+      {"gold": 0, "strength": 2, "magic": 1},
+      {"gold": 0, "strength": 1, "magic": 2},
+    ])
+
+  def test_slay_payment_prompt_offers_wild_splits(self):
+    state = {
+      "phase": "action",
+      "action_required": {"id": "p1", "action": "slay_monster_payment"},
+      "pending_required_choice": {
+        "gold_cost": 0,
+        "strength_cost": 3,
+        "magic_cost": 1,
+      },
+      "player_list": [{
+        "player_id": "p1",
+        "gold_score": 0,
+        "strength_score": 1,
+        "magic_score": 4,
+      }],
+    }
+    actions = [m["action"] for m in enumerate_actions(state, "p1")]
+    self.assertEqual(actions[0], "slay_pay 0 3 1")  # printed cost stays first
+    self.assertIn("slay_pay 0 1 3", actions)
+    self.assertEqual(actions[-1], "skip")
 
   def test_domain_prompt_verbs_match_engine_handlers(self):
     cases = (

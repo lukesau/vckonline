@@ -309,7 +309,18 @@ def _enumerate_required_prompt(state, player_id):
         g = int(prc.get("gold_cost") or 0)
         s = int(prc.get("strength_cost") or 0)
         m = int(prc.get("magic_cost") or 0)
+        # The printed-cost payment is always offered (historical behaviour;
+        # the engine rejects it harmlessly when unaffordable), plus any
+        # affordable magic-as-wild splits.
+        emitted = {(g, s, m)}
         moves.append(_act(player_id, f"slay_pay {g} {s} {m}"))
+        me = _player_by_id(state, player_id) or {}
+        for pay in _slay_payments(me, s, m, g):
+            key = (pay["gold"], pay["strength"], pay["magic"])
+            if key in emitted:
+                continue
+            emitted.add(key)
+            moves.append(_act(player_id, f"slay_pay {key[0]} {key[1]} {key[2]}"))
         moves.append(_act(player_id, "skip"))
         return moves
 
@@ -514,13 +525,51 @@ def _owned_same_name_count(player, name):
     return n
 
 
-def _simple_payment(player, gold=0, strength=0, magic=0):
+def _gold_magic_payments(player, cost):
+    """Every exact gold+magic payment for a hire/build gold cost.
+
+    Magic is wild for gold, but the engine requires at least 1 real gold in
+    any nonzero payment that uses magic (`_validate_hire_or_domain_gold_payment`).
+    Pure gold comes first so the historical single payment stays the lead move.
+    """
+    g = int(player.get("gold_score") or 0)
+    m = int(player.get("magic_score") or 0)
+    cost = int(cost or 0)
+    if cost <= 0:
+        return [{"gold": 0, "strength": 0, "magic": 0}]
+    pays = []
+    for gp in range(min(g, cost), 0, -1):
+        mp = cost - gp
+        if mp > m:
+            break  # mp only grows as gp shrinks
+        pays.append({"gold": gp, "strength": 0, "magic": mp})
+    return pays
+
+
+def _slay_payments(player, strength, magic, gold):
+    """Every exact payment for a slay cost.
+
+    Magic beyond the printed magic cost is wild for strength, but the engine
+    requires at least 1 real strength in any payment that substitutes on a
+    nonzero strength cost (`_validate_monster_slay_payment`). Gold and the
+    printed magic portion have no substitute. Max-strength comes first so the
+    historical single payment stays the lead move.
+    """
     g = int(player.get("gold_score") or 0)
     s = int(player.get("strength_score") or 0)
     m = int(player.get("magic_score") or 0)
-    if gold > g or strength > s or magic > m:
-        return None
-    return {"gold": gold, "strength": strength, "magic": magic}
+    strength, magic, gold = int(strength or 0), int(magic or 0), int(gold or 0)
+    if gold > g or magic > m:
+        return []
+    if strength <= 0:
+        return [{"gold": gold, "strength": 0, "magic": magic}]
+    pays = []
+    for sp in range(min(s, strength), 0, -1):
+        wild = strength - sp
+        if magic + wild > m:
+            break  # wild only grows as sp shrinks
+        pays.append({"gold": gold, "strength": sp, "magic": magic + wild})
+    return pays
 
 
 def _enumerate_standard_actions(state, player_id):
@@ -563,8 +612,7 @@ def _enumerate_standard_actions(state, player_id):
             cost = int(top["effective_hire_cost"])
         else:
             cost = int(top.get("gold_cost") or 0) + _owned_same_name_count(me, top.get("name"))
-        pay = _simple_payment(me, gold=cost)
-        if pay:
+        for pay in _gold_magic_payments(me, cost):
             moves.append({
                 "player_id": player_id,
                 "action_type": "hire_citizen",
@@ -582,8 +630,7 @@ def _enumerate_standard_actions(state, player_id):
             cost = int(top["effective_build_cost"])
         else:
             cost = int(top.get("gold_cost") or 0)
-        pay = _simple_payment(me, gold=cost)
-        if pay:
+        for pay in _gold_magic_payments(me, cost):
             moves.append({
                 "player_id": player_id,
                 "action_type": "build_domain",
@@ -607,8 +654,7 @@ def _enumerate_standard_actions(state, player_id):
         if top.get("event_id") is not None:
             eid = top.get("event_id")
             strength, magic, gold = _slay_costs(top)
-            pay = _simple_payment(me, gold=gold, strength=strength, magic=magic)
-            if pay:
+            for pay in _slay_payments(me, strength, magic, gold):
                 moves.append({
                     "player_id": player_id,
                     "action_type": "slay_monster",
@@ -618,8 +664,7 @@ def _enumerate_standard_actions(state, player_id):
         elif top.get("monster_id") is not None:
             mid = top.get("monster_id")
             strength, magic, gold = _slay_costs(top)
-            pay = _simple_payment(me, gold=gold, strength=strength, magic=magic)
-            if pay:
+            for pay in _slay_payments(me, strength, magic, gold):
                 moves.append({
                     "player_id": player_id,
                     "action_type": "slay_monster",
