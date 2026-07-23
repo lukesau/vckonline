@@ -28,6 +28,199 @@ def _payment_suffix(move):
     return " (" + " ".join(parts) + ")"
 
 
+# ---- prompt-answer naming --------------------------------------------------
+#
+# Prompt moves are wire verbs like "choose 2" or a bare owned-citizen index;
+# with the live game we can resolve what the number refers to and say
+# "choose 2 gold" / "banish Peasant" instead. Every resolver degrades to the
+# raw verb string when the game context is missing or doesn't match.
+
+def _player_by_id(game, pid):
+    for p in getattr(game, "player_list", None) or []:
+        if str(getattr(p, "player_id", "")) == str(pid):
+            return p
+    return None
+
+
+def _res_word(token):
+    token = (token or "").strip().lower()
+    if not token:
+        return ""
+    return RES_LABELS.get(token[0], token)
+
+
+def _card_name(card, fallback):
+    name = getattr(card, "name", None) if card is not None else None
+    return str(name) if name else fallback
+
+
+def _option_label(opt):
+    if isinstance(opt, dict):
+        for k in ("name", "victim_name", "player_name", "monster_name", "label", "text"):
+            v = opt.get(k)
+            if v:
+                return str(v)
+        if opt.get("resource"):
+            amount = opt.get("amount")
+            res = _res_word(str(opt["resource"]))
+            return f"{amount} {res}" if amount else res
+        return None
+    if isinstance(opt, (list, tuple)) and len(opt) == 2:
+        return f"{opt[1]} {_res_word(str(opt[0]))}"
+    if opt is None:
+        return None
+    return str(opt)
+
+
+def _pay_words(gold, strength, magic):
+    parts = []
+    if gold:
+        parts.append(f"{gold} gold")
+    if strength:
+        parts.append(f"{strength} strength")
+    if magic:
+        parts.append(f"{magic} magic")
+    return " + ".join(parts) if parts else "nothing"
+
+
+_INDEXED_VERBS = {
+    "choose": "choose",
+    "build_domain_pick": "build",
+    "grant_domain": "choose",
+    "choose_monster": "choose",
+    "choose_monster_slay": "slay",
+    "choose_player": "choose",
+    "choose_owned_card": "choose",
+}
+
+
+def _describe_action_string(action, game, mover_id, prc=None):
+    """Human phrasing for a prompt verb string, or None to keep the raw form."""
+    if game is None or not action:
+        return None
+    if prc is None:
+        prc = getattr(game, "pending_required_choice", None)
+    prc = prc if isinstance(prc, dict) else {}
+    req = getattr(game, "action_required", None) or {}
+    ctx = str(req.get("action") or "").strip() if isinstance(req, dict) else ""
+    toks = action.split()
+    verb = toks[0]
+
+    if action in ("accept", "skip") and ctx and ctx != "standard_action":
+        return f"{action} ({ctx.replace('_', ' ')})"
+    if verb == "skip_harvest_exchange":
+        return "skip exchange"
+    if verb == "confirm_harvest_exchange":
+        return "confirm exchange"
+    if verb in ("wild_cost_resource", "relic_pay") and len(toks) == 2:
+        return f"pay 1 {_res_word(toks[1])}"
+    if verb in ("wild_gain_resource", "relic_gain") and len(toks) == 2:
+        return f"gain 1 {_res_word(toks[1])}"
+    if verb == "exekratys_offering" and len(toks) == 2:
+        return f"offer {_res_word(toks[1])}"
+    if verb == "pay" and len(toks) == 3:
+        target = _player_by_id(game, toks[2])
+        target_name = getattr(target, "name", None) or f"player {toks[2]}"
+        return f"pay 1 {_res_word(toks[1])} to {target_name}"
+    if verb == "slay_pay" and len(toks) >= 4:
+        try:
+            return f"slay: pay {_pay_words(int(toks[1]), int(toks[2]), int(toks[3]))}"
+        except ValueError:
+            return None
+    if verb == "build_pay" and len(toks) >= 3:
+        try:
+            return f"build: pay {_pay_words(int(toks[1]), 0, int(toks[2]))}"
+        except ValueError:
+            return None
+    if verb == "steal_victim" and len(toks) == 2 and toks[1].isdigit():
+        opts = prc.get("victim_options") or []
+        idx = int(toks[1]) - 1
+        label = _option_label(opts[idx]) if 0 <= idx < len(opts) else None
+        return f"steal from {label}" if label else None
+    if verb == "steal_resource" and len(toks) == 2 and toks[1].isdigit():
+        opts = prc.get("resource_options") or []
+        idx = int(toks[1]) - 1
+        label = _option_label(opts[idx]) if 0 <= idx < len(opts) else None
+        return f"steal {label}" if label else None
+    if verb in _INDEXED_VERBS and len(toks) == 2 and toks[1].isdigit():
+        idx = int(toks[1]) - 1
+        pool = prc.get("options")
+        if not pool and prc.get("choices"):
+            pool = prc.get("choices")
+        if isinstance(pool, list) and 0 <= idx < len(pool):
+            label = _option_label(pool[idx])
+            if label:
+                return f"{_INDEXED_VERBS[verb]} {label}"
+        return None
+    if verb == "place" and len(toks) == 3:
+        return f"place monster on {toks[1]} stack {toks[2]}"
+    if action.isdigit():
+        n = int(action)
+        prompt_verb = str(prc.get("verb") or "")
+        if prompt_verb == "banish_center_citizen":
+            grid = getattr(game, "citizen_grid", None) or []
+            card = grid[n][-1] if 0 <= n < len(grid) and grid[n] else None
+            return f"banish {_card_name(card, f'center stack {n}')}"
+        if prompt_verb == "banish_owned_citizen":
+            mover = _player_by_id(game, mover_id)
+            owned = getattr(mover, "owned_citizens", None) or []
+            card = owned[n] if 0 <= n < len(owned) else None
+            return f"banish {_card_name(card, f'citizen #{n}')}"
+        for opt in prc.get("options") or []:
+            if isinstance(opt, dict) and (opt.get("stack_index") == n or opt.get("index") == n):
+                label = _option_label(opt)
+                if label:
+                    return f"choose {label}"
+        return None
+    return None
+
+
+def _harvest_prompt_prc(game, mover_id, prompt_id):
+    ca = getattr(game, "concurrent_action", None) or {}
+    prompts = ((ca.get("data") or {}).get("prompts") or {})
+    mine = prompts.get(mover_id) or prompts.get(str(mover_id)) or []
+    if not isinstance(mine, list):
+        mine = [mine]
+    for prompt in mine:
+        if isinstance(prompt, dict) and str(prompt.get("id")) == str(prompt_id):
+            return prompt.get("pending_required_choice") or {}
+    return {}
+
+
+def _describe_concurrent(kind, body, game, mover_id):
+    """Human phrasing for a concurrent-action response, or None."""
+    if game is None or not body:
+        return None
+    mover = _player_by_id(game, mover_id)
+    if kind == "choose_duke":
+        for d in getattr(mover, "owned_dukes", None) or []:
+            if str(getattr(d, "duke_id", "")) == body:
+                return f"choose duke {_card_name(d, body)}"
+        return None
+    if kind == "choose_relic":
+        for r in getattr(mover, "owned_relics", None) or []:
+            if str(getattr(r, "relic_id", "")) == body:
+                return f"choose relic {_card_name(r, body)}"
+        return None
+    if kind in ("flip_one_citizen", "event_banish_citizen_for_reward") and body.isdigit():
+        owned = getattr(mover, "owned_citizens", None) or []
+        i = int(body)
+        card = owned[i] if 0 <= i < len(owned) else None
+        word = "flip" if kind == "flip_one_citizen" else "banish"
+        return f"{word} {_card_name(card, f'citizen #{i}')}"
+    if kind == "harvest_choices" and "|" in body:
+        prompt_id, sub = body.split("|", 1)
+        sub = sub.strip()
+        if sub in ("gold", "strength", "magic"):
+            return f"take {sub}"
+        prc = _harvest_prompt_prc(game, mover_id, prompt_id)
+        described = _describe_action_string(sub, game, mover_id, prc=prc)
+        return described or sub.replace("_", " ")
+    if kind == "event_self_convert" and body in ("g", "s", "m"):
+        return f"pay 1 {_res_word(body)}"
+    return None
+
+
 def move_label(move, game=None):
     """Short label for logs: action + target card or prompt text."""
     if not move:
@@ -66,6 +259,9 @@ def move_label(move, game=None):
 
     if at == "act_on_required_action":
         action = (move.get("action") or "").strip()
+        described = _describe_action_string(action, game, move.get("player_id"))
+        if described:
+            return described
         if len(action) > 48:
             action = action[:45] + "..."
         return f"prompt: {action or '(empty)'}"
@@ -73,6 +269,9 @@ def move_label(move, game=None):
     if at == "submit_concurrent_action":
         kind = move.get("kind") or "concurrent"
         body = (move.get("action") or move.get("response") or "").strip()
+        described = _describe_concurrent(kind, body, game, move.get("player_id"))
+        if described:
+            return described
         if len(body) > 40:
             body = body[:37] + "..."
         return f"{kind}: {body or '(empty)'}"
