@@ -166,7 +166,9 @@ class BotTurnDriverTests(unittest.TestCase):
         from agent import bot_players
 
         original = bot_players.HARD_BOT_ITERATIONS
+        original_workers = bot_players.HARD_BOT_WORKERS
         bot_players.HARD_BOT_ITERATIONS = 8  # keep the unit test fast
+        bot_players.HARD_BOT_WORKERS = 1  # no process pool in unit tests
         try:
             game_id, game, human_id = self._start_game_with_bot("hard")
             log_before = len(game.game_log or [])
@@ -179,6 +181,7 @@ class BotTurnDriverTests(unittest.TestCase):
             )
         finally:
             bot_players.HARD_BOT_ITERATIONS = original
+            bot_players.HARD_BOT_WORKERS = original_workers
 
 
 if __name__ == "__main__":

@@ -78,12 +78,22 @@ def play_policy_game(policies, seed=None, max_steps=20000):
     return game, steps
 
 
-def make_policy(name, args):
+def make_policy(name, args, role="p1"):
+    """Build the policy for a side. `role` is "p1"/"p2" per the CLI arguments
+    (NOT the seat — seats swap per game); the --iterations2/--workers2
+    overrides follow the p2 role so same-name matchups (self-play A/B) work."""
     from agent.policies import GreedyPolicy, RandomPolicy
 
     iterations = args.iterations
-    if getattr(args, "iterations2", None) is not None and name == args.p2:
-        iterations = args.iterations2
+    workers = args.workers
+    parallel_mode = getattr(args, "parallel_mode", "root") or "root"
+    if role == "p2":
+        if getattr(args, "iterations2", None) is not None:
+            iterations = args.iterations2
+        if getattr(args, "workers2", None) is not None:
+            workers = args.workers2
+        if getattr(args, "parallel_mode2", None) is not None:
+            parallel_mode = args.parallel_mode2
 
     if name == "random":
         return RandomPolicy()
@@ -92,12 +102,14 @@ def make_policy(name, args):
     if name == "mcts":
         from agent.mcts import MCTSPolicy
 
-        return MCTSPolicy(iterations=iterations, workers=args.workers)
+        return MCTSPolicy(iterations=iterations, workers=workers,
+                          parallel_mode=parallel_mode)
     if name == "mcts-nn":
         from agent.mcts import MCTSPolicy
         from agent.value_net import DEFAULT_MODEL_PATH
 
-        policy = MCTSPolicy(iterations=iterations, workers=args.workers,
+        policy = MCTSPolicy(iterations=iterations, workers=workers,
+                            parallel_mode=parallel_mode,
                             value_path=DEFAULT_MODEL_PATH)
         policy.name = "mcts-nn"
         return policy
@@ -119,22 +131,32 @@ def main():
         default=1,
         help="MCTS root-parallel worker processes (1 = single-process)",
     )
+    parser.add_argument("--workers2", type=int, default=None,
+                        help="override workers for --p2 (config A/B comparisons)")
+    parser.add_argument("--parallel-mode", default="root", choices=("root", "halving"),
+                        help="how workers spend the budget (see MCTSPolicy)")
+    parser.add_argument("--parallel-mode2", default=None, choices=("root", "halving"),
+                        help="override parallel mode for --p2")
     parser.add_argument("--swap-seats", action="store_true", default=True)
     args = parser.parse_args()
 
-    wins = {args.p1: 0, args.p2: 0}
+    label1 = args.p1
+    label2 = args.p2 if args.p2 != args.p1 else f"{args.p2}#2"
+    sides = ((args.p1, "p1", label1), (args.p2, "p2", label2))
+
+    wins = {label1: 0, label2: 0}
     ties = 0
-    vp_sum = {args.p1: 0, args.p2: 0}
+    vp_sum = {label1: 0, label2: 0}
     unfinished = 0
     start = time.perf_counter()
     for i in range(args.games):
         seed = args.seed + i
-        names = (args.p1, args.p2) if (not args.swap_seats or i % 2 == 0) else (args.p2, args.p1)
+        order = sides if (not args.swap_seats or i % 2 == 0) else sides[::-1]
         policies = {
-            "p1": make_policy(names[0], args),
-            "p2": make_policy(names[1], args),
+            "p1": make_policy(order[0][0], args, role=order[0][1]),
+            "p2": make_policy(order[1][0], args, role=order[1][1]),
         }
-        name_by_pid = {"p1": names[0], "p2": names[1]}
+        name_by_pid = {"p1": order[0][2], "p2": order[1][2]}
         try:
             game, steps = play_policy_game(policies, seed=seed)
         finally:
@@ -165,8 +187,8 @@ def main():
         )
     elapsed = time.perf_counter() - start
     finished = args.games - unfinished
-    print(f"\n=== {args.p1} vs {args.p2}: {args.games} games in {elapsed:.0f}s ===")
-    for name in (args.p1, args.p2):
+    print(f"\n=== {label1} vs {label2}: {args.games} games in {elapsed:.0f}s ===")
+    for name in (label1, label2):
         if finished:
             print(
                 f"  {name:8} wins={wins[name]:3} ({100 * wins[name] / finished:.0f}%) "

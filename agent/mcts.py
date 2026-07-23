@@ -52,6 +52,14 @@ def _move_key(move):
     return move_key(move)
 
 
+def _effect_key(move):
+    """Move identity ignoring the payment split, so alternative payments for
+    the same purchase count as one effect when pruning to top_k."""
+    if "payment" not in (move or {}):
+        return move_key(move)
+    return move_key({k: v for k, v in move.items() if k != "payment"})
+
+
 def _biased_random_move(moves):
     builders = [
         m for m in moves
@@ -90,7 +98,7 @@ class MCTSPolicy:
 
     def __init__(self, iterations=100, exploration=1.5, rollout_cap=250, descent_cap=400,
                  rollout_epsilon=0.15, top_k=12, prior_temperature=2.0, determinize=True,
-                 workers=1, value_path=None):
+                 workers=1, value_path=None, parallel_mode="root"):
         self.iterations = iterations
         self.exploration = exploration
         self.rollout_cap = rollout_cap
@@ -100,6 +108,14 @@ class MCTSPolicy:
         self.prior_temperature = prior_temperature
         self.determinize = determinize
         self.workers = max(1, int(workers))
+        # How to spend `workers`: "root" = independent full trees merged by
+        # visits; "halving" = sequential halving (phase 1 partitions the root
+        # moves across workers for deep non-redundant screening, phase 2 gives
+        # every worker the top finalists for parallel deep verification).
+        # Measured: at equal budget, root-splitting dilutes depth (800x8 lost
+        # 6-14 to 800x1) while depth itself pays (1000x1 beat 400x1 14-6);
+        # halving exists to buy that depth back at parallel wall-clock.
+        self.parallel_mode = parallel_mode if parallel_mode in ("root", "halving") else "root"
         self._greedy = GreedyPolicy()
         self.last_decision = None
         self._pool = None
@@ -189,16 +205,29 @@ class MCTSPolicy:
 
     def _compute_priors(self, sim, pid, moves_by_key):
         """Softmax of greedy VP-values -> prior move probabilities; also prunes
-        to the top_k moves so search budget concentrates where it matters."""
+        to the top_k moves so search budget concentrates where it matters.
+
+        Pruning counts distinct EFFECTS, not raw moves: alternative payment
+        splits of the same purchase share one top_k slot (all kept splits stay
+        in the prior with their own weight), so enumerating gold+magic splits
+        cannot crowd genuinely different moves out of the search."""
         keys = list(moves_by_key)
         moves = [moves_by_key[k] for k in keys]
         values = self._greedy.move_values(sim, pid, moves)
         if values is None:
             p = 1.0 / len(keys)
             return {k: p for k in keys}
-        ranked = sorted(zip(keys, values), key=lambda kv: -kv[1])[: self.top_k]
-        top = ranked[0][1]
-        weights = {k: math.exp((v - top) / self.prior_temperature) for k, v in ranked}
+        ranked = sorted(zip(keys, values), key=lambda kv: -kv[1])
+        kept, kept_groups = [], set()
+        for k, v in ranked:
+            group = _effect_key(moves_by_key[k])
+            if group not in kept_groups:
+                if len(kept_groups) >= self.top_k:
+                    continue
+                kept_groups.add(group)
+            kept.append((k, v))
+        top = kept[0][1]
+        weights = {k: math.exp((v - top) / self.prior_temperature) for k, v in kept}
         total = sum(weights.values())
         return {k: w / total for k, w in weights.items()}
 
@@ -452,6 +481,98 @@ class MCTSPolicy:
         result = self._parallel_root_search(game, player_id, moves)
         return {key: entry["visits"] for key, entry in result["by_key"].items()}
 
+    # ---- sequential halving (partitioned parallel search) ---------------
+
+    @staticmethod
+    def _partition_by_prior(keys, priors, buckets):
+        """Disjoint prior-balanced buckets: highest-prior key goes to the
+        lightest bucket, so strong candidates spread across workers instead
+        of piling into one."""
+        buckets = max(1, min(int(buckets), len(keys)))
+        out = [[] for _ in range(buckets)]
+        loads = [0.0] * buckets
+        for k in sorted(keys, key=lambda k: -priors.get(k, 0.0)):
+            i = loads.index(min(loads))
+            out[i].append(k)
+            loads[i] += priors.get(k, 0.0)
+        return [b for b in out if b]
+
+    def _halving_root_search(self, game, player_id, moves, finalists_cap=4):
+        """Two-phase partitioned search (see __init__ for rationale).
+
+        Phase 1 spends half the budget with each worker searching a DISJOINT
+        prior-balanced subset of the (top_k-pruned) root moves — no cross-
+        worker redundancy. Phase 2 spends the rest with every worker deep-
+        verifying the same top-Q finalists under different determinization
+        seeds. Final stats: phase sums (finalists get both phases' visits, so
+        `chosen = max visits` still lands on a finalist)."""
+        from game_serialization import serialize_game_to_save_dict
+
+        root_moves_by_key = {_move_key(m): m for m in moves}
+        priors = self._compute_priors(game, player_id, root_moves_by_key)
+        kept = [k for k in root_moves_by_key if k in priors]
+        if not kept:
+            return self._build_search_result({}, priors, root_moves_by_key, 0)
+
+        pool = self._get_pool()
+        save_dict = serialize_game_to_save_dict(game)
+        cfg = self._config_for_worker()
+        cfg.pop("iterations", None)
+        base_seed = random.randrange(1 << 30)
+        phase_budget = max(1, self.iterations // 2)
+
+        # Every worker runs the same per-worker budget so phase-1 wall-clock
+        # matches root mode. Workers cycle over the buckets: when there are
+        # fewer buckets than workers, same-bucket workers differ by seed and
+        # their stats merge (bounded redundancy, only where the root is
+        # narrow and redundancy is unavoidable anyway).
+        buckets = self._partition_by_prior(kept, priors, self.workers)
+        per_worker_1 = max(1, phase_budget // self.workers)
+        payloads = [
+            (save_dict, player_id,
+             [root_moves_by_key[k] for k in buckets[i % len(buckets)]],
+             per_worker_1, cfg, base_seed + i)
+            for i in range(self.workers)
+        ]
+        phase1 = {}
+        for partial in pool.map(_parallel_worker, payloads):
+            for key, entry in partial.get("by_key", {}).items():
+                if key not in root_moves_by_key:
+                    continue
+                bucket = phase1.setdefault(key, {"visits": 0, "value": 0.0})
+                bucket["visits"] += int(entry["visits"])
+                bucket["value"] += float(entry["value"])
+
+        def q_of(entry):
+            v = entry["visits"]
+            return entry["value"] / v if v else 0.5
+
+        finalists = sorted(phase1, key=lambda k: -q_of(phase1[k]))
+        finalists = finalists[: max(2, min(finalists_cap, len(finalists)))]
+        finalist_moves = [root_moves_by_key[k] for k in finalists]
+
+        per_worker_2 = max(1, (self.iterations - phase_budget) // self.workers)
+        payloads = [
+            (save_dict, player_id, finalist_moves, per_worker_2, cfg,
+             base_seed + 7919 + i)
+            for i in range(self.workers)
+        ]
+        by_key = {
+            k: {"move": root_moves_by_key[k], "key": k,
+                "visits": int(e["visits"]), "value": float(e["value"])}
+            for k, e in phase1.items()
+        }
+        for partial in pool.map(_parallel_worker, payloads):
+            for key, entry in partial.get("by_key", {}).items():
+                if key not in root_moves_by_key:
+                    continue
+                bucket = by_key.setdefault(
+                    key, {"move": root_moves_by_key[key], "key": key, "visits": 0, "value": 0.0}
+                )
+                bucket["visits"] += int(entry["visits"])
+                bucket["value"] += float(entry["value"])
+        return self._build_search_result(by_key, priors, root_moves_by_key, self.iterations)
+
     def analyze(self, game, player_id, moves):
         """Run search and record ranked root candidates on ``last_decision``."""
         if not moves:
@@ -466,7 +587,9 @@ class MCTSPolicy:
             }
             return self.last_decision
 
-        if self.workers > 1:
+        if self.workers > 1 and self.parallel_mode == "halving":
+            search = self._halving_root_search(game, player_id, moves)
+        elif self.workers > 1:
             search = self._parallel_root_search(game, player_id, moves)
         else:
             search = self._root_search(game, player_id, moves, self.iterations)

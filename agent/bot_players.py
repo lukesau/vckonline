@@ -10,6 +10,7 @@ executor using a cloned game.
 
 import contextlib
 import io
+import os
 
 from agent.headless import acting_player_ids, apply_move, legal_moves
 from agent.play_random import _fingerprint
@@ -20,10 +21,25 @@ BOT_LEVELS = {
     "hard": "Hard Bot",
 }
 
-# Hard-bot search budget. 400 iterations ≈ 2-4s per decision — fine for a
-# turn-based opponent (players reported 200 felt too fast), and the driver
-# computes on an executor against a clone so the server stays responsive.
-HARD_BOT_ITERATIONS = 400
+
+def env_int(name, default):
+    """Deploy-tunable integer knob (invalid/unset values fall back silently)."""
+    try:
+        return int(os.environ.get(name, "") or default)
+    except (TypeError, ValueError):
+        return default
+
+
+# Hard-bot search budget: one deep tree. Head-to-head A/Bs (20 games each)
+# showed 1000x1 beats 400x1 14-6, while every parallel split tried lost or
+# tied at equal-or-larger budgets (800x8 lost 6-14 to 800x1; 4000x8 root and
+# sequential-halving both lost 8-12 to 1000x1) — merged independent trees
+# trade away the depth that actually pays. ~8.5s/decision, play-tested as
+# acceptable pacing. Iterations are SPLIT across `workers` when workers > 1
+# (see MCTSPolicy.parallel_mode); all three knobs are deploy-tunable.
+HARD_BOT_ITERATIONS = env_int("VCKO_HARD_BOT_ITERATIONS", 1000)
+HARD_BOT_WORKERS = env_int("VCKO_HARD_BOT_WORKERS", 1)
+HARD_BOT_MODE = (os.environ.get("VCKO_HARD_BOT_MODE") or "root").strip().lower()
 
 _SINK = io.StringIO()
 
@@ -39,7 +55,12 @@ def make_policy(level):
         from agent.mcts import MCTSPolicy
         from agent.value_net import DEFAULT_MODEL_PATH
 
-        return MCTSPolicy(iterations=HARD_BOT_ITERATIONS, value_path=DEFAULT_MODEL_PATH)
+        return MCTSPolicy(
+            iterations=HARD_BOT_ITERATIONS,
+            workers=HARD_BOT_WORKERS,
+            parallel_mode=HARD_BOT_MODE,
+            value_path=DEFAULT_MODEL_PATH,
+        )
     raise ValueError(f"unknown bot level {level!r}")
 
 

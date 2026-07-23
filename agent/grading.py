@@ -20,9 +20,12 @@ import io
 
 from agent.move_summary import move_label
 
+from agent.bot_players import env_int
+
 GREAT_THRESHOLD = 0.02
 FINE_THRESHOLD = 0.08
-ANALYSIS_ITERATIONS = 300
+ANALYSIS_ITERATIONS = env_int("VCKO_GRADING_ITERATIONS", 300)
+ANALYSIS_WORKERS = env_int("VCKO_GRADING_WORKERS", 1)
 
 CATEGORIES = ("perfect", "great", "fine", "blunder", "unrated")
 
@@ -33,7 +36,11 @@ def analysis_policy():
     from agent.mcts import MCTSPolicy
     from agent.value_net import DEFAULT_MODEL_PATH
 
-    return MCTSPolicy(iterations=ANALYSIS_ITERATIONS, value_path=DEFAULT_MODEL_PATH)
+    return MCTSPolicy(
+        iterations=ANALYSIS_ITERATIONS,
+        workers=ANALYSIS_WORKERS,
+        value_path=DEFAULT_MODEL_PATH,
+    )
 
 
 def normalize_move(move):
