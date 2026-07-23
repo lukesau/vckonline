@@ -25,3 +25,6 @@ websockets>=13.0
 # Image processing (used by split_domains.py and similar scripts)
 Pillow>=10.0.0
 
+# AI opponents / hints / move grading (agent package: value net, features)
+numpy>=1.26.0
+
