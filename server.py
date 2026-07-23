@@ -417,6 +417,7 @@ def _serialize_lobby(lb: Lobby):
         ),
         "training_mode": bool(getattr(lb, "training_mode", False)),
         "move_analysis": bool(getattr(lb, "move_analysis", False)),
+        "hints_enabled": bool(getattr(lb, "hints_enabled", True)),
         "members": [_serialize_member(m) for m in lb.members],
     }
 
@@ -482,6 +483,7 @@ def _maybe_start_lobby_game(lb: Lobby):
 
     new_game.training_mode = bool(getattr(lb, "training_mode", False))
     new_game.move_analysis = bool(getattr(lb, "move_analysis", False))
+    new_game.hints_enabled = bool(getattr(lb, "hints_enabled", True))
     if new_game.training_mode or new_game.move_analysis:
         _analysis_state[new_game_id] = {"tallies": {}, "feedback": {}}
 
@@ -1439,6 +1441,7 @@ async def _finish_draft(lobby_id: str):
             duke_select_count=int(getattr(lb, "duke_select_count", 2)),
         )
         new_game = Game(game_state)
+        new_game.hints_enabled = bool(getattr(lb, "hints_enabled", True))
         _touch_game_audience(new_game)
         while new_game.advance_tick():
             if getattr(new_game, "phase", None) == "action":
@@ -1481,6 +1484,9 @@ class CreateLobbyRequest(BaseModel):
     training_mode: Optional[bool] = False
     # Move analysis: end-game move-quality summary only (no live feedback).
     move_analysis: Optional[bool] = False
+    # In-game hint button (Hard-bot recommendation). On by default; lobby
+    # creators can turn it off for games where hints shouldn't be available.
+    hints_enabled: Optional[bool] = True
 
 
 class JoinLobbyRequest(BaseModel):
@@ -1681,6 +1687,7 @@ async def create_lobby(request: CreateLobbyRequest):
     lb.created_at = time.time()
     lb.training_mode = bool(request.training_mode)
     lb.move_analysis = bool(request.move_analysis)
+    lb.hints_enabled = request.hints_enabled is not False  # unset -> enabled
     lb.members.append(member)
     if bot_levels:
         from agent.bot_players import BOT_LEVELS
@@ -2306,9 +2313,10 @@ def _serialize_game_for_player(game, viewer_player_id: Optional[str]):
         except Exception:
             state["legal_moves"] = []
 
-    # Training mode / move analysis surfaces
+    # Training mode / move analysis / hint surfaces
     state["training_mode"] = bool(getattr(game, "training_mode", False))
     state["move_analysis"] = bool(getattr(game, "move_analysis", False))
+    state["hints_enabled"] = bool(getattr(game, "hints_enabled", True))
     astate = _analysis_state.get(getattr(game, "game_id", "") or "")
     if astate:
         if viewer_player_id and state["training_mode"]:
@@ -2452,6 +2460,8 @@ async def get_game_hint(game_id: str, player_id: str):
     game = games.get(game_id)
     if not game:
         return game_not_found_json()
+    if not getattr(game, "hints_enabled", True):
+        raise HTTPException(status_code=403, detail="Hints are disabled for this game")
     if not _player_in_game(game, player_id):
         raise HTTPException(status_code=403, detail="Not a player in this game")
     from agent.hints import player_pending_moves

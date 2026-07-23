@@ -94,6 +94,35 @@ class HintEndpointTests(unittest.TestCase):
         with self.assertRaises(Exception):
             asyncio.run(server.get_game_hint(game_id, "not-a-player"))
 
+    def test_hints_disabled_lobby_option(self):
+        from fastapi import HTTPException
+
+        async def _go():
+            a = await server.create_lobby(CreateLobbyRequest(
+                name="Alice", preset="base", min_players=2, hints_enabled=False,
+            ))
+            from server import JoinLobbyRequest
+
+            b = await server.join_lobby(JoinLobbyRequest(name="Bob", lobby_id=a["lobby_id"]))
+            await server.set_ready(ReadyRequest(player_id=a["player_id"]))
+            await server.set_ready(ReadyRequest(player_id=b["player_id"]))
+            return a["player_id"]
+        pid_a = asyncio.run(_go())
+        game_id, game = next(iter(server.games.items()))
+        self.assertFalse(game.hints_enabled)
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(server.get_game_hint(game_id, pid_a))
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_hints_enabled_by_default_and_in_state_payload(self):
+        game_id, game, pid_a, pid_b = self._start_two_human_game()
+        self.assertTrue(getattr(game, "hints_enabled", None))
+        state = server._serialize_game_for_player(game, pid_a)
+        self.assertTrue(state["hints_enabled"])
+        game.hints_enabled = False
+        state = server._serialize_game_for_player(game, pid_a)
+        self.assertFalse(state["hints_enabled"])
+
     def test_hint_cache_reused_for_same_state(self):
         from agent.hints import player_pending_moves
 

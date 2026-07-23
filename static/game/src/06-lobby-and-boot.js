@@ -1415,6 +1415,7 @@ function initLobbyModal() {
   const createBotsWarning = document.getElementById('lobby-create-bots-warning');
   const createTrainingCheck = document.getElementById('lobby-create-training-mode');
   const createAnalysisCheck = document.getElementById('lobby-create-move-analysis');
+  const createHintsCheck = document.getElementById('lobby-create-hints');
   const lobbySheet = overlay ? overlay.querySelector('.lobby-sheet') : null;
   const waitMetaEl = document.getElementById('lobby-wait-meta');
   const presetSelect = document.getElementById('lobby-preset-select');
@@ -2131,6 +2132,7 @@ function initLobbyModal() {
           bots,
           training_mode: !!(createTrainingCheck && createTrainingCheck.checked),
           move_analysis: !!(createAnalysisCheck && createAnalysisCheck.checked),
+          hints_enabled: !createHintsCheck || !!createHintsCheck.checked,
         }),
       });
       const data = await res.json().catch(() => ({}));

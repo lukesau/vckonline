@@ -155,7 +155,7 @@ function ensureHintElements() {
 
 function syncHintControl(state) {
   ensureHintElements();
-  const show = viewerOwesDecision(state);
+  const show = viewerOwesDecision(state) && state?.hints_enabled !== false;
   hintBtnEl.hidden = !show || hintBusy;
   // A hint describes one specific decision point; drop it once the game moved.
   if (!show || (hintShownForKey && hintShownForKey !== hintStateKey(state))) {
