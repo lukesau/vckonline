@@ -51,10 +51,10 @@ HARD_BOT_ITERATIONS = env_int("VCKO_HARD_BOT_ITERATIONS", 1000)
 HARD_BOT_WORKERS = env_int("VCKO_HARD_BOT_WORKERS", 1)
 HARD_BOT_MODE = (os.environ.get("VCKO_HARD_BOT_MODE") or "root").strip().lower()
 # Turn-aware root priors (see MCTSPolicy.turn_priors). A/B'd flat for play
-# strength at 100 iters (21-18-1 over 40 games) so the bot defaults OFF;
-# hints/grading default ON — their candidate rankings are user-facing and
-# the pair-lookahead demonstrably surfaces two-move combos there.
-HARD_BOT_TURN_PRIORS = env_flag("VCKO_HARD_BOT_TURN_PRIORS", False)
+# strength at 100 iters (21-18-1 over 40 games); ON for the bot at the
+# user's request to judge combo play by feel — flip via the env var (or
+# revert this default) if it doesn't hold up at the table.
+HARD_BOT_TURN_PRIORS = env_flag("VCKO_HARD_BOT_TURN_PRIORS", True)
 
 _SINK = io.StringIO()
 
