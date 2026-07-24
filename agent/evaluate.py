@@ -87,6 +87,7 @@ def make_policy(name, args, role="p1"):
     iterations = args.iterations
     workers = args.workers
     parallel_mode = getattr(args, "parallel_mode", "root") or "root"
+    value_path = getattr(args, "value_path", None)
     if role == "p2":
         if getattr(args, "iterations2", None) is not None:
             iterations = args.iterations2
@@ -94,6 +95,8 @@ def make_policy(name, args, role="p1"):
             workers = args.workers2
         if getattr(args, "parallel_mode2", None) is not None:
             parallel_mode = args.parallel_mode2
+        if getattr(args, "value_path2", None) is not None:
+            value_path = args.value_path2
 
     if name == "random":
         return RandomPolicy()
@@ -110,7 +113,7 @@ def make_policy(name, args, role="p1"):
 
         policy = MCTSPolicy(iterations=iterations, workers=workers,
                             parallel_mode=parallel_mode,
-                            value_path=DEFAULT_MODEL_PATH)
+                            value_path=value_path or DEFAULT_MODEL_PATH)
         policy.name = "mcts-nn"
         return policy
     raise ValueError(f"unknown policy {name!r}")
@@ -137,6 +140,10 @@ def main():
                         help="how workers spend the budget (see MCTSPolicy)")
     parser.add_argument("--parallel-mode2", default=None, choices=("root", "halving"),
                         help="override parallel mode for --p2")
+    parser.add_argument("--value-path", default=None,
+                        help="value-net .npz for mcts-nn (default: DEFAULT_MODEL_PATH)")
+    parser.add_argument("--value-path2", default=None,
+                        help="override value net for --p2 (model A/B comparisons)")
     parser.add_argument("--swap-seats", action="store_true", default=True)
     args = parser.parse_args()
 

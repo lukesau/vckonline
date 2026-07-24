@@ -50,17 +50,20 @@ def _make_policy(name, iterations):
 
 
 def _pick(policy, game, pid, moves, temperature_turns):
-    """Policy move choice; MCTS samples proportional to root visits early on."""
+    """Policy move choice; MCTS samples proportional to root visits early on.
+
+    Candidates without visit counts (e.g. GreedyPolicy.analyze rankings) fall
+    through to the decision's own chosen move."""
     analyze = getattr(policy, "analyze", None)
     if callable(analyze) and int(game.turn_number or 0) <= temperature_turns:
         decision = analyze(game, pid, moves)
         candidates = decision.get("candidates") or []
-        total = sum(c["visits"] for c in candidates)
+        total = sum(int(c.get("visits") or 0) for c in candidates)
         if total > 0:
             pick = random.uniform(0, total)
             acc = 0.0
             for c in candidates:
-                acc += c["visits"]
+                acc += int(c.get("visits") or 0)
                 if pick <= acc:
                     return c["move"]
         return decision.get("chosen") or (moves[0] if moves else None)
@@ -69,17 +72,25 @@ def _pick(policy, game, pid, moves, temperature_turns):
 
 def play_selfplay_game(seed, policy_name="greedy", iterations=50, epsilon=0.15,
                        sample_every=2, temperature_turns=10, max_steps=20000,
-                       collect_states=False):
+                       collect_states=False, record_visits=False):
     """Play one self-play game. Returns (samples, game) or None on failure.
 
     samples: list of (payload, viewer_pid) where payload is a feature vector
     (collect_states=False) or a serialized save-dict (collect_states=True).
+
+    record_visits (search policies + collect_states only): instead of the
+    periodic state sampling, every searched decision emits one record payload
+    {"state" (pre-move), "to_move", "chosen", "visit_counts"} — the state
+    still feeds value extraction unchanged, and visit_counts is the policy-
+    head target (AlphaZero-style root visit distribution, captured BEFORE
+    temperature sampling picks the move actually played).
     """
     from agent.features import extract
 
     policy = _make_policy(policy_name, iterations)
     rando = RandomPolicy()
     use_epsilon = epsilon if policy_name == "greedy" else 0.0
+    record_visits = bool(record_visits and collect_states and policy_name != "greedy")
     game = new_game(seed=seed)
     with contextlib.redirect_stdout(_SINK):
         advance(game)
@@ -90,7 +101,7 @@ def play_selfplay_game(seed, policy_name="greedy", iterations=50, epsilon=0.15,
         steps += 1
         if steps > max_steps:
             return None
-        if steps % sample_every == 0 and game.phase == "action":
+        if not record_visits and steps % sample_every == 0 and game.phase == "action":
             if collect_states:
                 from game_serialization import serialize_game_to_save_dict
 
@@ -104,6 +115,12 @@ def play_selfplay_game(seed, policy_name="greedy", iterations=50, epsilon=0.15,
         noops = []
         for pid in acting_player_ids(game):
             moves = legal_moves(game, pid)
+            pre_save = None
+            if record_visits and len(moves) >= 2:
+                from game_serialization import serialize_game_to_save_dict
+
+                with contextlib.redirect_stdout(_SINK):
+                    pre_save = serialize_game_to_save_dict(game)
             while moves:
                 if use_epsilon and random.random() < use_epsilon:
                     move = rando.choose(game, None, pid, moves)
@@ -122,6 +139,18 @@ def play_selfplay_game(seed, policy_name="greedy", iterations=50, epsilon=0.15,
                     noops.append(move)
                     continue
                 moved = True
+                if pre_save is not None:
+                    decision = getattr(policy, "last_decision", None) or {}
+                    candidates = decision.get("candidates") or []
+                    if candidates:
+                        samples.append(({
+                            "state": pre_save,
+                            "to_move": pid,
+                            "chosen": move,
+                            "visit_counts": [
+                                [c["move"], int(c.get("visits") or 0)] for c in candidates
+                            ],
+                        }, "decision"))
                 break
             if moved:
                 break
@@ -167,7 +196,13 @@ def main():
     parser.add_argument("--out", default=None, help="npz of extracted features (legacy fast mode)")
     parser.add_argument("--store-states", default=None,
                         help="gzip jsonl of raw save-dict states + outcomes (re-extractable)")
+    parser.add_argument("--record-visits", action="store_true", default=False,
+                        help="store one record per searched decision with the MCTS root "
+                             "visit distribution (policy-head targets); replaces the "
+                             "periodic state sampling (search policies + --store-states only)")
     args = parser.parse_args()
+    if args.record_visits and (not args.store_states or args.policy == "greedy"):
+        parser.error("--record-visits needs --store-states and a search policy")
     if not args.out and not args.store_states:
         parser.error("need --out and/or --store-states")
 
@@ -186,6 +221,7 @@ def main():
             args.seed + i, policy_name=args.policy, iterations=args.iterations,
             epsilon=args.epsilon, sample_every=args.sample_every,
             temperature_turns=args.temperature_turns, collect_states=collect_states,
+            record_visits=args.record_visits,
         )
         if result is None:
             skipped += 1
@@ -193,8 +229,12 @@ def main():
         samples, game = result
         outcomes = {p.player_id: outcome_for(game, p.player_id) for p in game.player_list}
         if collect_states:
-            for save_dict, _ in samples:
-                writer.write(json.dumps({"state": save_dict, "outcomes": outcomes}) + "\n")
+            for payload, tag in samples:
+                if tag == "decision":
+                    record = {**payload, "outcomes": outcomes}
+                else:
+                    record = {"state": payload, "outcomes": outcomes}
+                writer.write(json.dumps(record) + "\n")
                 n_states += 1
         else:
             for features, viewer in samples:
