@@ -8,7 +8,7 @@ and can later be replaced by something bigger without touching the search.
 
 import numpy as np
 
-DEFAULT_MODEL_PATH = "agent/models/value_v1.npz"
+DEFAULT_MODEL_PATH = "agent/models/value_v3.npz"
 
 
 class ValueNet:
