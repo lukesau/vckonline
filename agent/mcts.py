@@ -98,7 +98,7 @@ class MCTSPolicy:
 
     def __init__(self, iterations=100, exploration=1.5, rollout_cap=250, descent_cap=400,
                  rollout_epsilon=0.15, top_k=12, prior_temperature=2.0, determinize=True,
-                 workers=1, value_path=None, parallel_mode="root"):
+                 workers=1, value_path=None, parallel_mode="root", turn_priors=False):
         self.iterations = iterations
         self.exploration = exploration
         self.rollout_cap = rollout_cap
@@ -116,6 +116,14 @@ class MCTSPolicy:
         # 6-14 to 800x1) while depth itself pays (1000x1 beat 400x1 14-6);
         # halving exists to buy that depth back at parallel wall-clock.
         self.parallel_mode = parallel_mode if parallel_mode in ("root", "halving") else "root"
+        # turn_priors: at the ROOT only, score each candidate by the greedy
+        # value of the best same-turn (action, follow-up) PAIR instead of the
+        # action alone, so two-move combos (recruit that unlocks a domain,
+        # slay whose reward funds a bigger buy) survive top_k pruning and get
+        # search budget. Interior nodes keep cheap one-ply priors — they sit
+        # under real search instead of pruning, so the root is where one-ply
+        # blindness bites.
+        self.turn_priors = bool(turn_priors)
         self._greedy = GreedyPolicy()
         self.last_decision = None
         self._pool = None
@@ -149,6 +157,7 @@ class MCTSPolicy:
             "prior_temperature": self.prior_temperature,
             "determinize": self.determinize,
             "value_path": self.value_path,
+            "turn_priors": self.turn_priors,
         }
 
     def _get_pool(self):
@@ -217,7 +226,11 @@ class MCTSPolicy:
         if values is None:
             p = 1.0 / len(keys)
             return {k: p for k in keys}
-        ranked = sorted(zip(keys, values), key=lambda kv: -kv[1])
+        return self._prior_softmax(moves_by_key, list(zip(keys, values)))
+
+    def _prior_softmax(self, moves_by_key, keyed_values):
+        """Effect-grouped top_k prune + softmax over (move_key, value) pairs."""
+        ranked = sorted(keyed_values, key=lambda kv: -kv[1])
         kept, kept_groups = [], set()
         for k, v in ranked:
             group = _effect_key(moves_by_key[k])
@@ -230,6 +243,62 @@ class MCTSPolicy:
         weights = {k: math.exp((v - top) / self.prior_temperature) for k, v in kept}
         total = sum(weights.values())
         return {k: w / total for k, w in weights.items()}
+
+    def _turn_follow_up_bonus(self, game, pid, move):
+        """Greedy value of the best SAME-TURN follow-up standard action after
+        applying `move` on a clone. Interposed prompts owed by the mover are
+        resolved greedily; anything else (opponent's decision, phase change,
+        rejected move, no second action) ends the lookahead at 0.0."""
+        try:
+            sim = clone_game(game)
+            with contextlib.redirect_stdout(_SINK):
+                apply_move(sim, move)
+        except (ValueError, KeyError, IndexError):
+            return 0.0
+        for _ in range(6):
+            if getattr(sim, "phase", None) != "action":
+                return 0.0
+            acting = acting_player_ids(sim)
+            if not acting or str(acting[0]) != str(pid):
+                return 0.0
+            with contextlib.redirect_stdout(_SINK):
+                follow_ups = legal_moves(sim, pid)
+            if not follow_ups:
+                return 0.0
+            req = sim.action_required if isinstance(getattr(sim, "action_required", None), dict) else {}
+            if str(req.get("action") or "") == "standard_action" \
+                    and int(getattr(sim, "actions_remaining", 0) or 0) > 0:
+                with contextlib.redirect_stdout(_SINK):
+                    values = self._greedy.move_values(sim, pid, follow_ups)
+                return max(values) if values else 0.0
+            before = _fingerprint(sim)
+            try:
+                with contextlib.redirect_stdout(_SINK):
+                    apply_move(sim, self._greedy.choose(sim, None, pid, follow_ups))
+            except (ValueError, KeyError, IndexError):
+                return 0.0
+            if _fingerprint(sim) == before:
+                return 0.0
+        return 0.0
+
+    def _compute_turn_priors(self, game, pid, moves_by_key):
+        """Root priors from best same-turn PAIR values (see turn_priors)."""
+        keys = list(moves_by_key)
+        moves = [moves_by_key[k] for k in keys]
+        with contextlib.redirect_stdout(_SINK):
+            values = self._greedy.move_values(game, pid, moves)
+        if values is None:
+            return self._compute_priors(game, pid, moves_by_key)
+        pair_values = [
+            (k, v + self._turn_follow_up_bonus(game, pid, moves_by_key[k]))
+            for k, v in zip(keys, values)
+        ]
+        return self._prior_softmax(moves_by_key, pair_values)
+
+    def _root_priors(self, game, pid, moves_by_key):
+        if self.turn_priors:
+            return self._compute_turn_priors(game, pid, moves_by_key)
+        return self._compute_priors(game, pid, moves_by_key)
 
     # ---- rewards -------------------------------------------------------
 
@@ -336,6 +405,10 @@ class MCTSPolicy:
         """Run ``iterations`` of search; return root stats and ranked candidates."""
         root = _Node()
         root_moves_by_key = {_move_key(m): m for m in moves}
+        if self.turn_priors:
+            # Seed the root with turn-aware pair priors; interior nodes still
+            # lazily compute one-ply priors on first visit.
+            root.priors = self._compute_turn_priors(game, player_id, root_moves_by_key)
 
         with contextlib.redirect_stdout(_SINK):
             for _ in range(iterations):
@@ -509,7 +582,7 @@ class MCTSPolicy:
         from game_serialization import serialize_game_to_save_dict
 
         root_moves_by_key = {_move_key(m): m for m in moves}
-        priors = self._compute_priors(game, player_id, root_moves_by_key)
+        priors = self._root_priors(game, player_id, root_moves_by_key)
         kept = [k for k in root_moves_by_key if k in priors]
         if not kept:
             return self._build_search_result({}, priors, root_moves_by_key, 0)

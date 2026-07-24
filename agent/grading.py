@@ -20,12 +20,13 @@ import io
 
 from agent.move_summary import move_label
 
-from agent.bot_players import env_int
+from agent.bot_players import env_flag, env_int
 
 GREAT_THRESHOLD = 0.02
 FINE_THRESHOLD = 0.08
 ANALYSIS_ITERATIONS = env_int("VCKO_GRADING_ITERATIONS", 300)
 ANALYSIS_WORKERS = env_int("VCKO_GRADING_WORKERS", 1)
+ANALYSIS_TURN_PRIORS = env_flag("VCKO_GRADING_TURN_PRIORS", True)
 
 CATEGORIES = ("perfect", "great", "fine", "blunder", "unrated")
 
@@ -39,6 +40,7 @@ def analysis_policy():
     return MCTSPolicy(
         iterations=ANALYSIS_ITERATIONS,
         workers=ANALYSIS_WORKERS,
+        turn_priors=ANALYSIS_TURN_PRIORS,
         value_path=DEFAULT_MODEL_PATH,
     )
 

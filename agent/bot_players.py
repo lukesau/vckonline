@@ -30,6 +30,16 @@ def env_int(name, default):
         return default
 
 
+def env_flag(name, default):
+    """Deploy-tunable boolean knob (accepts 1/0, true/false, on/off, yes/no)."""
+    raw = (os.environ.get(name) or "").strip().lower()
+    if raw in ("1", "true", "on", "yes"):
+        return True
+    if raw in ("0", "false", "off", "no"):
+        return False
+    return default
+
+
 # Hard-bot search budget: one deep tree. Head-to-head A/Bs (20 games each)
 # showed 1000x1 beats 400x1 14-6, while every parallel split tried lost or
 # tied at equal-or-larger budgets (800x8 lost 6-14 to 800x1; 4000x8 root and
@@ -40,6 +50,11 @@ def env_int(name, default):
 HARD_BOT_ITERATIONS = env_int("VCKO_HARD_BOT_ITERATIONS", 1000)
 HARD_BOT_WORKERS = env_int("VCKO_HARD_BOT_WORKERS", 1)
 HARD_BOT_MODE = (os.environ.get("VCKO_HARD_BOT_MODE") or "root").strip().lower()
+# Turn-aware root priors (see MCTSPolicy.turn_priors). A/B'd flat for play
+# strength at 100 iters (21-18-1 over 40 games) so the bot defaults OFF;
+# hints/grading default ON — their candidate rankings are user-facing and
+# the pair-lookahead demonstrably surfaces two-move combos there.
+HARD_BOT_TURN_PRIORS = env_flag("VCKO_HARD_BOT_TURN_PRIORS", False)
 
 _SINK = io.StringIO()
 
@@ -59,6 +74,7 @@ def make_policy(level):
             iterations=HARD_BOT_ITERATIONS,
             workers=HARD_BOT_WORKERS,
             parallel_mode=HARD_BOT_MODE,
+            turn_priors=HARD_BOT_TURN_PRIORS,
             value_path=DEFAULT_MODEL_PATH,
         )
     raise ValueError(f"unknown bot level {level!r}")

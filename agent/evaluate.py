@@ -88,6 +88,7 @@ def make_policy(name, args, role="p1"):
     workers = args.workers
     parallel_mode = getattr(args, "parallel_mode", "root") or "root"
     value_path = getattr(args, "value_path", None)
+    turn_priors = (getattr(args, "turn_priors", "off") or "off") == "on"
     if role == "p2":
         if getattr(args, "iterations2", None) is not None:
             iterations = args.iterations2
@@ -97,6 +98,8 @@ def make_policy(name, args, role="p1"):
             parallel_mode = args.parallel_mode2
         if getattr(args, "value_path2", None) is not None:
             value_path = args.value_path2
+        if getattr(args, "turn_priors2", None) is not None:
+            turn_priors = args.turn_priors2 == "on"
 
     if name == "random":
         return RandomPolicy()
@@ -106,13 +109,13 @@ def make_policy(name, args, role="p1"):
         from agent.mcts import MCTSPolicy
 
         return MCTSPolicy(iterations=iterations, workers=workers,
-                          parallel_mode=parallel_mode)
+                          parallel_mode=parallel_mode, turn_priors=turn_priors)
     if name == "mcts-nn":
         from agent.mcts import MCTSPolicy
         from agent.value_net import DEFAULT_MODEL_PATH
 
         policy = MCTSPolicy(iterations=iterations, workers=workers,
-                            parallel_mode=parallel_mode,
+                            parallel_mode=parallel_mode, turn_priors=turn_priors,
                             value_path=value_path or DEFAULT_MODEL_PATH)
         policy.name = "mcts-nn"
         return policy
@@ -144,6 +147,10 @@ def main():
                         help="value-net .npz for mcts-nn (default: DEFAULT_MODEL_PATH)")
     parser.add_argument("--value-path2", default=None,
                         help="override value net for --p2 (model A/B comparisons)")
+    parser.add_argument("--turn-priors", default="off", choices=("on", "off"),
+                        help="root priors from best same-turn action PAIRS (see MCTSPolicy)")
+    parser.add_argument("--turn-priors2", default=None, choices=("on", "off"),
+                        help="override turn-priors for --p2")
     parser.add_argument("--swap-seats", action="store_true", default=True)
     args = parser.parse_args()
 

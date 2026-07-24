@@ -9,13 +9,14 @@ move_summary.move_label, e.g. "Slay Goblin (5s)" or "Hire Cleric (3g)".
 import contextlib
 import io
 
-from agent.bot_players import env_int, pending_bot_decision  # noqa: F401  (re-export convenience)
+from agent.bot_players import env_flag, env_int, pending_bot_decision  # noqa: F401  (re-export convenience)
 from agent.headless import acting_player_ids, legal_moves
 from agent.move_summary import move_label
 
 # Latency-sensitive: the player is waiting on the response.
 HINT_ITERATIONS = env_int("VCKO_HINT_ITERATIONS", 200)
 HINT_WORKERS = env_int("VCKO_HINT_WORKERS", 1)
+HINT_TURN_PRIORS = env_flag("VCKO_HINT_TURN_PRIORS", True)
 
 _SINK = io.StringIO()
 
@@ -25,7 +26,8 @@ def _hint_policy():
     from agent.value_net import DEFAULT_MODEL_PATH
 
     return MCTSPolicy(
-        iterations=HINT_ITERATIONS, workers=HINT_WORKERS, value_path=DEFAULT_MODEL_PATH
+        iterations=HINT_ITERATIONS, workers=HINT_WORKERS,
+        turn_priors=HINT_TURN_PRIORS, value_path=DEFAULT_MODEL_PATH,
     )
 
 
