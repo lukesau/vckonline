@@ -13,8 +13,9 @@ from agent.bot_players import env_flag, env_int, pending_bot_decision  # noqa: F
 from agent.headless import acting_player_ids, legal_moves
 from agent.move_summary import move_label
 
-# Latency-sensitive: the player is waiting on the response.
-HINT_ITERATIONS = env_int("VCKO_HINT_ITERATIONS", 200)
+# Latency-sensitive: the player is waiting on the response (~2-4s at 500).
+# 500 keeps hints closer to the Hard bot's 1000-iteration judgement.
+HINT_ITERATIONS = env_int("VCKO_HINT_ITERATIONS", 500)
 HINT_WORKERS = env_int("VCKO_HINT_WORKERS", 1)
 HINT_TURN_PRIORS = env_flag("VCKO_HINT_TURN_PRIORS", True)
 
