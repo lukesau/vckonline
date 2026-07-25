@@ -382,7 +382,11 @@ def _serialize_member(member: LobbyMember):
 
 def _validate_bots(bots, preset):
     """Normalize the requested bot list. Bots are unsupported in draft (no
-    draft-pick logic) and capped so the lobby stays within the 5-seat table."""
+    draft-pick logic) and capped so the lobby stays within the 5-seat table.
+
+    Easy/Medium (random/greedy) are rules-based and validated for every
+    preset at 2-5 players. The Hard bot's learning stack (features/value
+    net) is strictly 2-player, so a hard lobby is exactly you vs the bot."""
     from agent.bot_players import BOT_LEVELS
 
     if not bots:
@@ -401,6 +405,11 @@ def _validate_bots(bots, preset):
         )
     if len(levels) > 4:
         raise HTTPException(status_code=400, detail="At most 4 bots per lobby.")
+    if "hard" in levels and len(levels) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="The Hard bot plays head-to-head — it cannot share a lobby with other bots.",
+        )
     return levels
 
 
@@ -477,6 +486,15 @@ def _maybe_start_lobby_game(lb: Lobby):
     _shot_clock_reset(new_game_id)
 
     bot_levels = dict(getattr(lb, "bot_levels", None) or {})
+    if bot_levels and len(game_gamers) != 2:
+        # Defense-in-depth: the lobby gates should make this unreachable, but
+        # the Hard bot's learning stack is strictly 2-player — degrade rather
+        # than field a silently broken value net.
+        for bid, lvl in list(bot_levels.items()):
+            if lvl == "hard":
+                bot_levels[bid] = "medium"
+                print(f"[bots] downgraded hard bot {bid} to medium "
+                      f"({len(game_gamers)}-player game)")
     if bot_levels:
         new_game.bot_levels = bot_levels
         _schedule_bot_turns(new_game_id)
@@ -1664,6 +1682,11 @@ async def create_lobby(request: CreateLobbyRequest):
         request.random_no_optional_modules, default=False
     )
     bot_levels = _validate_bots(request.bots, preset)
+    if "hard" in bot_levels and min_players > 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Hard bot games are 2-player (you vs the bot); lower min players to 2.",
+        )
     if expansion_only and preset not in _PRESETS_WITH_EXPANSION_ONLY:
         expansion_only = False
     if random_no_optional_modules and preset != "random":
@@ -1749,6 +1772,12 @@ async def join_lobby(request: JoinLobbyRequest):
         player_id = requested_pid
     else:
         player_id = str(shortuuid.uuid())
+
+    if "hard" in (getattr(lb, "bot_levels", None) or {}).values() and len(lb.members) >= 2:
+        raise HTTPException(
+            status_code=409,
+            detail="Hard bot games are 2-player (one human vs the bot); this lobby is full.",
+        )
 
     member = LobbyMember(display_name, player_id, lobby_id=lobby_id)
     member.last_active_time = time.time()
@@ -1924,6 +1953,11 @@ async def set_lobby_min_players(request: SetMinPlayersRequest):
         raise HTTPException(status_code=404, detail="Player not found in any lobby")
     if lb.owner_id != member.player_id:
         raise HTTPException(status_code=403, detail="Only the lobby owner may change min_players")
+    if floor > 2 and "hard" in (getattr(lb, "bot_levels", None) or {}).values():
+        raise HTTPException(
+            status_code=400,
+            detail="Hard bot games are 2-player (you vs the bot); min players stays at 2.",
+        )
     lb.min_players = floor
     member.last_active_time = time.time()
     for m in lb.members:

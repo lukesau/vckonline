@@ -1411,6 +1411,25 @@ function initLobbyModal() {
   const createBotChecks = ['easy', 'medium', 'hard'].map(
     level => document.getElementById('lobby-create-bot-' + level)
   ).filter(Boolean);
+  // The Hard bot plays strictly head-to-head (2-player learning stack), so
+  // checking it clears the other bots and pins min players to 2; the server
+  // enforces the same rules.
+  const createHardCheck = document.getElementById('lobby-create-bot-hard');
+  if (createHardCheck) {
+    createHardCheck.addEventListener('change', () => {
+      if (!createHardCheck.checked) return;
+      createBotChecks.forEach(check => {
+        if (check !== createHardCheck) check.checked = false;
+      });
+      if (createMinPlayersSelect) createMinPlayersSelect.value = '2';
+    });
+    createBotChecks.forEach(check => {
+      if (check === createHardCheck) return;
+      check.addEventListener('change', () => {
+        if (check.checked) createHardCheck.checked = false;
+      });
+    });
+  }
   const createBotsRow = document.getElementById('lobby-create-bots-row');
   const createBotsWarning = document.getElementById('lobby-create-bots-warning');
   const createTrainingCheck = document.getElementById('lobby-create-training-mode');
