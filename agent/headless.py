@@ -310,7 +310,12 @@ def describe_stall(game, state=None):
 
 
 def progress_signature(game):
-    """Cheap fingerprint of whether anything meaningful changed."""
+    """Cheap fingerprint of whether anything meaningful changed.
+
+    Includes pending-queue/harvest bookkeeping: several queued effects can
+    resolve into byte-identical prompts with unchanged scores (e.g. repeated
+    steals against a victim who has 0 of the resource), and drivers must not
+    mistake draining that queue for a stuck engine."""
     ar = getattr(game, "action_required", None) or {}
     prc = getattr(game, "pending_required_choice", None) or {}
     ca = getattr(game, "concurrent_action", None) or {}
@@ -319,12 +324,21 @@ def progress_signature(game):
             int(getattr(p, "gold_score", 0) or 0),
             int(getattr(p, "strength_score", 0) or 0),
             int(getattr(p, "magic_score", 0) or 0),
+            int(getattr(p, "map_score", 0) or 0),
             int(getattr(p, "victory_score", 0) or 0),
             len(getattr(p, "owned_citizens", []) or []),
             len(getattr(p, "owned_domains", []) or []),
             len(getattr(p, "owned_monsters", []) or []),
         )
         for p in getattr(game, "player_list", []) or []
+    )
+    consumed = getattr(game, "harvest_consumed", None) or {}
+    queues = (
+        sum(len(v or []) for v in consumed.values()) if isinstance(consumed, dict) else 0,
+        len(getattr(game, "pending_harvest_slays", []) or []),
+        len(getattr(game, "pending_event_activations", []) or []),
+        len(getattr(game, "pending_action_end_queue", []) or []),
+        len(getattr(game, "pending_event_sequence", []) or []),
     )
     return (
         int(getattr(game, "tick_id", 0) or 0),
@@ -334,6 +348,7 @@ def progress_signature(game):
         prc.get("kind"), prc.get("stage"),
         tuple(ca.get("pending") or ()),
         scores,
+        queues,
     )
 
 

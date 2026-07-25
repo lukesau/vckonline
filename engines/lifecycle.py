@@ -88,6 +88,9 @@ class LifecycleEngine:
                 or aa == "event_active_choose"
                 or aa == "event_sequence"
                 or aa == "choose_domain_to_build"
+                or aa == "build_domain_payment"
+                or aa == "may_sail"
+                or aa == "may_recruit"
                 or aa == "relic_wild_exchange"
             ):
                 return False
