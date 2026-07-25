@@ -32,20 +32,21 @@ from agent.policies import GreedyPolicy, RandomPolicy
 _SINK = io.StringIO()
 
 
-def _make_policy(name, iterations):
+def _make_policy(name, iterations, turn_priors=False):
     if name == "greedy":
         return GreedyPolicy()
     if name == "mcts-nn":
         from agent.mcts import MCTSPolicy
         from agent.value_net import DEFAULT_MODEL_PATH
 
-        policy = MCTSPolicy(iterations=iterations, value_path=DEFAULT_MODEL_PATH)
+        policy = MCTSPolicy(iterations=iterations, turn_priors=turn_priors,
+                            value_path=DEFAULT_MODEL_PATH)
         policy.name = "mcts-nn"
         return policy
     if name == "mcts":
         from agent.mcts import MCTSPolicy
 
-        return MCTSPolicy(iterations=iterations)
+        return MCTSPolicy(iterations=iterations, turn_priors=turn_priors)
     raise ValueError(f"unknown policy {name!r}")
 
 
@@ -73,7 +74,7 @@ def _pick(policy, game, pid, moves, temperature_turns):
 def play_selfplay_game(seed, policy_name="greedy", iterations=50, epsilon=0.15,
                        sample_every=2, temperature_turns=10, max_steps=20000,
                        collect_states=False, record_visits=False,
-                       preset="base", num_players=2):
+                       preset="base", num_players=2, turn_priors=False):
     """Play one self-play game. Returns (samples, game) or None on failure.
 
     samples: list of (payload, viewer_pid) where payload is a feature vector
@@ -88,7 +89,7 @@ def play_selfplay_game(seed, policy_name="greedy", iterations=50, epsilon=0.15,
     """
     from agent.features import extract
 
-    policy = _make_policy(policy_name, iterations)
+    policy = _make_policy(policy_name, iterations, turn_priors=turn_priors)
     rando = RandomPolicy()
     use_epsilon = epsilon if policy_name == "greedy" else 0.0
     record_visits = bool(record_visits and collect_states and policy_name != "greedy")
@@ -204,6 +205,8 @@ def main():
     parser.add_argument("--preset", default="base",
                         help="board preset to deal (see presets/*.json)")
     parser.add_argument("--players", type=int, default=2, choices=(2, 3, 4, 5))
+    parser.add_argument("--turn-priors", action="store_true", default=False,
+                        help="generate with turn-aware root priors (search policies)")
     args = parser.parse_args()
     if args.record_visits and (not args.store_states or args.policy == "greedy"):
         parser.error("--record-visits needs --store-states and a search policy")
@@ -227,6 +230,7 @@ def main():
             temperature_turns=args.temperature_turns, collect_states=collect_states,
             record_visits=args.record_visits,
             preset=args.preset, num_players=args.players,
+            turn_priors=args.turn_priors,
         )
         if result is None:
             skipped += 1
