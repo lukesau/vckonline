@@ -98,7 +98,8 @@ class MCTSPolicy:
 
     def __init__(self, iterations=100, exploration=1.5, rollout_cap=250, descent_cap=400,
                  rollout_epsilon=0.15, top_k=12, prior_temperature=2.0, determinize=True,
-                 workers=1, value_path=None, parallel_mode="root", turn_priors=False):
+                 workers=1, value_path=None, parallel_mode="root", turn_priors=False,
+                 policy_path=None):
         self.iterations = iterations
         self.exploration = exploration
         self.rollout_cap = rollout_cap
@@ -137,6 +138,19 @@ class MCTSPolicy:
             from agent.value_net import ValueNet
 
             self._value_net = ValueNet.load(value_path)
+        # Learned policy priors: when set, node priors come from the policy
+        # net (softmax over [state || move] scores, then the same effect-
+        # grouped top_k prune) instead of the greedy heuristic. Greedy stays
+        # as the fallback on any featurization/scoring failure, and its
+        # per-move value is one of the net's INPUT features. Takes
+        # precedence over turn_priors (learned attention over heuristic
+        # lookahead).
+        self.policy_path = policy_path
+        self._policy_net = None
+        if policy_path:
+            from agent.policy_net import PolicyNet
+
+            self._policy_net = PolicyNet.load(policy_path)
 
     def _leaf_value(self, game, root_pid):
         from agent.features import extract
@@ -158,6 +172,7 @@ class MCTSPolicy:
             "determinize": self.determinize,
             "value_path": self.value_path,
             "turn_priors": self.turn_priors,
+            "policy_path": self.policy_path,
         }
 
     def _get_pool(self):
@@ -213,8 +228,8 @@ class MCTSPolicy:
                     p.owned_dukes = [pool.pop() for _ in range(n)]
 
     def _compute_priors(self, sim, pid, moves_by_key):
-        """Softmax of greedy VP-values -> prior move probabilities; also prunes
-        to the top_k moves so search budget concentrates where it matters.
+        """Prior move probabilities, pruned to top_k. Learned policy net when
+        loaded (greedy softmax as fallback and as a net input feature).
 
         Pruning counts distinct EFFECTS, not raw moves: alternative payment
         splits of the same purchase share one top_k slot (all kept splits stay
@@ -222,11 +237,40 @@ class MCTSPolicy:
         cannot crowd genuinely different moves out of the search."""
         keys = list(moves_by_key)
         moves = [moves_by_key[k] for k in keys]
+        if self._policy_net is not None:
+            try:
+                from agent.policy_net import featurize_decision
+
+                state_vec, move_mat = featurize_decision(sim, pid, moves, greedy=self._greedy)
+                probs = self._policy_net.score(state_vec, move_mat)
+                # Rank by learned probability; reuse the softmax tail for the
+                # effect-grouped prune by feeding log-probs as "values" with
+                # temperature 1 semantics preserved via renormalization below.
+                kept = self._prior_softmax_keys(moves_by_key, list(zip(keys, probs)))
+                total = sum(probs[keys.index(k)] for k in kept)
+                if total > 0:
+                    return {k: float(probs[keys.index(k)] / total) for k in kept}
+            except Exception:
+                pass  # fall through to greedy priors
         values = self._greedy.move_values(sim, pid, moves)
         if values is None:
             p = 1.0 / len(keys)
             return {k: p for k in keys}
         return self._prior_softmax(moves_by_key, list(zip(keys, values)))
+
+    def _prior_softmax_keys(self, moves_by_key, keyed_scores):
+        """The effect-grouped top_k CUT only (no reweighting): highest-scored
+        distinct effects survive, with all their payment splits."""
+        ranked = sorted(keyed_scores, key=lambda kv: -kv[1])
+        kept, kept_groups = [], set()
+        for k, _ in ranked:
+            group = _effect_key(moves_by_key[k])
+            if group not in kept_groups:
+                if len(kept_groups) >= self.top_k:
+                    continue
+                kept_groups.add(group)
+            kept.append(k)
+        return kept
 
     def _prior_softmax(self, moves_by_key, keyed_values):
         """Effect-grouped top_k prune + softmax over (move_key, value) pairs."""
@@ -296,7 +340,7 @@ class MCTSPolicy:
         return self._prior_softmax(moves_by_key, pair_values)
 
     def _root_priors(self, game, pid, moves_by_key):
-        if self.turn_priors:
+        if self.turn_priors and self._policy_net is None:
             return self._compute_turn_priors(game, pid, moves_by_key)
         return self._compute_priors(game, pid, moves_by_key)
 
@@ -405,7 +449,7 @@ class MCTSPolicy:
         """Run ``iterations`` of search; return root stats and ranked candidates."""
         root = _Node()
         root_moves_by_key = {_move_key(m): m for m in moves}
-        if self.turn_priors:
+        if self.turn_priors and self._policy_net is None:
             # Seed the root with turn-aware pair priors; interior nodes still
             # lazily compute one-ply priors on first visit.
             root.priors = self._compute_turn_priors(game, player_id, root_moves_by_key)

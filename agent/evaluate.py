@@ -88,6 +88,7 @@ def make_policy(name, args, role="p1"):
     workers = args.workers
     parallel_mode = getattr(args, "parallel_mode", "root") or "root"
     value_path = getattr(args, "value_path", None)
+    policy_path = getattr(args, "policy_path", None)
     turn_priors = (getattr(args, "turn_priors", "off") or "off") == "on"
     if role == "p2":
         if getattr(args, "iterations2", None) is not None:
@@ -100,6 +101,8 @@ def make_policy(name, args, role="p1"):
             value_path = args.value_path2
         if getattr(args, "turn_priors2", None) is not None:
             turn_priors = args.turn_priors2 == "on"
+        if getattr(args, "policy_path2", None) is not None:
+            policy_path = args.policy_path2 or None
 
     if name == "random":
         return RandomPolicy()
@@ -116,7 +119,8 @@ def make_policy(name, args, role="p1"):
 
         policy = MCTSPolicy(iterations=iterations, workers=workers,
                             parallel_mode=parallel_mode, turn_priors=turn_priors,
-                            value_path=value_path or DEFAULT_MODEL_PATH)
+                            value_path=value_path or DEFAULT_MODEL_PATH,
+                            policy_path=policy_path)
         policy.name = "mcts-nn"
         return policy
     raise ValueError(f"unknown policy {name!r}")
@@ -151,6 +155,10 @@ def main():
                         help="root priors from best same-turn action PAIRS (see MCTSPolicy)")
     parser.add_argument("--turn-priors2", default=None, choices=("on", "off"),
                         help="override turn-priors for --p2")
+    parser.add_argument("--policy-path", default=None,
+                        help="policy-net .npz for learned priors (default: greedy priors)")
+    parser.add_argument("--policy-path2", default=None,
+                        help="override policy net for --p2 (empty string = greedy)")
     parser.add_argument("--swap-seats", action="store_true", default=True)
     parser.add_argument("--players", type=int, default=2, choices=(2, 3, 4, 5),
                         help="table size: --p1 takes one (rotating) seat, --p2 fills the rest")
