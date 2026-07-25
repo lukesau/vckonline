@@ -17,4 +17,4 @@ AI coding agents: start at [`docs/agents.md`](docs/agents.md) before touching th
 
 ## License
 
-This project is licensed under the [GNU General Public License v3.0](LICENSE).
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
