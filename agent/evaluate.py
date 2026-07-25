@@ -29,9 +29,9 @@ def _quiet(fn, *args, **kwargs):
     return result
 
 
-def play_policy_game(policies, seed=None, max_steps=20000):
+def play_policy_game(policies, seed=None, max_steps=20000, preset="base"):
     """policies: {player_id: policy}. Returns (game, steps)."""
-    game = new_game(seed=seed)
+    game = new_game(preset=preset, num_players=len(policies), seed=seed)
     _quiet(advance, game)
     steps = 0
     stuck_streak = 0
@@ -88,6 +88,7 @@ def make_policy(name, args, role="p1"):
     workers = args.workers
     parallel_mode = getattr(args, "parallel_mode", "root") or "root"
     value_path = getattr(args, "value_path", None)
+    policy_path = getattr(args, "policy_path", None)
     turn_priors = (getattr(args, "turn_priors", "off") or "off") == "on"
     if role == "p2":
         if getattr(args, "iterations2", None) is not None:
@@ -100,6 +101,8 @@ def make_policy(name, args, role="p1"):
             value_path = args.value_path2
         if getattr(args, "turn_priors2", None) is not None:
             turn_priors = args.turn_priors2 == "on"
+        if getattr(args, "policy_path2", None) is not None:
+            policy_path = args.policy_path2 or None
 
     if name == "random":
         return RandomPolicy()
@@ -116,7 +119,8 @@ def make_policy(name, args, role="p1"):
 
         policy = MCTSPolicy(iterations=iterations, workers=workers,
                             parallel_mode=parallel_mode, turn_priors=turn_priors,
-                            value_path=value_path or DEFAULT_MODEL_PATH)
+                            value_path=value_path or DEFAULT_MODEL_PATH,
+                            policy_path=policy_path)
         policy.name = "mcts-nn"
         return policy
     raise ValueError(f"unknown policy {name!r}")
@@ -151,28 +155,41 @@ def main():
                         help="root priors from best same-turn action PAIRS (see MCTSPolicy)")
     parser.add_argument("--turn-priors2", default=None, choices=("on", "off"),
                         help="override turn-priors for --p2")
+    parser.add_argument("--policy-path", default=None,
+                        help="policy-net .npz for learned priors (default: greedy priors)")
+    parser.add_argument("--policy-path2", default=None,
+                        help="override policy net for --p2 (empty string = greedy)")
     parser.add_argument("--swap-seats", action="store_true", default=True)
+    parser.add_argument("--players", type=int, default=2, choices=(2, 3, 4, 5),
+                        help="table size: --p1 takes one (rotating) seat, --p2 fills the rest")
+    parser.add_argument("--preset", default="base",
+                        help="board preset to deal (see presets/*.json)")
     args = parser.parse_args()
 
     label1 = args.p1
     label2 = args.p2 if args.p2 != args.p1 else f"{args.p2}#2"
-    sides = ((args.p1, "p1", label1), (args.p2, "p2", label2))
+    n = args.players
+    pids = [f"p{k + 1}" for k in range(n)]
 
     wins = {label1: 0, label2: 0}
     ties = 0
     vp_sum = {label1: 0, label2: 0}
+    seats = {label1: 0, label2: 0}
     unfinished = 0
     start = time.perf_counter()
     for i in range(args.games):
         seed = args.seed + i
-        order = sides if (not args.swap_seats or i % 2 == 0) else sides[::-1]
+        hero_seat = pids[i % n] if args.swap_seats else pids[0]
         policies = {
-            "p1": make_policy(order[0][0], args, role=order[0][1]),
-            "p2": make_policy(order[1][0], args, role=order[1][1]),
+            pid: make_policy(
+                args.p1 if pid == hero_seat else args.p2, args,
+                role="p1" if pid == hero_seat else "p2",
+            )
+            for pid in pids
         }
-        name_by_pid = {"p1": order[0][2], "p2": order[1][2]}
+        name_by_pid = {pid: (label1 if pid == hero_seat else label2) for pid in pids}
         try:
-            game, steps = play_policy_game(policies, seed=seed)
+            game, steps = play_policy_game(policies, seed=seed, preset=args.preset)
         finally:
             for pol in policies.values():
                 close = getattr(pol, "close", None)
@@ -185,28 +202,32 @@ def main():
         result = game.final_result or {}
         winners = set(result.get("winner_player_ids") or [])
         for row in game.final_scores or []:
-            vp_sum[name_by_pid[row["player_id"]]] += int(row["total_vp"])
+            label = name_by_pid[row["player_id"]]
+            vp_sum[label] += int(row["total_vp"])
+            seats[label] += 1
         if len(winners) == 1:
-            winner_name = name_by_pid[next(iter(winners))]
-            wins[winner_name] += 1
+            wins[name_by_pid[next(iter(winners))]] += 1
         else:
             ties += 1
-        by_name = {
-            name_by_pid[r["player_id"]]: r["total_vp"] for r in game.final_scores or []
+        by_seat = {
+            r["player_id"]: (name_by_pid[r["player_id"]], r["total_vp"])
+            for r in game.final_scores or []
         }
         print(
             f"game {i + 1}: seed={seed} turns={game.turn_number} "
-            + " vs ".join(f"{n}={v}" for n, v in by_name.items())
+            + " vs ".join(f"{lbl}={vp}" for lbl, vp in by_seat.values())
             + f" -> {result.get('headline', '?')} [{name_by_pid[next(iter(winners))] if len(winners) == 1 else 'tie'}]"
         )
     elapsed = time.perf_counter() - start
     finished = args.games - unfinished
-    print(f"\n=== {label1} vs {label2}: {args.games} games in {elapsed:.0f}s ===")
+    table = f" ({n}p)" if n != 2 else ""
+    print(f"\n=== {label1} vs {label2}{table}: {args.games} games in {elapsed:.0f}s ===")
     for name in (label1, label2):
-        if finished:
+        if finished and seats[name]:
+            baseline = f", baseline {100.0 / n:.0f}%" if name == label1 and n != 2 else ""
             print(
-                f"  {name:8} wins={wins[name]:3} ({100 * wins[name] / finished:.0f}%) "
-                f"avg VP={vp_sum[name] / finished:.1f}"
+                f"  {name:8} wins={wins[name]:3} ({100 * wins[name] / finished:.0f}%{baseline}) "
+                f"avg VP={vp_sum[name] / seats[name]:.1f}"
             )
     if ties:
         print(f"  ties={ties}")

@@ -1,10 +1,16 @@
 """State featurization for the learned value function.
 
-extract(game, viewer_pid) -> fixed-length float vector, viewer-relative
-(my side first, opponent second, then differences and global board state).
+extract(game, viewer_pid) -> fixed-length float vector, viewer-relative.
 Uses the engine's own endgame scorer for projected VP and GreedyPolicy's
 income model, so the features share semantics with everything else.
-2-player only for now.
+
+v3 (player-count-general, July 2026): works for 2-5 players. Opponents are
+summarized by two aggregate blocks — the LEADER opponent (highest projected
+VP, the threat to beat) and the element-wise MEAN across all opponents —
+plus rank/count globals. In a 2-player game both aggregates equal the old
+single-opponent block and every shared feature computes the same value as
+v2, so 2p training data remains meaningful across the redesign. Board-size
+normalizations scale with player count (bigger deals, longer games).
 
 v2 additions (domain-knowledge features, July 2026):
   - purchase-threshold features: value of the best accessible monster/domain
@@ -23,7 +29,7 @@ import numpy as np
 
 from agent.policies import GreedyPolicy, _match_rate
 
-FEATURE_VERSION = 2
+FEATURE_VERSION = 3
 
 _greedy = GreedyPolicy()
 
@@ -172,12 +178,21 @@ def _threshold_features(game, player):
     return [best_mon_now / 10.0, best_mon_next / 10.0, best_dom_now / 10.0, best_dom_next / 10.0]
 
 
-def _contested_features(game, me, opp):
-    """Citizens whose NAME both players have hired: how contested is the board
-    and who can grab the accessible ones right now."""
+def _contested_features(game, me, opponents):
+    """Citizens whose NAME both the viewer and at least one opponent have
+    hired: how contested is the board and who can grab the accessible ones
+    right now (opponent side = any opponent can afford it)."""
     mine = {c.name for c in me.owned_citizens}
-    theirs = {c.name for c in opp.owned_citizens}
+    theirs = set()
+    for opp in opponents:
+        theirs |= {c.name for c in opp.owned_citizens}
     contested = mine & theirs
+
+    def _dup_cost(player, top):
+        return int(getattr(top, "gold_cost", 0) or 0) \
+            + sum(1 for c in player.owned_citizens if c.name == top.name and not getattr(c, "is_flipped", False)) \
+            + sum(1 for s in player.owned_starters if s.name == top.name)
+
     count = affordable_me = affordable_opp = 0
     for stack in game.citizen_grid:
         if not stack:
@@ -188,14 +203,9 @@ def _contested_features(game, me, opp):
         if top.name not in contested:
             continue
         count += 1
-        cost = int(getattr(top, "gold_cost", 0) or 0)
-        my_cost = cost + sum(1 for c in me.owned_citizens if c.name == top.name and not getattr(c, "is_flipped", False)) \
-            + sum(1 for s in me.owned_starters if s.name == top.name)
-        opp_cost = cost + sum(1 for c in opp.owned_citizens if c.name == top.name and not getattr(c, "is_flipped", False)) \
-            + sum(1 for s in opp.owned_starters if s.name == top.name)
-        if me.gold_score + me.magic_score >= my_cost:
+        if me.gold_score + me.magic_score >= _dup_cost(me, top):
             affordable_me += 1
-        if opp.gold_score + opp.magic_score >= opp_cost:
+        if any(o.gold_score + o.magic_score >= _dup_cost(o, top) for o in opponents):
             affordable_opp += 1
     return [count / 5.0, affordable_me / 5.0, affordable_opp / 5.0]
 
@@ -300,51 +310,67 @@ def _player_features(game, player, projected_vp):
 
 
 def extract(game, viewer_pid):
-    me = opp = None
-    for p in game.player_list:
-        if p.player_id == viewer_pid:
-            me = p
-        else:
-            opp = p
-    if me is None or opp is None:
-        raise ValueError(f"viewer {viewer_pid!r} not found or not a 2-player game")
+    players = list(game.player_list)
+    me = next((p for p in players if p.player_id == viewer_pid), None)
+    opponents = [p for p in players if p.player_id != viewer_pid]
+    if me is None or not opponents:
+        raise ValueError(f"viewer {viewer_pid!r} not found or no opponents")
 
     try:
         scores = {s["player_id"]: int(s["total_vp"]) for s in game.endgame._calculate_final_scores()}
     except Exception:
-        scores = {p.player_id: int(p.victory_score) for p in game.player_list}
+        scores = {p.player_id: int(p.victory_score) for p in players}
     my_proj = scores.get(me.player_id, 0)
-    opp_proj = scores.get(opp.player_id, 0)
+    opp_projs = {o.player_id: scores.get(o.player_id, 0) for o in opponents}
+    leader = max(opponents, key=lambda o: opp_projs[o.player_id])
+    leader_proj = opp_projs[leader.player_id]
 
     features = _player_features(game, me, my_proj)
-    features += _player_features(game, opp, opp_proj)
+    # Opponent aggregates: the leader (threat to beat) and the field mean.
+    # Both reduce to the single opponent's block in a 2-player game.
+    opp_blocks = [_player_features(game, o, opp_projs[o.player_id]) for o in opponents]
+    leader_block = opp_blocks[opponents.index(leader)]
+    mean_block = [sum(vals) / len(opp_blocks) for vals in zip(*opp_blocks)]
+    features += leader_block
+    features += mean_block
 
-    n_players = len(game.player_list)
+    n_players = len(players)
+    scale = n_players / 2.0  # deal sizes / game length grow with the table
+    n_opps = len(opponents)
+    my_rank = 1 + sum(1 for v in opp_projs.values() if v > my_proj)
+    close_opps = sum(1 for v in opp_projs.values() if abs(v - my_proj) <= 10)
     monsters_left = sum(len(s) for s in game.monster_grid)
     domains_left = sum(len(s) for s in game.domain_grid)
     citizen_stacks = [len(s) for s in game.citizen_grid] or [0]
-    active = game.player_list[game.turn_index].player_id if game.player_list else None
+    active = players[game.turn_index].player_id if players else None
+
+    def _res_total(p):
+        return p.gold_score + p.strength_score + p.magic_score
+
     features += [
-        (my_proj - opp_proj) / 50.0,
-        (me.gold_score + me.strength_score + me.magic_score
-         - opp.gold_score - opp.strength_score - opp.magic_score) / 40.0,
-        int(game.turn_number or 0) / 32.0,
+        (my_proj - leader_proj) / 50.0,
+        (_res_total(me) - _res_total(leader)) / 40.0,
+        int(game.turn_number or 0) / (16.0 * n_players),
         int(game.exhausted_count or 0) / (2.0 * n_players),
-        monsters_left / 34.0,
-        domains_left / 15.0,
+        monsters_left / (34.0 * scale),
+        domains_left / (15.0 * scale),
         min(citizen_stacks) / 5.0,
-        sum(citizen_stacks) / 50.0,
+        sum(citizen_stacks) / (50.0 * scale),
         1.0 if active == viewer_pid else 0.0,
         1.0 if getattr(me, "is_first", False) else 0.0,
         1.0 if game.end_game_triggered else 0.0,
+        # v3 multiplayer globals (near-constant in 2p by design)
+        (n_players - 2) / 3.0,
+        (my_rank - 1) / max(1, n_opps),
+        close_opps / max(1, n_opps),
     ]
 
-    # v2: purchase thresholds (me, then opp), contested citizens,
-    # monster-stack lookahead, per-stack exhaustion proximity
+    # v2: purchase thresholds (me, then the leader opponent), contested
+    # citizens, monster-stack lookahead, per-stack exhaustion proximity
     features += _threshold_features(game, me)
-    features += _threshold_features(game, opp)
-    features += _contested_features(game, me, opp)
-    features += _monster_stack_features(game, me, opp)
+    features += _threshold_features(game, leader)
+    features += _contested_features(game, me, opponents)
+    features += _monster_stack_features(game, me, leader)
     features += _exhaustion_features(game, me)
     # v2: monster-type symbols remaining on the board (runway for
     # type-scoring dukes; owned counts live in the per-player block)
@@ -354,4 +380,4 @@ def extract(game, viewer_pid):
     return np.asarray(features, dtype=np.float32)
 
 
-N_FEATURES = 2 * 18 + 11 + 4 + 4 + 3 + 6 + 5 + 4
+N_FEATURES = 3 * 18 + 14 + 4 + 4 + 3 + 6 + 5 + 4

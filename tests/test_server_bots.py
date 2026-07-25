@@ -31,7 +31,8 @@ def _reset_server_state():
 
 class ValidateBotsTests(unittest.TestCase):
     def test_valid_levels_normalized(self):
-        self.assertEqual(server._validate_bots(["Hard", " easy "], "base"), ["hard", "easy"])
+        self.assertEqual(server._validate_bots(["Medium", " easy "], "base"), ["medium", "easy"])
+        self.assertEqual(server._validate_bots([" Hard "], "base"), ["hard"])
 
     def test_empty_and_none_ok(self):
         self.assertEqual(server._validate_bots(None, "base"), [])
@@ -45,6 +46,18 @@ class ValidateBotsTests(unittest.TestCase):
     def test_draft_rejected(self):
         with self.assertRaises(Exception):
             server._validate_bots(["easy"], "draft")
+
+    def test_hard_bot_rejects_bot_teammates(self):
+        from fastapi import HTTPException
+
+        with self.assertRaises(HTTPException):
+            server._validate_bots(["hard", "easy"], "base")
+
+    def test_easy_medium_allowed_on_expansion_presets(self):
+        for preset in ("crimsonseas", "flamesandfrost", "shadowvale", "random"):
+            self.assertEqual(
+                server._validate_bots(["easy", "medium"], preset), ["easy", "medium"]
+            )
 
     def test_cap(self):
         with self.assertRaises(Exception):
@@ -61,13 +74,13 @@ class LobbyBotSeatingTests(unittest.TestCase):
         )))
 
     def test_bots_join_ready_and_flagged(self):
-        payload = self._create(["hard", "easy"])
+        payload = self._create(["medium", "easy"])
         lb = server.lobbies[payload["lobby_id"]]
         self.assertEqual(len(lb.members), 3)
         bots = [m for m in lb.members if getattr(m, "is_bot", False)]
-        self.assertEqual({m.name for m in bots}, {"Hard Bot", "Easy Bot"})
+        self.assertEqual({m.name for m in bots}, {"Medium Bot", "Easy Bot"})
         self.assertTrue(all(m.is_ready for m in bots))
-        self.assertEqual(sorted(lb.bot_levels.values()), ["easy", "hard"])
+        self.assertEqual(sorted(lb.bot_levels.values()), ["easy", "medium"])
         serialized = server._serialize_lobby(lb)
         self.assertEqual(
             sorted(m["is_bot"] for m in serialized["members"]), [False, True, True]
@@ -78,6 +91,55 @@ class LobbyBotSeatingTests(unittest.TestCase):
         lb = server.lobbies[payload["lobby_id"]]
         names = sorted(m.name for m in lb.members if getattr(m, "is_bot", False))
         self.assertEqual(names, ["Easy Bot", "Easy Bot 2"])
+
+    def test_hard_lobby_is_two_player_only(self):
+        import asyncio
+
+        from fastapi import HTTPException
+        from server import JoinLobbyRequest, SetMinPlayersRequest
+
+        async def _go():
+            payload = await server.create_lobby(CreateLobbyRequest(
+                name="Human", preset="base", bots=["hard"],
+            ))
+            # A second human cannot join: the hard bot fills the other seat.
+            with self.assertRaises(HTTPException) as ctx:
+                await server.join_lobby(JoinLobbyRequest(name="Third", lobby_id=payload["lobby_id"]))
+            self.assertEqual(ctx.exception.status_code, 409)
+            # The floor cannot be raised past 2 either.
+            with self.assertRaises(HTTPException):
+                await server.set_lobby_min_players(SetMinPlayersRequest(
+                    player_id=payload["player_id"], min_players=3,
+                ))
+        asyncio.run(_go())
+
+    def test_hard_bot_with_high_floor_rejected_at_creation(self):
+        import asyncio
+
+        from fastapi import HTTPException
+
+        async def _go():
+            with self.assertRaises(HTTPException) as ctx:
+                await server.create_lobby(CreateLobbyRequest(
+                    name="Human", preset="base", min_players=3, bots=["hard"],
+                ))
+            self.assertEqual(ctx.exception.status_code, 400)
+        asyncio.run(_go())
+
+    def test_easy_bots_start_multiplayer_expansion_game(self):
+        import asyncio
+
+        async def _go():
+            payload = await server.create_lobby(CreateLobbyRequest(
+                name="Human", preset="crimsonseas", min_players=4,
+                bots=["easy", "easy", "medium"],
+            ))
+            await server.set_ready(ReadyRequest(player_id=payload["player_id"]))
+        asyncio.run(_go())
+        self.assertEqual(len(server.games), 1)
+        game = next(iter(server.games.values()))
+        self.assertEqual(len(game.player_list), 4)
+        self.assertEqual(sorted(game.bot_levels.values()), ["easy", "easy", "medium"])
 
     def test_prune_keeps_bots_while_human_active(self):
         payload = self._create(["easy"])

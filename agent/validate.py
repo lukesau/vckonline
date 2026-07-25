@@ -1,6 +1,7 @@
 """Validation pass: play many seeded games while asserting engine/driver invariants.
 
 Usage: python -m agent.validate --games 200 --seed 1 [--parity-every 1]
+       python -m agent.validate --games 50 --preset crimsonseas --players 4
 
 Checks per step:
   - legal_moves via serialize_state matches wire_state enumeration path
@@ -111,8 +112,13 @@ def _check_final(game):
         raise ValidationError(f"{result.get('kind')} result with no winners")
 
 
-def validate_game(seed, max_steps=20000, parity_every=1):
-    game = new_game(seed=seed)
+def validate_game(seed, max_steps=20000, parity_every=1, preset="base", num_players=2,
+                  policy=None):
+    """`policy=None` drives with the biased-random picker; passing a policy
+    object (e.g. GreedyPolicy — the Medium bot's brain) validates that ITS
+    choices drive full games. Deterministic policies re-pick from a reduced
+    list after a rejected move, unlike the random driver which just resamples."""
+    game = new_game(preset=preset, num_players=num_players, seed=seed)
     with contextlib.redirect_stdout(_SINK):
         advance(game)
     _SINK.seek(0), _SINK.truncate(0)
@@ -134,7 +140,14 @@ def validate_game(seed, max_steps=20000, parity_every=1):
         for pid in acting_player_ids(game):
             moves = legal_moves(game, pid, state=state)
             while moves:
-                move = _pick_move(moves)
+                if policy is not None:
+                    with contextlib.redirect_stdout(_SINK):
+                        move = policy.choose(game, None, pid, moves)
+                    if move is None:
+                        break
+                    moves.remove(move)
+                else:
+                    move = _pick_move(moves)
                 try:
                     with contextlib.redirect_stdout(_SINK):
                         apply_move(game, move)
@@ -178,22 +191,38 @@ def main():
         default=1,
         help="check serialize/wire move parity every N steps (0 = off)",
     )
+    parser.add_argument("--preset", default="base",
+                        help="board preset to deal (see presets/*.json)")
+    parser.add_argument("--players", type=int, default=2, choices=(2, 3, 4, 5))
+    parser.add_argument("--policy", default="random", choices=("random", "greedy"),
+                        help="move driver: biased-random or GreedyPolicy (Medium bot)")
     args = parser.parse_args()
 
     start = time.perf_counter()
     failures = 0
     for i in range(args.games):
         seed = args.seed + i
+        policy = None
+        if args.policy == "greedy":
+            from agent.policies import GreedyPolicy
+
+            policy = GreedyPolicy()
         try:
-            validate_game(seed, parity_every=args.parity_every)
+            validate_game(seed, parity_every=args.parity_every,
+                          preset=args.preset, num_players=args.players,
+                          policy=policy)
         except ValidationError as e:
             failures += 1
-            print(f"seed {seed}: FAIL {e}")
+            print(f"seed {seed}: FAIL {e}", flush=True)
+        except Exception as e:
+            failures += 1
+            print(f"seed {seed}: CRASH {type(e).__name__}: {e}", flush=True)
         if (i + 1) % 50 == 0:
-            print(f"  ... {i + 1}/{args.games} games validated")
+            print(f"  ... {i + 1}/{args.games} games validated", flush=True)
     elapsed = time.perf_counter() - start
+    tag = f"{args.preset} {args.players}p" + (f" {args.policy}" if args.policy != "random" else "")
     print(
-        f"\n{args.games} games validated in {elapsed:.1f}s "
+        f"\n[{tag}] {args.games} games validated in {elapsed:.1f}s "
         f"({failures} failure(s))" + (" — ALL PASS" if failures == 0 else "")
     )
     return 1 if failures else 0
