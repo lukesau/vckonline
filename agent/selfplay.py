@@ -72,7 +72,8 @@ def _pick(policy, game, pid, moves, temperature_turns):
 
 def play_selfplay_game(seed, policy_name="greedy", iterations=50, epsilon=0.15,
                        sample_every=2, temperature_turns=10, max_steps=20000,
-                       collect_states=False, record_visits=False):
+                       collect_states=False, record_visits=False,
+                       preset="base", num_players=2):
     """Play one self-play game. Returns (samples, game) or None on failure.
 
     samples: list of (payload, viewer_pid) where payload is a feature vector
@@ -91,7 +92,7 @@ def play_selfplay_game(seed, policy_name="greedy", iterations=50, epsilon=0.15,
     rando = RandomPolicy()
     use_epsilon = epsilon if policy_name == "greedy" else 0.0
     record_visits = bool(record_visits and collect_states and policy_name != "greedy")
-    game = new_game(seed=seed)
+    game = new_game(preset=preset, num_players=num_players, seed=seed)
     with contextlib.redirect_stdout(_SINK):
         advance(game)
     samples = []
@@ -200,6 +201,9 @@ def main():
                         help="store one record per searched decision with the MCTS root "
                              "visit distribution (policy-head targets); replaces the "
                              "periodic state sampling (search policies + --store-states only)")
+    parser.add_argument("--preset", default="base",
+                        help="board preset to deal (see presets/*.json)")
+    parser.add_argument("--players", type=int, default=2, choices=(2, 3, 4, 5))
     args = parser.parse_args()
     if args.record_visits and (not args.store_states or args.policy == "greedy"):
         parser.error("--record-visits needs --store-states and a search policy")
@@ -222,6 +226,7 @@ def main():
             epsilon=args.epsilon, sample_every=args.sample_every,
             temperature_turns=args.temperature_turns, collect_states=collect_states,
             record_visits=args.record_visits,
+            preset=args.preset, num_players=args.players,
         )
         if result is None:
             skipped += 1
