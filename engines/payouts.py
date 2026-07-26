@@ -1473,7 +1473,19 @@ class PayoutsEngine:
         role_count = 0
         for player in self.game.player_list:
             if player.player_id == player_id:
-                role_count = player.calc_roles()[role_name]
+                # Citizen role-icon harvest verbs (owned_worker / owned_soldier /
+                # owned_holy / owned_shadow) scale off face-up Citizen pips only.
+                # Domains and Nobles still feed calc_roles() for endgame Duke /
+                # Noble scoring — that pool must not inflate Butcher / Warlord /
+                # Blacksmith / Baker (and any future role-icon harvest cards).
+                if role_name in ("shadow_count", "holy_count", "soldier_count", "worker_count"):
+                    role_count = sum(
+                        int(getattr(c, role_name, 0) or 0)
+                        for c in list(getattr(player, "owned_citizens", []) or [])
+                        if not getattr(c, "is_flipped", False)
+                    )
+                else:
+                    role_count = player.calc_roles()[role_name]
                 break
         match split_command[2]:
             case 'g':

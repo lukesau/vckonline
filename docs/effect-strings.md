@@ -237,7 +237,7 @@ roll.set_one_die cost=g:2
 The various `count` patterns are syntactically parallel but semantically distinct. No unification needed beyond being aware they share a parser.
 
 ```
-count owned_worker g 2          # count by citizen role pip totals (sum of worker_count on each owned citizen, scaling 2g per pip)
+count owned_worker g 2          # sum worker_count on face-up owned citizens only (not domains/nobles; flipped citizens excluded). Same for owned_soldier / owned_holy / owned_shadow.
 count owned_citizens g 1        # count face-up citizen cards (Purser); excludes flipped citizens, excludes starters
 count owned_domains g 1         # count domain cards (Miner)
 count owned_monsters g 1        # count monster cards owned (Leviathan ships `count owned_monsters v 1`)
