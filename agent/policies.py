@@ -175,15 +175,21 @@ class GreedyPolicy:
                 count = 2.0
                 if player is not None and len(tokens) >= 2:
                     what = tokens[1]
-                    if what.startswith("owned_") and hasattr(player, "calc_roles"):
-                        roles = player.calc_roles()
-                        key = what.replace("owned_", "") + "_count"
-                        if key in roles:
-                            count = roles[key]
-                        elif what in ("owned_citizen", "owned_citizens"):
-                            count = len(player.owned_citizens)
-                        elif what in ("owned_domain", "owned_domains"):
-                            count = len(player.owned_domains)
+                    key = what.replace("owned_", "") + "_count"
+                    if key in ("shadow_count", "holy_count", "soldier_count", "worker_count"):
+                        # Engine fix 7bc2362: role-icon harvest verbs (Butcher,
+                        # Warlord, Blacksmith, Baker) scale off face-up CITIZEN
+                        # pips only — never domain/noble pips (those stay in
+                        # calc_roles for endgame scoring).
+                        count = sum(
+                            int(getattr(c, key, 0) or 0)
+                            for c in (getattr(player, "owned_citizens", []) or [])
+                            if not getattr(c, "is_flipped", False)
+                        )
+                    elif what in ("owned_citizen", "owned_citizens"):
+                        count = len(player.owned_citizens)
+                    elif what in ("owned_domain", "owned_domains"):
+                        count = len(player.owned_domains)
                 total += count * self._pairs_value(tokens[-2:], rates, mode="sum")
             elif verb in rates:
                 total += self._pairs_value(tokens, rates, mode="sum")
