@@ -124,7 +124,17 @@ def clone_game(game):
         serialize_game_to_save_dict,
     )
 
-    return deserialize_save_dict_to_game(json.loads(json.dumps(serialize_game_to_save_dict(game))))
+    # serialize_game_to_save_dict already returns a plain, fully-detached dict:
+    # its `base` is itself the output of json.loads (game_serialization.py:297)
+    # and every key added after that is built fresh via .to_dict()/list()/bool().
+    # Nothing in it aliases the live Game, so the extra json.loads(json.dumps(...))
+    # that used to wrap this call was a deep copy of something already copied -
+    # a second full serialize+parse of the whole game per MCTS iteration.
+    #
+    # clone_game is ~36% of selfplay runtime (cProfile, mcts-nn) and this removed
+    # half its work. Equivalence verified with tools/equivalence.py in vcko-ray:
+    # bit-identical records across seeds 950000-950002.
+    return deserialize_save_dict_to_game(serialize_game_to_save_dict(game))
 
 
 def acting_player_ids(game):
