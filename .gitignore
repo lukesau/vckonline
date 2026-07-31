@@ -148,3 +148,8 @@ sql/dumps/
 static/game/game.js
 .claude/
 .DS_Store
+# Ray selfplay generation output (vcko_ray/). Shards and the ledger are
+# gigabytes of generated data - never commit them. The ledger in particular
+# is the resume state: losing or duplicating it re-runs completed games.
+/data/
+*.jsonl.gz

@@ -1,0 +1,78 @@
+# Selfplay campaigns — the Ray equivalent of run_gen_v2.sh.
+#
+# Work is one game per Ray task (not one 130-game chunk per process), but
+# seeds, shard filenames, and cohort totals match Kyle's script exactly.
+#
+# Seed scheme (gen_v2): for game index i within a cohort,
+#   chunk = i // games_per_shard
+#   seed  = seed_base + chunk * chunk_stride + (i % games_per_shard)
+# Same as: python -m agent.selfplay --games N --seed $((base + chunk*1000))
+#
+# Resume: data/ledger.jsonl lists completed (campaign, seed) pairs. Re-run the
+# same command to skip finished games. Delete ledger + shards to start over.
+
+[output]
+games_per_shard = 130
+dir = "data"
+ledger = "data/ledger.jsonl"
+
+[defaults]
+policy = "mcts-nn"
+turn_priors = true
+record_visits = true
+preset = "base"
+
+# --- Cohorts (match run_gen_v2.sh) -------------------------------------------
+
+[campaigns.deep2p_2k]
+players = 2
+iterations = 2000
+games = 2340          # 18 chunks x 130
+games_per_shard = 130
+seed_base = 200000
+chunk_stride = 1000
+observed_min_per_game = 38.0
+
+[campaigns.mp3p_search]
+players = 3
+iterations = 300
+games = 1440          # 6 chunks x 240
+games_per_shard = 240
+seed_base = 300000
+chunk_stride = 1000
+observed_min_per_game = 12.0
+
+[campaigns.mp4p_search]
+players = 4
+iterations = 300
+games = 900           # 5 chunks x 180
+games_per_shard = 180
+seed_base = 310000
+chunk_stride = 1000
+observed_min_per_game = 16.0
+
+[campaigns.mp5p_search]
+players = 5
+iterations = 300
+games = 725           # 5 chunks x 145
+games_per_shard = 145
+seed_base = 320000
+chunk_stride = 1000
+observed_min_per_game = 25.0
+
+# Quick tests — contiguous seeds, separate ranges, not training data.
+[campaigns.smoke]
+test = true
+players = 2
+iterations = 25
+games = 4
+seed_base = 900000
+observed_min_per_game = 0.1
+
+[campaigns.smoke2]
+test = true
+players = 2
+iterations = 25
+games = 4
+seed_base = 901000
+observed_min_per_game = 0.1

@@ -186,6 +186,31 @@ def outcome_for(game, viewer_pid):
     return 0.0
 
 
+def build_records(samples, game):
+    """Shape one game's samples into the records written to --store-states.
+
+    This is the emitted-record format, and it had drifted into three separate
+    copies: main() below, the Ray task in vcko_ray/task.py, and the
+    equivalence harness. All three must agree exactly - they write into the
+    same shard files and feed the same training pipeline - and nothing caught
+    a divergence, since each looked correct in isolation.
+
+    `tag == "decision"` payloads (from --record-visits) already carry their own
+    keys and get `outcomes` merged in; periodic state samples are wrapped under
+    a "state" key instead. Changing either shape invalidates every shard
+    generated so far, so verify with tools/equivalence.py against a captured
+    baseline before touching it.
+    """
+    outcomes = {p.player_id: outcome_for(game, p.player_id) for p in game.player_list}
+    records = []
+    for payload, tag in samples:
+        if tag == "decision":
+            records.append({**payload, "outcomes": outcomes})
+        else:
+            records.append({"state": payload, "outcomes": outcomes})
+    return records
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--games", type=int, default=250)
@@ -236,16 +261,16 @@ def main():
             skipped += 1
             continue
         samples, game = result
-        outcomes = {p.player_id: outcome_for(game, p.player_id) for p in game.player_list}
         if collect_states:
-            for payload, tag in samples:
-                if tag == "decision":
-                    record = {**payload, "outcomes": outcomes}
-                else:
-                    record = {"state": payload, "outcomes": outcomes}
+            for record in build_records(samples, game):
                 writer.write(json.dumps(record) + "\n")
                 n_states += 1
         else:
+            # The legacy --out npz path keeps its own shape: it accumulates
+            # feature vectors and scalar outcomes for np.savez_compressed, not
+            # the JSON records build_records() produces.
+            outcomes = {p.player_id: outcome_for(game, p.player_id)
+                        for p in game.player_list}
             for features, viewer in samples:
                 xs.append(features)
                 ys.append(outcomes[viewer])
