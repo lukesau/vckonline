@@ -101,7 +101,9 @@ def plan(cfgs: dict, done: set, only: str | None, limit: int | None) -> list[dic
         if c.get("test") and not only:
             continue
         per_shard = c.get("games_per_shard", default_shard)
-        cfg = {**defaults, "players": c["players"], "iterations": c["iterations"]}
+        cfg = {**defaults, "players": c["players"], "iterations": c["iterations"],
+               "policy_priors": c.get("policy_priors",
+                                      defaults.get("policy_priors", False))}
         for i in range(c["games"]):
             seed = game_seed(c, i, per_shard)
             if (name, seed) in done:

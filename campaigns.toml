@@ -60,6 +60,22 @@ seed_base = 320000
 chunk_stride = 1000
 observed_min_per_game = 25.0
 
+# --- Expert iteration round 2 ------------------------------------------------
+# Deep 2p visits with policy_v3 INSIDE the generating search (policy_priors),
+# so the next policy head learns from a teacher that already has learned
+# attention. Fresh seed range; excluded from value-net corpora by default
+# globs only via shard-name choice (deep2p_ei2_*).
+
+[campaigns.deep2p_ei2]
+players = 2
+iterations = 2000
+games = 2500          # 20 chunks x 125
+games_per_shard = 125
+seed_base = 500000
+chunk_stride = 1000
+policy_priors = true
+observed_min_per_game = 33.0
+
 # Quick tests — contiguous seeds, separate ranges, not training data.
 [campaigns.smoke]
 test = true
@@ -75,4 +91,13 @@ players = 2
 iterations = 25
 games = 4
 seed_base = 901000
+observed_min_per_game = 0.1
+
+[campaigns.smoke_ei]
+test = true
+players = 2
+iterations = 25
+games = 4
+seed_base = 902000
+policy_priors = true
 observed_min_per_game = 0.1

@@ -45,6 +45,8 @@ def _play(seed: int, cfg: dict) -> tuple[int, bytes]:
         preset=cfg["preset"],
         num_players=cfg["players"],
         turn_priors=cfg["turn_priors"],
+        # Expert iteration (default off so existing campaigns are unchanged).
+        policy_priors=cfg.get("policy_priors", False),
     )
     if result is None:
         # Upstream returns None for a stuck/overlong game and main() counts it
