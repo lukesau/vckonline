@@ -14,7 +14,7 @@ nothing.
 
 import numpy as np
 
-DEFAULT_POLICY_PATH = "agent/models/policy_v1.npz"
+DEFAULT_POLICY_PATH = "agent/models/policy_v3.npz"
 
 ACTION_TYPES = (
     "take_resource",

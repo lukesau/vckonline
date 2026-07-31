@@ -18,17 +18,21 @@ from agent.move_summary import move_label
 HINT_ITERATIONS = env_int("VCKO_HINT_ITERATIONS", 500)
 HINT_WORKERS = env_int("VCKO_HINT_WORKERS", 1)
 HINT_TURN_PRIORS = env_flag("VCKO_HINT_TURN_PRIORS", True)
+HINT_POLICY_PRIORS = env_flag("VCKO_HINT_POLICY_PRIORS", True)
 
 _SINK = io.StringIO()
 
 
 def _hint_policy():
     from agent.mcts import MCTSPolicy
+    from agent.policy_net import DEFAULT_POLICY_PATH
     from agent.value_net import DEFAULT_MODEL_PATH
 
     return MCTSPolicy(
         iterations=HINT_ITERATIONS, workers=HINT_WORKERS,
-        turn_priors=HINT_TURN_PRIORS, value_path=DEFAULT_MODEL_PATH,
+        turn_priors=HINT_TURN_PRIORS,
+        policy_path=DEFAULT_POLICY_PATH if HINT_POLICY_PRIORS else None,
+        value_path=DEFAULT_MODEL_PATH,
     )
 
 

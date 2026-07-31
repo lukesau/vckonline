@@ -55,6 +55,10 @@ HARD_BOT_MODE = (os.environ.get("VCKO_HARD_BOT_MODE") or "root").strip().lower()
 # user's request to judge combo play by feel — flip via the env var (or
 # revert this default) if it doesn't hold up at the table.
 HARD_BOT_TURN_PRIORS = env_flag("VCKO_HARD_BOT_TURN_PRIORS", True)
+# Learned policy priors (policy_v3): beat greedy priors 62%/60%/60% in three
+# independent 40-game A/Bs (including under the shipping v5 value net).
+# Takes precedence over turn_priors inside MCTSPolicy when loaded.
+HARD_BOT_POLICY_PRIORS = env_flag("VCKO_HARD_BOT_POLICY_PRIORS", True)
 
 _SINK = io.StringIO()
 
@@ -70,11 +74,14 @@ def make_policy(level):
         from agent.mcts import MCTSPolicy
         from agent.value_net import DEFAULT_MODEL_PATH
 
+        from agent.policy_net import DEFAULT_POLICY_PATH
+
         return MCTSPolicy(
             iterations=HARD_BOT_ITERATIONS,
             workers=HARD_BOT_WORKERS,
             parallel_mode=HARD_BOT_MODE,
             turn_priors=HARD_BOT_TURN_PRIORS,
+            policy_path=DEFAULT_POLICY_PATH if HARD_BOT_POLICY_PRIORS else None,
             value_path=DEFAULT_MODEL_PATH,
         )
     raise ValueError(f"unknown bot level {level!r}")

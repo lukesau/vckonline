@@ -27,6 +27,7 @@ FINE_THRESHOLD = 0.08
 ANALYSIS_ITERATIONS = env_int("VCKO_GRADING_ITERATIONS", 300)
 ANALYSIS_WORKERS = env_int("VCKO_GRADING_WORKERS", 1)
 ANALYSIS_TURN_PRIORS = env_flag("VCKO_GRADING_TURN_PRIORS", True)
+ANALYSIS_POLICY_PRIORS = env_flag("VCKO_GRADING_POLICY_PRIORS", True)
 
 CATEGORIES = ("perfect", "great", "fine", "blunder", "unrated")
 
@@ -35,12 +36,14 @@ _SINK = io.StringIO()
 
 def analysis_policy():
     from agent.mcts import MCTSPolicy
+    from agent.policy_net import DEFAULT_POLICY_PATH
     from agent.value_net import DEFAULT_MODEL_PATH
 
     return MCTSPolicy(
         iterations=ANALYSIS_ITERATIONS,
         workers=ANALYSIS_WORKERS,
         turn_priors=ANALYSIS_TURN_PRIORS,
+        policy_path=DEFAULT_POLICY_PATH if ANALYSIS_POLICY_PRIORS else None,
         value_path=DEFAULT_MODEL_PATH,
     )
 
