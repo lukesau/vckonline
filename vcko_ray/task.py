@@ -45,6 +45,9 @@ def _play(seed: int, cfg: dict) -> tuple[int, bytes]:
         preset=cfg["preset"],
         num_players=cfg["players"],
         turn_priors=cfg["turn_priors"],
+        # Optional: expert-iteration rounds regenerate with a newer net.
+        # Absent means the engine default (agent/models/value_v5.npz).
+        value_path=cfg.get("value_path"),
     )
     if result is None:
         # Upstream returns None for a stuck/overlong game and main() counts it

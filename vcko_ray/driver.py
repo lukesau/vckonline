@@ -102,6 +102,8 @@ def plan(cfgs: dict, done: set, only: str | None, limit: int | None) -> list[dic
             continue
         per_shard = c.get("games_per_shard", default_shard)
         cfg = {**defaults, "players": c["players"], "iterations": c["iterations"]}
+        if c.get("value_path"):
+            cfg["value_path"] = c["value_path"]
         for i in range(c["games"]):
             seed = game_seed(c, i, per_shard)
             if (name, seed) in done:
@@ -217,11 +219,18 @@ def run(work: list[dict], out_dir: Path, ledger_path: Path, in_flight: int) -> i
                 completed += 1
             else:
                 skipped += 1
-            ledger.write(json.dumps({
+            entry = {
                 "campaign": item["campaign"], "seed": seed,
                 "records": n_records, "shard": item["shard"],
                 "ts": int(time.time()),
-            }) + "\n")
+            }
+            # Provenance: which net produced this game. Without it, a round-2
+            # shard is indistinguishable from a round-1 shard once the file
+            # names repeat, and there is no way to audit a training corpus
+            # after the fact. Only written when set, so old ledgers stay valid.
+            if item["cfg"].get("value_path"):
+                entry["value_path"] = item["cfg"]["value_path"]
+            ledger.write(json.dumps(entry) + "\n")
             ledger.flush()
             os.fsync(ledger.fileno())
 

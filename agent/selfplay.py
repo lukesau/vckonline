@@ -32,7 +32,19 @@ from agent.policies import GreedyPolicy, RandomPolicy
 _SINK = io.StringIO()
 
 
-def _make_policy(name, iterations, turn_priors=False):
+def _make_policy(name, iterations, turn_priors=False, value_path=None):
+    """Build the search policy. `value_path` selects the value net for mcts-nn.
+
+    Expert iteration regenerates data with a NEWER net inside the search, so
+    the net has to be selectable per run rather than fixed. Before this it was
+    always DEFAULT_MODEL_PATH, and the only way to generate with v6 was to
+    overwrite value_v5.npz - which works but destroys provenance: nothing in
+    the emitted shards would say which net produced them, and two rounds'
+    output would be indistinguishable.
+
+    None keeps the existing default, so every previously generated shard stays
+    reproducible.
+    """
     if name == "greedy":
         return GreedyPolicy()
     if name == "mcts-nn":
@@ -40,7 +52,7 @@ def _make_policy(name, iterations, turn_priors=False):
         from agent.value_net import DEFAULT_MODEL_PATH
 
         policy = MCTSPolicy(iterations=iterations, turn_priors=turn_priors,
-                            value_path=DEFAULT_MODEL_PATH)
+                            value_path=value_path or DEFAULT_MODEL_PATH)
         policy.name = "mcts-nn"
         return policy
     if name == "mcts":
@@ -74,7 +86,8 @@ def _pick(policy, game, pid, moves, temperature_turns):
 def play_selfplay_game(seed, policy_name="greedy", iterations=50, epsilon=0.15,
                        sample_every=2, temperature_turns=10, max_steps=20000,
                        collect_states=False, record_visits=False,
-                       preset="base", num_players=2, turn_priors=False):
+                       preset="base", num_players=2, turn_priors=False,
+                       value_path=None):
     """Play one self-play game. Returns (samples, game) or None on failure.
 
     samples: list of (payload, viewer_pid) where payload is a feature vector
@@ -89,7 +102,8 @@ def play_selfplay_game(seed, policy_name="greedy", iterations=50, epsilon=0.15,
     """
     from agent.features import extract
 
-    policy = _make_policy(policy_name, iterations, turn_priors=turn_priors)
+    policy = _make_policy(policy_name, iterations, turn_priors=turn_priors,
+                          value_path=value_path)
     rando = RandomPolicy()
     use_epsilon = epsilon if policy_name == "greedy" else 0.0
     record_visits = bool(record_visits and collect_states and policy_name != "greedy")
@@ -230,6 +244,8 @@ def main():
     parser.add_argument("--preset", default="base",
                         help="board preset to deal (see presets/*.json)")
     parser.add_argument("--players", type=int, default=2, choices=(2, 3, 4, 5))
+    parser.add_argument("--value-path", default=None,
+                        help="value net for mcts-nn (default: agent/models/value_v5.npz)")
     parser.add_argument("--turn-priors", action="store_true", default=False,
                         help="generate with turn-aware root priors (search policies)")
     args = parser.parse_args()
@@ -256,6 +272,7 @@ def main():
             record_visits=args.record_visits,
             preset=args.preset, num_players=args.players,
             turn_priors=args.turn_priors,
+            value_path=args.value_path,
         )
         if result is None:
             skipped += 1

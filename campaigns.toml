@@ -16,6 +16,23 @@ games_per_shard = 130
 dir = "data"
 ledger = "data/ledger.jsonl"
 
+# --- Optional per-campaign key -----------------------------------------------
+#
+# value_path = "agent/models/value_v6.npz"
+#
+# Selects the value net used INSIDE the search for mcts-nn. Omit it and the
+# engine default (agent/models/value_v5.npz) is used, which is what every
+# shard generated so far used.
+#
+# This is what makes an expert-iteration round expressible as config rather
+# than as a file swap: the alternative is overwriting value_v5.npz, which
+# works but leaves no record of which net produced which shard. When set, the
+# driver writes it into each ledger entry, so a corpus can be audited after
+# the fact.
+#
+# Path is relative to the checkout, since tasks run with cwd set to the
+# runtime_env working_dir.
+
 [defaults]
 policy = "mcts-nn"
 turn_priors = true
