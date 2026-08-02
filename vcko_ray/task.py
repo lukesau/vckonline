@@ -48,6 +48,8 @@ def _play(seed: int, cfg: dict) -> tuple[int, bytes]:
         # Optional: expert-iteration rounds regenerate with a newer net.
         # Absent means the engine default (agent/models/value_v5.npz).
         value_path=cfg.get("value_path"),
+        # Expert iteration (default off so existing campaigns are unchanged).
+        policy_priors=cfg.get("policy_priors", False),
     )
     if result is None:
         # Upstream returns None for a stuck/overlong game and main() counts it

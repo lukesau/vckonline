@@ -32,7 +32,8 @@ from agent.policies import GreedyPolicy, RandomPolicy
 _SINK = io.StringIO()
 
 
-def _make_policy(name, iterations, turn_priors=False, value_path=None):
+def _make_policy(name, iterations, turn_priors=False, value_path=None,
+                 policy_priors=False):
     """Build the search policy. `value_path` selects the value net for mcts-nn.
 
     Expert iteration regenerates data with a NEWER net inside the search, so
@@ -51,7 +52,15 @@ def _make_policy(name, iterations, turn_priors=False, value_path=None):
         from agent.mcts import MCTSPolicy
         from agent.value_net import DEFAULT_MODEL_PATH
 
+        policy_path = None
+        if policy_priors:
+            # Expert iteration: the generating search uses the LEARNED priors,
+            # so the next policy head's targets come from a stronger teacher.
+            from agent.policy_net import DEFAULT_POLICY_PATH
+
+            policy_path = DEFAULT_POLICY_PATH
         policy = MCTSPolicy(iterations=iterations, turn_priors=turn_priors,
+                            policy_path=policy_path,
                             value_path=value_path or DEFAULT_MODEL_PATH)
         policy.name = "mcts-nn"
         return policy
@@ -87,7 +96,7 @@ def play_selfplay_game(seed, policy_name="greedy", iterations=50, epsilon=0.15,
                        sample_every=2, temperature_turns=10, max_steps=20000,
                        collect_states=False, record_visits=False,
                        preset="base", num_players=2, turn_priors=False,
-                       value_path=None):
+                       value_path=None, policy_priors=False):
     """Play one self-play game. Returns (samples, game) or None on failure.
 
     samples: list of (payload, viewer_pid) where payload is a feature vector
@@ -103,7 +112,7 @@ def play_selfplay_game(seed, policy_name="greedy", iterations=50, epsilon=0.15,
     from agent.features import extract
 
     policy = _make_policy(policy_name, iterations, turn_priors=turn_priors,
-                          value_path=value_path)
+                          value_path=value_path, policy_priors=policy_priors)
     rando = RandomPolicy()
     use_epsilon = epsilon if policy_name == "greedy" else 0.0
     record_visits = bool(record_visits and collect_states and policy_name != "greedy")
@@ -248,6 +257,9 @@ def main():
                         help="value net for mcts-nn (default: agent/models/value_v5.npz)")
     parser.add_argument("--turn-priors", action="store_true", default=False,
                         help="generate with turn-aware root priors (search policies)")
+    parser.add_argument("--policy-priors", action="store_true", default=False,
+                        help="generate with the learned policy net as search priors "
+                             "(expert iteration; takes precedence over turn-priors)")
     args = parser.parse_args()
     if args.record_visits and (not args.store_states or args.policy == "greedy"):
         parser.error("--record-visits needs --store-states and a search policy")
@@ -273,6 +285,7 @@ def main():
             preset=args.preset, num_players=args.players,
             turn_priors=args.turn_priors,
             value_path=args.value_path,
+            policy_priors=args.policy_priors,
         )
         if result is None:
             skipped += 1

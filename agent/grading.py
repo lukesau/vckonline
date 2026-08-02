@@ -24,7 +24,10 @@ from agent.bot_players import env_flag, env_int
 
 GREAT_THRESHOLD = 0.02
 FINE_THRESHOLD = 0.08
-ANALYSIS_ITERATIONS = env_int("VCKO_GRADING_ITERATIONS", 300)
+# Grading runs async after the move (never blocks the player), so deeper
+# search here costs compute, not UX; 1000 matches the Hard bot and reduces
+# the known noisy-Q problem on low-visit candidates.
+ANALYSIS_ITERATIONS = env_int("VCKO_GRADING_ITERATIONS", 1000)
 ANALYSIS_WORKERS = env_int("VCKO_GRADING_WORKERS", 1)
 ANALYSIS_TURN_PRIORS = env_flag("VCKO_GRADING_TURN_PRIORS", True)
 ANALYSIS_POLICY_PRIORS = env_flag("VCKO_GRADING_POLICY_PRIORS", True)
