@@ -366,6 +366,11 @@ def final_scores(game):
     """List of score rows sorted best-first."""
     rows = []
     for p in getattr(game, "player_list", []) or []:
+        tableau_size = sum(
+            len(getattr(p, attr, None) or [])
+            for attr in ("owned_starters", "owned_citizens", "owned_domains",
+                         "owned_monsters", "owned_dukes", "owned_nobles")
+        )
         rows.append({
             "player_id": getattr(p, "player_id", None),
             "name": getattr(p, "name", "?"),
@@ -373,8 +378,12 @@ def final_scores(game):
             "gold": int(getattr(p, "gold_score", 0) or 0),
             "strength": int(getattr(p, "strength_score", 0) or 0),
             "magic": int(getattr(p, "magic_score", 0) or 0),
+            "tableau_size": tableau_size,
         })
-    rows.sort(key=lambda r: (-r["victory_score"], -(r["gold"] + r["strength"] + r["magic"])))
+    # Rulebook tie-break: fewest tableau cards wins a VP tie; leftover
+    # resources stay as a last-resort ordering for reporting.
+    rows.sort(key=lambda r: (-r["victory_score"], r["tableau_size"],
+                             -(r["gold"] + r["strength"] + r["magic"])))
     return rows
 
 

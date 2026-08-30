@@ -365,12 +365,19 @@ class MCTSPolicy:
                 for p in game.player_list
             ]
         ranked = sorted(
-            scores, key=lambda r: (-int(r["total_vp"]), -int(r.get("tableau_size") or 0))
+            scores, key=lambda r: (-int(r["total_vp"]), int(r.get("tableau_size") or 0))
         )
         top_vp = int(ranked[0]["total_vp"])
-        leaders = [r["player_id"] for r in ranked if int(r["total_vp"]) == top_vp]
-        if root_pid in leaders:
-            return 1.0 if len(leaders) == 1 else 0.5
+        vp_tied = [r for r in ranked if int(r["total_vp"]) == top_vp]
+        # Rulebook tie-break: fewest tableau cards wins; only a still-tied
+        # group shares the victory.
+        min_tableau = min(int(r.get("tableau_size") or 0) for r in vp_tied)
+        winners = [
+            r["player_id"] for r in vp_tied
+            if int(r.get("tableau_size") or 0) == min_tableau
+        ]
+        if root_pid in winners:
+            return 1.0 if len(winners) == 1 else 0.5
         return 0.0
 
     # ---- one simulated step -------------------------------------------

@@ -83,8 +83,10 @@ class EndgameEngine:
                 "detail": None,
                 "winner_player_ids": [w["player_id"]],
             }
-        max_tableau = max(int(s["tableau_size"]) for s in vp_tied)
-        winners = [s for s in vp_tied if int(s["tableau_size"]) == max_tableau]
+        # Rulebook: "the tied player who has the fewest cards in their
+        # tableau wins the game."
+        min_tableau = min(int(s["tableau_size"]) for s in vp_tied)
+        winners = [s for s in vp_tied if int(s["tableau_size"]) == min_tableau]
         if len(winners) == 1:
             w = winners[0]
             losers = [s for s in vp_tied if s["player_id"] != w["player_id"]]
@@ -95,7 +97,7 @@ class EndgameEngine:
                 "kind": "tiebreak",
                 "headline": f"{w['name']} wins on tie-break!",
                 "detail": (
-                    f"Tied at {top_vp} VP; {w['name']} had the larger tableau "
+                    f"Tied at {top_vp} VP; {w['name']} had the smaller tableau "
                     f"({int(w['tableau_size'])} cards vs {loser_bits})."
                 ),
                 "winner_player_ids": [w["player_id"]],
@@ -514,7 +516,9 @@ class EndgameEngine:
                 "total_vp": total_vp,
                 "tableau_size": tableau_size,
             })
-        scores.sort(key=lambda s: (-s["total_vp"], -s["tableau_size"]))
+        # Rulebook tie-break: on equal VP, the player with the FEWEST tableau
+        # cards ranks first.
+        scores.sort(key=lambda s: (-s["total_vp"], s["tableau_size"]))
         top_vp = int(scores[0]["total_vp"]) if scores else None
         for rank, s in enumerate(scores):
             s["rank"] = rank + 1
