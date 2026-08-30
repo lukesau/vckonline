@@ -405,6 +405,23 @@ goods/nobles machinery, two engine-level rule deltas are worth calling out:
   every other preset). Like the other end conditions, the game then plays out
   the rest of the round before `_finalize_game` runs.
 
+### Deferred (card-resident) VP scoring
+
+Per the rulebook, your final score is the sum of the VP "on" your slain
+Monsters and built Domains, plus your player board, plus your Duke. The
+engine mirrors that literally: slaying a monster or building a domain does
+NOT bank its printed `vp_reward` into `victory_score`. The VP stays on the
+card and is tallied at scoring time by `EndgameEngine.card_vp_totals`
+(exposed on score entries as `monster_vp` / `domain_vp`), so it follows the
+card through `take_owned` steals, stack-returns, and banishes — and a
+returned monster can be re-slain without its VP scoring twice.
+
+`victory_score` holds **board VP only**: special-reward payouts
+(`choose v N`, scaling `count … v N` rewards), dice roll effects, relic
+bonuses (e.g. Violet Ring), and VP transfers. For any live "current VP"
+display or evaluation, use `EndgameEngine.effective_vp` (board + card VP),
+not raw `victory_score`.
+
 ### Crimson Seas end-game scoring
 
 `_calculate_final_scores` adds three Crimson-Seas-only VP sources on top of

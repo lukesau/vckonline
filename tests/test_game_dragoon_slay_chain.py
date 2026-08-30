@@ -323,7 +323,7 @@ class DragoonSlayChainInteractionTests(unittest.TestCase):
         # domain from the center, opening choose_domain_reward.
         magic_before = player.magic_score
         strength_before = player.strength_score
-        vp_before = player.victory_score
+        vp_before = game.endgame.effective_vp(player)
         game.act_on_required_action(player.player_id, "slay_pay 0 12 5")
         self.assertEqual(game.action_required["action"], "choose_domain_reward",
             "Snow Queen's <domains> special_reward must open the grant-domain prompt")
@@ -337,8 +337,8 @@ class DragoonSlayChainInteractionTests(unittest.TestCase):
         # its chain.
         self.assertEqual(player.strength_score, strength_before - 12)
         self.assertEqual(player.magic_score, magic_before - 5)
-        self.assertEqual(player.victory_score, vp_before + 5,
-            "Snow Queen's flat vp_reward=5 must apply during slay_monster")
+        self.assertEqual(game.endgame.effective_vp(player), vp_before + 5,
+            "Snow Queen's flat vp_reward=5 must count as card VP after the slay")
         self.assertIn(self.snow_queen_row["name"],
                       [m.name for m in player.owned_monsters],
                       "Snow Queen must be in the player's owned_monsters after the slay")
@@ -362,7 +362,7 @@ class DragoonSlayChainInteractionTests(unittest.TestCase):
         # action_required, the next advance_tick re-enters harvest
         # automation and drains the new slay into choose_monster_slay.
         strength_before = player.strength_score
-        vp_before = player.victory_score
+        vp_before = game.endgame.effective_vp(player)
         idx = self._option_index_by(options, "domain_id", EYE_OF_ASTERATEN_ID)
         game.act_on_required_action(player.player_id, f"grant_domain {idx}")
         # Acquired domain went onto the player's tableau and granted its
@@ -370,8 +370,8 @@ class DragoonSlayChainInteractionTests(unittest.TestCase):
         self.assertIn(self.eye_of_asteraten_row["name"],
                       [d.name for d in player.owned_domains],
                       "Eye of Asteraten must be owned after the grant_domain pick")
-        self.assertEqual(player.victory_score, vp_before + int(self.eye_of_asteraten_row["vp_reward"] or 0),
-            "Eye of Asteraten's vp_reward should apply at acquisition")
+        self.assertEqual(game.endgame.effective_vp(player), vp_before + int(self.eye_of_asteraten_row["vp_reward"] or 0),
+            "Eye of Asteraten's vp_reward should count as card VP once owned")
         # `s 5` leg of the activation applied.
         self.assertEqual(player.strength_score, strength_before + 5,
             "Eye of Asteraten activation must apply +5 strength before the `slay` queue")
@@ -405,7 +405,7 @@ class DragoonSlayChainInteractionTests(unittest.TestCase):
         self.assertEqual(prc.get("magic_cost"), 0)
 
         strength_before = player.strength_score
-        vp_before = player.victory_score
+        vp_before = game.endgame.effective_vp(player)
         owned_citizens_before = len(player.owned_citizens)
         game.act_on_required_action(player.player_id, "slay_pay 0 9 0")
         self.assertEqual(
@@ -414,9 +414,9 @@ class DragoonSlayChainInteractionTests(unittest.TestCase):
         )
         prc = game.pending_required_choice or {}
         self.assertEqual(prc.get("kind"), "special_payout_choose")
-        # Strength was deducted; VP from Gnolls (3) applied.
+        # Strength was deducted; Gnolls' printed VP (3) now counts as card VP.
         self.assertEqual(player.strength_score, strength_before - 9)
-        self.assertEqual(player.victory_score, vp_before + 3)
+        self.assertEqual(game.endgame.effective_vp(player), vp_before + 3)
         self.assertIn(self.gnolls_row["name"],
                       [m.name for m in player.owned_monsters],
                       "Gnolls must be in owned_monsters after the slay")

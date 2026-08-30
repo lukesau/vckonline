@@ -532,7 +532,7 @@ class SquireTests(unittest.TestCase):
         self.assertEqual(game.action_required.get("action"), "slay_monster_payment")
         game.act_on_required_action("p1", "slay_pay 0 2 0")
         self.assertEqual(p1.strength_score, 1)
-        self.assertEqual(p1.victory_score, 1)
+        self.assertEqual(game.endgame.effective_vp(p1), 1)
         self.assertEqual([m.name for m in p1.owned_monsters], ["Goblin"])
         self.assertNotEqual(game.action_required.get("action"), "slay_monster_payment")
 

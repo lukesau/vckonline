@@ -137,8 +137,9 @@ class DomainsThenCitizensCompoundTests(unittest.TestCase):
         player, _, game = self._slay()
         self.assertEqual(player.gold_score, 0,
                          "gold leaked -9999 sentinel into player score")
-        # Slay vp_reward applied immediately on slay (independent of either leg).
-        self.assertEqual(player.victory_score, 3)
+        # Slay vp_reward stays on the card (deferred scoring), counted in the
+        # live projection independent of either leg.
+        self.assertEqual(game.endgame.effective_vp(player), 3)
         self.assertEqual(game.action_required.get("action", ""),
                          "choose_domain_reward")
         prc = game.pending_required_choice or {}
@@ -174,8 +175,9 @@ class DomainsThenCitizensCompoundTests(unittest.TestCase):
         self.assertEqual(player.gold_score, 0)
         self.assertEqual(player.strength_score, 11 - 5)
         self.assertEqual(player.magic_score, 5 - 4)
-        # vp_reward = 3 from the slay; neither leg pays vp.
-        self.assertEqual(player.victory_score, 3)
+        # vp_reward = 3 stays on the slain card; neither leg pays board VP.
+        self.assertEqual(player.victory_score, 0)
+        self.assertEqual(game.endgame.effective_vp(player), 3)
 
 
 class CitizensThenDomainsCompoundTests(unittest.TestCase):
@@ -224,7 +226,8 @@ class CitizensThenDomainsCompoundTests(unittest.TestCase):
         self.assertEqual(domain_names, ["Smallholding"])
         self.assertEqual(citizen_names, ["Peasant"])
         self.assertEqual(player.gold_score, 0)
-        self.assertEqual(player.victory_score, 3)
+        self.assertEqual(player.victory_score, 0)
+        self.assertEqual(game.endgame.effective_vp(player), 3)
 
 
 class CompoundDispatchPlusInsideAngleBracketsTests(unittest.TestCase):

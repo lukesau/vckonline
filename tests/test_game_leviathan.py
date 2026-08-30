@@ -155,12 +155,15 @@ class LeviathanSlayTests(unittest.TestCase):
         lev = make_leviathan()
         game.monster_grid[0].append(lev)
 
-        before_vp = slayer.victory_score
+        before_board_vp = slayer.victory_score
+        before_vp = game.endgame.effective_vp(slayer)
         game.player_actions.slay_monster(slayer.player_id, monster_id=None, event_id=34, sp=6, mp=16)
 
         # owned_monsters now = 2 pre-owned + Leviathan = 3 -> 3 VP from
-        # `count owned_monsters v 1`, plus the printed vp_reward of 6.
-        self.assertEqual(slayer.victory_score - before_vp, 3 + 6)
+        # `count owned_monsters v 1` banked as board VP; the printed vp_reward
+        # of 6 stays on the card (deferred scoring).
+        self.assertEqual(slayer.victory_score - before_board_vp, 3)
+        self.assertEqual(game.endgame.effective_vp(slayer) - before_vp, 3 + 6)
         self.assertEqual(len(slayer.owned_monsters), 3)
 
 

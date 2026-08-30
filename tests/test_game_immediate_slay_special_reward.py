@@ -163,7 +163,9 @@ class FrostOgreImmediateSlayTests(unittest.TestCase):
         self.assertEqual(player.gold_score, 9, "gold leaked -9999 sentinel into player score")
         self.assertEqual(player.strength_score, 11 - 5)
         self.assertEqual(player.magic_score, 5 - 4)
-        self.assertEqual(player.victory_score, 5 + 3, "VP slay reward not applied")
+        # Printed vp_reward (3) stays on the card (deferred scoring).
+        self.assertEqual(player.victory_score, 5)
+        self.assertEqual(game.endgame.effective_vp(player), 5 + 3, "VP slay reward not applied")
 
     def test_bare_citizens_opens_followup_choice_prompt(self):
         _, _, game = self._run("<citizens>")
@@ -189,7 +191,7 @@ class FrostOgreImmediateSlayTests(unittest.TestCase):
         # Ogre's special_reward is `choose <citizens>`. Same expectations.
         player, _, game = self._run("choose <citizens>")
         self.assertEqual(player.gold_score, 9)
-        self.assertEqual(player.victory_score, 5 + 3)
+        self.assertEqual(game.endgame.effective_vp(player), 5 + 3)
         ar = game.action_required.get("action", "")
         self.assertTrue(ar.lower().startswith("choose"))
         self.assertEqual(game.pending_required_choice.get("kind"), "special_payout_choose")
@@ -222,8 +224,10 @@ class WargImmediateSlayChooseSurvivesTests(unittest.TestCase):
         self.assertEqual(player.gold_score, 9, "gold leaked -9999 sentinel into player score")
 
     def test_vp_reward_applied(self):
-        player, _, _ = self._run()
-        self.assertEqual(player.victory_score, 5 + 1)
+        player, _, game = self._run()
+        # Printed vp_reward (1) stays on the card (deferred scoring).
+        self.assertEqual(player.victory_score, 5)
+        self.assertEqual(game.endgame.effective_vp(player), 5 + 1)
 
     def test_choose_prompt_survives_after_slay(self):
         _, _, game = self._run()

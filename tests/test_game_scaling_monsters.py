@@ -161,7 +161,11 @@ class ScalingMonsterRewardTests(unittest.TestCase):
         game = make_game(player, top)
 
         game.slay_monster(player.player_id, top.monster_id, sp=2, mp=1)
-        self.assertEqual(player.victory_score, 2)
+        # Scaling special-reward VP is banked as board VP; the printed
+        # vp_reward stays on the card (deferred scoring).
+        self.assertEqual(player.victory_score, 1)
+        self.assertEqual(game.endgame.card_vp_totals(player), (1, 0))
+        self.assertEqual(game.endgame.effective_vp(player), 2)
 
         player.strength_score = 10
         player.magic_score = 10
@@ -179,7 +183,11 @@ class ScalingMonsterRewardTests(unittest.TestCase):
         )
         game.monster_grid[0].append(top2)
         game.slay_monster(player.player_id, top2.monster_id, sp=3, mp=2)
-        self.assertEqual(player.victory_score, 5)
+        # Board VP: 1 (first slay's scaling) + 2 (second slay counts both
+        # owned copies). Card VP: 1 printed on each of the two slain copies.
+        self.assertEqual(player.victory_score, 3)
+        self.assertEqual(game.endgame.card_vp_totals(player), (2, 0))
+        self.assertEqual(game.endgame.effective_vp(player), 5)
 
     def test_goblin_pirates_scaling_gold_reward(self):
         player = Player("p1", "Player 1")
@@ -197,7 +205,7 @@ class ScalingMonsterRewardTests(unittest.TestCase):
 
         game.slay_monster(player.player_id, top.monster_id, sp=3, mp=0)
         self.assertEqual(player.gold_score, 5)
-        self.assertEqual(player.victory_score, 1)
+        self.assertEqual(game.endgame.effective_vp(player), 1)
 
     def test_sea_drake_scaling_strength_reward(self):
         player = Player("p1", "Player 1")
@@ -216,7 +224,7 @@ class ScalingMonsterRewardTests(unittest.TestCase):
 
         game.slay_monster(player.player_id, top.monster_id, sp=1, mp=2)
         self.assertEqual(player.strength_score, 12)
-        self.assertEqual(player.victory_score, 2)
+        self.assertEqual(game.endgame.effective_vp(player), 2)
 
 
 class HarpiesChooseRewardTests(unittest.TestCase):
@@ -256,7 +264,7 @@ class HarpiesChooseRewardTests(unittest.TestCase):
 
         game.act_on_required_action(player.player_id, "choose 2")
         self.assertEqual(player.strength_score, 11)
-        self.assertEqual(player.victory_score, 2)
+        self.assertEqual(game.endgame.effective_vp(player), 2)
 
 
 class BryneMapFilterTests(unittest.TestCase):
@@ -307,7 +315,7 @@ class BossTypeCountRewardTests(unittest.TestCase):
 
         game.slay_monster(player.player_id, boss.monster_id, sp=5, mp=2)
         self.assertEqual(player.gold_score, 6)
-        self.assertEqual(player.victory_score, 6)
+        self.assertEqual(game.endgame.effective_vp(player), 6)
 
     def test_wereshark_wild_choose_scales_with_owned_beasts(self):
         player = Player("p1", "Player 1")
@@ -349,7 +357,7 @@ class BossTypeCountRewardTests(unittest.TestCase):
         strength_before = player.strength_score
         game.act_on_required_action(player.player_id, "choose 2")
         self.assertEqual(player.strength_score, strength_before + 4)
-        self.assertEqual(player.victory_score, 6)
+        self.assertEqual(game.endgame.effective_vp(player), 6)
 
 
 if __name__ == "__main__":

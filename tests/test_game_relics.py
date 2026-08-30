@@ -661,7 +661,10 @@ class RelicDomainPassiveTests(unittest.TestCase):
         domain = _make_domain(99, "Keep", gold_cost=0, vp_reward=1)
         game, p1 = self._build_game("action.build_domain v 2", "Violet Ring", domain)
         game.player_actions.build_domain("p1", 99)
-        self.assertEqual(p1.victory_score, 3)
+        # Violet Ring's 2 VP is board VP; the domain's printed 1 VP stays on
+        # the card (deferred scoring).
+        self.assertEqual(p1.victory_score, 2)
+        self.assertEqual(game.endgame.effective_vp(p1), 3)
 
     def test_passive_relic_not_click_usable(self):
         domain = _make_domain(99, "Keep", gold_cost=0)

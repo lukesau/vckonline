@@ -127,12 +127,13 @@ class GhostShipSlayTests(unittest.TestCase):
         game.monster_grid[0].append(ship)
 
         before_gold = int(slayer.gold_score)
-        before_vp = int(slayer.victory_score)
+        before_vp = int(game.endgame.effective_vp(slayer))
         game.player_actions.slay_monster(slayer.player_id, monster_id=None, event_id=32, sp=6, mp=6)
 
         # +7 from the pool (gold_reward is 0); strength/magic spent on the slay.
+        # The printed 5 VP stays on the card (deferred scoring).
         self.assertEqual(int(slayer.gold_score) - before_gold, 7)
-        self.assertEqual(int(slayer.victory_score) - before_vp, 5)
+        self.assertEqual(int(game.endgame.effective_vp(slayer)) - before_vp, 5)
         self.assertIn(ship, slayer.owned_monsters)
         self.assertEqual(ship.gold_pool, 0)
 
