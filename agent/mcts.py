@@ -17,10 +17,13 @@ re-randomizes everything the root player cannot see — buried domain cards, the
 undealt exhausted/event deck order, and the opponent's duke — so the search
 plans against samples of its information set rather than the true hidden state.
 
-Parallelism: workers>1 runs root-parallel MCTS via ProcessPoolExecutor — each
-worker builds an independent tree for a share of the iteration budget; visit
-counts at the root are summed. That uses real multiple cores (unlike threads
-under the GIL) without sharing a mutable tree across processes.
+Parallelism: analyze() always dispatches through a ProcessPoolExecutor, even
+at workers=1, so the search never competes for the caller's GIL — concurrent
+searches (e.g. two players' hints) land on separate cores. workers>1 runs
+root-parallel MCTS: each worker builds an independent tree for a share of the
+iteration budget and visit counts at the root are summed. That uses real
+multiple cores (unlike threads under the GIL) without sharing a mutable tree
+across processes.
 """
 
 import contextlib
@@ -176,8 +179,6 @@ class MCTSPolicy:
         }
 
     def _get_pool(self):
-        if self.workers <= 1:
-            return None
         if self._pool is None:
             self._pool = ProcessPoolExecutor(max_workers=self.workers)
         return self._pool
@@ -471,7 +472,20 @@ class MCTSPolicy:
                     if sim.phase == "game_over":
                         reward = self._terminal_reward(sim, player_id)
                         break
-                    decision = self._sim_decision(sim)
+                    if node is root:
+                        # The tree ranks the ROOT player's options, so the
+                        # first step must be their decision. During concurrent
+                        # phases (e.g. the opening duke pick) _sim_decision
+                        # would return whichever pending player enumerates
+                        # first — analyzing the opponent's choice and leaving
+                        # the root's own moves with zero visits.
+                        root_sim_moves = legal_moves(sim, player_id)
+                        decision = (
+                            (player_id, root_sim_moves) if root_sim_moves
+                            else self._sim_decision(sim)
+                        )
+                    else:
+                        decision = self._sim_decision(sim)
                     if decision is None:
                         reward = (
                             self._terminal_reward(sim, player_id)
@@ -569,8 +583,6 @@ class MCTSPolicy:
         budgets = [b for b in _split_budget(self.iterations, self.workers) if b > 0]
         if not budgets:
             return self._build_search_result({}, {}, {_move_key(m): m for m in moves}, 0)
-        if len(budgets) == 1:
-            return self._root_search(game, player_id, moves, budgets[0])
 
         save_dict = serialize_game_to_save_dict(game)
         cfg = self._config_for_worker()
@@ -704,12 +716,13 @@ class MCTSPolicy:
             }
             return self.last_decision
 
+        # Even workers=1 dispatches through the process pool (single payload):
+        # the search runs on its own core instead of contending for this
+        # process's GIL with other threads' searches.
         if self.workers > 1 and self.parallel_mode == "halving":
             search = self._halving_root_search(game, player_id, moves)
-        elif self.workers > 1:
-            search = self._parallel_root_search(game, player_id, moves)
         else:
-            search = self._root_search(game, player_id, moves, self.iterations)
+            search = self._parallel_root_search(game, player_id, moves)
 
         chosen = None
         best_visits = -1

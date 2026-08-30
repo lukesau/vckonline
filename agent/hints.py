@@ -2,7 +2,8 @@
 
 compute_hint runs a determinized MCTS analysis of the player's current
 decision on a CLONE of the game (callers pass the clone; the server offloads
-this to an executor) and formats the result as short human-readable text via
+this to a process pool so concurrent hints get their own cores) and formats
+the result as short human-readable text via
 move_summary.move_label, e.g. "Slay Goblin (5s)" or "Hire Cleric (3g)".
 """
 
@@ -13,10 +14,12 @@ from agent.bot_players import env_flag, env_int, pending_bot_decision  # noqa: F
 from agent.headless import acting_player_ids, legal_moves
 from agent.move_summary import move_label
 
-# The player waits on this (~7s at 1000 with policy priors), but 1000 makes
-# hints exactly the Hard bot's judgement — same iterations, same nets.
+# The player waits on this, but 1000 iterations makes hints exactly the
+# Hard bot's judgement — same iterations, same nets. 4 workers run the
+# search root-parallel (250 iterations per independent tree, visits merged)
+# to cut the wall-clock the player stares at.
 HINT_ITERATIONS = env_int("VCKO_HINT_ITERATIONS", 1000)
-HINT_WORKERS = env_int("VCKO_HINT_WORKERS", 1)
+HINT_WORKERS = env_int("VCKO_HINT_WORKERS", 4)
 HINT_TURN_PRIORS = env_flag("VCKO_HINT_TURN_PRIORS", True)
 HINT_POLICY_PRIORS = env_flag("VCKO_HINT_POLICY_PRIORS", True)
 
@@ -86,3 +89,13 @@ def compute_hint(game, player_id):
         "iterations": HINT_ITERATIONS,
         "candidates": candidates,
     }
+
+
+def compute_hint_from_save(save_dict, player_id):
+    """Top-level (picklable) entry for the server's hint process pool:
+    rebuild the clone from its save dict and analyze it."""
+    from game_serialization import deserialize_save_dict_to_game
+
+    clone = deserialize_save_dict_to_game(save_dict)
+    clone.sim_mode = True
+    return compute_hint(clone, player_id)

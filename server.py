@@ -771,6 +771,25 @@ def _drop_bot_policies(game_id: str) -> None:
 
 _hint_cache: Dict[str, dict] = {}  # game_id -> {"key": (pid, tick, log_len), "future": Future}
 
+# Hints run in their own process pool (not the default thread executor): the
+# MCTS search is GIL-bound pure Python, so threads would interleave concurrent
+# hints onto one core. One pool slot per in-flight hint; each hint may fan out
+# further via the policy's own root-parallel workers (VCKO_HINT_WORKERS).
+_hint_executor = None
+
+
+def _get_hint_executor():
+    global _hint_executor
+    if _hint_executor is None:
+        from concurrent.futures import ProcessPoolExecutor
+
+        from agent.bot_players import env_int
+
+        _hint_executor = ProcessPoolExecutor(
+            max_workers=env_int("VCKO_HINT_CONCURRENCY", 4)
+        )
+    return _hint_executor
+
 # Move-quality grading (training mode / move analysis).
 # game_id -> {"tallies": {pid: {category: n}}, "feedback": {pid: feedback_dict}}
 _analysis_state: Dict[str, dict] = {}
@@ -880,8 +899,8 @@ def _move_quality_summary(game) -> list:
 
 
 async def _compute_hint_for(game_id: str, game, player_id: str):
-    """Run hint analysis on a clone in the executor; dedupe concurrent requests
-    for the same game state via a cached future."""
+    """Run hint analysis on a clone in the hint process pool; dedupe concurrent
+    requests for the same game state via a cached future."""
     state_key = (
         str(player_id),
         int(getattr(game, "tick_id", 0) or 0),
@@ -891,18 +910,13 @@ async def _compute_hint_for(game_id: str, game, player_id: str):
     if entry and entry["key"] == state_key:
         return await asyncio.shield(entry["future"])
 
-    from game_serialization import deserialize_save_dict_to_game, serialize_game_to_save_dict
+    from agent.hints import compute_hint_from_save
+    from game_serialization import serialize_game_to_save_dict
 
     save_dict = serialize_game_to_save_dict(game)
-
-    def _compute():
-        from agent.hints import compute_hint
-
-        clone = deserialize_save_dict_to_game(save_dict)
-        clone.sim_mode = True
-        return compute_hint(clone, player_id)
-
-    future = asyncio.get_running_loop().run_in_executor(None, _compute)
+    future = asyncio.get_running_loop().run_in_executor(
+        _get_hint_executor(), compute_hint_from_save, save_dict, player_id
+    )
     _hint_cache[game_id] = {"key": state_key, "future": future}
     return await asyncio.shield(future)
 
