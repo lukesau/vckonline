@@ -111,6 +111,32 @@ class EndgameEngine:
             "winner_player_ids": [s["player_id"] for s in winners],
         }
 
+    def card_vp_totals(self, player):
+        """Printed VP resident on the player's tableau cards, as
+        (monster_vp, domain_vp).
+
+        Deferred scoring: slaying a monster or building a domain does not bank
+        its printed vp_reward into victory_score; the VP lives on the card and
+        is tallied here, so it follows the card through steals, stack-returns,
+        and banishes. victory_score holds board VP only (effect payouts, dice
+        rolls, relics, VP transfers)."""
+        monster_vp = sum(
+            int(getattr(c, "vp_reward", 0) or 0)
+            for c in (getattr(player, "owned_monsters", None) or [])
+        )
+        domain_vp = sum(
+            int(getattr(c, "vp_reward", 0) or 0)
+            for c in (getattr(player, "owned_domains", None) or [])
+        )
+        return monster_vp, domain_vp
+
+    def effective_vp(self, player):
+        """Board VP plus card-resident VP -- the player's current projected VP
+        before Duke/Crimson scoring. Use this (not raw victory_score) anywhere
+        a live 'how many VP do I have' number is shown or evaluated."""
+        monster_vp, domain_vp = self.card_vp_totals(player)
+        return int(getattr(player, "victory_score", 0) or 0) + monster_vp + domain_vp
+
     def _compute_duke_breakdown(self, player, duke, roles=None, monster_attrs=None):
         """Single source of truth for "how many VP does this duke score for this player".
 
@@ -227,10 +253,13 @@ class EndgameEngine:
             return None
         duke = player.owned_dukes[0]
         duke_vp, breakdown = self._compute_duke_breakdown(player, duke)
+        # base_vp here is the live projection (board VP + card-resident VP) so
+        # the modal's total matches what end-game scoring would produce now.
+        base_vp = self.effective_vp(player)
         return {
-            "base_vp": int(player.victory_score),
+            "base_vp": base_vp,
             "duke_vp": int(duke_vp),
-            "total_vp": int(player.victory_score) + int(duke_vp),
+            "total_vp": base_vp + int(duke_vp),
             "duke_vp_breakdown": breakdown,
         }
 
@@ -256,7 +285,8 @@ class EndgameEngine:
         # once and reuse across every duke projection.
         roles = player.calc_roles()
         monster_attrs = self.game.owned_monster_attributes(player.player_id)
-        base_vp = int(player.victory_score)
+        # Live projection: board VP + card-resident VP (deferred scoring).
+        base_vp = self.effective_vp(player)
         table = []
         for duke in catalog:
             duke_vp, breakdown = self._compute_duke_breakdown(
@@ -455,7 +485,11 @@ class EndgameEngine:
                 tome_vp, goods_vp, noble_vp, crimson_vp_breakdown = \
                     self._compute_crimson_scoring(player, roles, monster_attrs)
 
-            total_vp = int(player.victory_score) + duke_vp + tome_vp + goods_vp + noble_vp
+            monster_vp, domain_vp = self.card_vp_totals(player)
+            total_vp = (
+                int(player.victory_score) + monster_vp + domain_vp
+                + duke_vp + tome_vp + goods_vp + noble_vp
+            )
             tableau_size = (
                 len(player.owned_starters)
                 + len(player.owned_citizens)
@@ -468,6 +502,8 @@ class EndgameEngine:
                 "player_id": player.player_id,
                 "name": player.name,
                 "base_vp": int(player.victory_score),
+                "monster_vp": monster_vp,
+                "domain_vp": domain_vp,
                 "duke_vp": duke_vp,
                 "duke": duke_summary,
                 "duke_vp_breakdown": duke_vp_breakdown,

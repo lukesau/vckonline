@@ -82,10 +82,8 @@ class PayoutsEngine:
         acquired = domain_stack.pop(-1)
         acquired.acquired_turn_number = int(self.game.turn_number)
         player.owned_domains.append(acquired)
-        vp_gain = int(getattr(acquired, "vp_reward", 0) or 0)
-        if vp_gain:
-            player.victory_score = int(getattr(player, "victory_score", 0)) + vp_gain
-            self.game.harvest._bump_harvest_delta(player, 0, 0, 0, vp_gain)
+        # Printed vp_reward is NOT banked: card VP is tallied at end-game
+        # scoring from owned_domains (deferred scoring).
         if not domain_stack and self.game.exhausted_stack:
             self.game.events.reveal_exhausted_onto_stack(domain_stack)
         after = self.game._player_scores_line(player)

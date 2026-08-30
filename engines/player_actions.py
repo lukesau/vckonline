@@ -2060,7 +2060,10 @@ class PlayerActionsEngine:
             payout[0] = payout[0] + int(getattr(top, "gold_reward", 0) or 0)
             payout[1] = payout[1] + int(getattr(top, "strength_reward", 0) or 0)
             payout[2] = payout[2] + int(getattr(top, "magic_reward", 0) or 0)
-            payout[3] = payout[3] + int(getattr(top, "vp_reward", 0) or 0)
+            # The monster's printed vp_reward is NOT banked here: card VP stays
+            # on the card and is tallied at end-game scoring, so it follows the
+            # card through steals, stack-returns, and banishes. payout[3] still
+            # carries board VP granted by special rewards (e.g. "choose v N").
             player.gold_score = player.gold_score + payout[0]
             player.strength_score = player.strength_score + payout[1]
             player.magic_score = player.magic_score + payout[2]
@@ -2173,11 +2176,8 @@ class PlayerActionsEngine:
             bought = domain_stack.pop(-1)
             bought.acquired_turn_number = int(self.game.turn_number)
             player.owned_domains.append(bought)
-
-            vp_gain = int(getattr(bought, "vp_reward", 0) or 0)
-            if vp_gain:
-                player.victory_score = int(getattr(player, "victory_score", 0) or 0) + vp_gain
-                self.game.harvest._bump_harvest_delta(player, 0, 0, 0, vp_gain)
+            # The domain's printed vp_reward is NOT banked here: card VP is
+            # tallied at end-game scoring from owned_domains (deferred scoring).
 
             # Violet Ring relic: gain VP whenever you buy a Domain.
             relic_vp = self.game.relics.relic_build_domain_vp_bonus(player)
